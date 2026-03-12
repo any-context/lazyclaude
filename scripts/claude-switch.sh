@@ -10,6 +10,34 @@ fi
 
 CURRENT_WINDOW=$($TMUX_BIN display-message -p -t claude '#{window_name}' 2>/dev/null)
 
+# --- Live preview refresh via fzf --listen ---
+
+PORT_FILE="/tmp/tmux-claude-switch-$$.port"
+REFRESH_PID=
+
+_cleanup() {
+  [ -n "$REFRESH_PID" ] && kill "$REFRESH_PID" 2>/dev/null
+  rm -f "$PORT_FILE"
+}
+trap _cleanup EXIT
+
+# Background loop: waits for fzf to write its port, then sends reload-preview every second
+(
+  # Wait up to 3s for fzf to start and write the port file
+  for i in $(seq 1 30); do
+    [ -f "$PORT_FILE" ] && break
+    sleep 0.1
+  done
+  port=$(cat "$PORT_FILE" 2>/dev/null)
+  [ -z "$port" ] && exit 0
+  while curl -s -XPOST "http://localhost:${port}" -d 'reload-preview' 2>/dev/null; do
+    sleep 1
+  done
+) </dev/null >/dev/null 2>/dev/null &
+REFRESH_PID=$!
+
+# --- fzf session list ---
+
 SELECTED=$($TMUX_BIN list-windows -t claude -F "#{window_name}	#{pane_current_command}	#{pane_current_path}	#{pane_path}" | \
   while IFS=$'\t' read name cmd dirpath oscpath; do
     if [ "$cmd" = "ssh" ]; then
@@ -27,6 +55,8 @@ SELECTED=$($TMUX_BIN list-windows -t claude -F "#{window_name}	#{pane_current_co
     printf "claude:=%s\t%s %s\n" "$name" "$marker" "$label"
   done | \
   fzf \
+    --listen \
+    --bind "start:execute-silent(echo \$FZF_PORT > $PORT_FILE)" \
     --delimiter='\t' \
     --with-nth=2 \
     --border rounded \
