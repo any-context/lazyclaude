@@ -21,7 +21,7 @@ SELECTED=$($TMUX_BIN list-windows -t claude -F "#{window_name}	#{pane_current_co
         label="[remote] $name"
       fi
     else
-      label="[local] $(echo "$dirpath" | sed "s|$HOME|~|")"
+      label="[local] $dirpath"
     fi
     [ "$name" = "$CURRENT_WINDOW" ] && marker="*" || marker=" "
     printf "claude:=%s\t%s %s\n" "$name" "$marker" "$label"
