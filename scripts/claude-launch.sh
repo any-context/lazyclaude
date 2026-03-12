@@ -16,21 +16,33 @@ FLAGS="${7:-}"          # e.g. --resume
 CLAUDE_BIN=$(command -v claude 2>/dev/null)
 CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
 
+_parse_ssh_host() {
+  # Extract hostname from SSH command line, skipping flags and their values.
+  # SSH options that take an argument: b c D E e F I i J l m o p Q R S W w
+  awk '{
+    for (i=2; i<=NF; i++) {
+      if ($i ~ /^-[bcDEeFIiJlmopQRSWw]$/) { i++; continue }
+      if ($i ~ /^-/) { continue }
+      print $i; exit
+    }
+  }'
+}
+
 _get_ssh_host() {
   # Try children of pane PID first (SSH is typically a child of the shell)
   local ssh_pid
   ssh_pid=$(pgrep -P "$PANE_PID" -x ssh 2>/dev/null | head -1)
   if [ -n "$ssh_pid" ]; then
-    ps -p "$ssh_pid" -o args= 2>/dev/null | awk '{print $NF}'
+    ps -p "$ssh_pid" -o args= 2>/dev/null | _parse_ssh_host
     return
   fi
   # Fallback: scan all processes on this TTY for ssh
   if [ -n "$PANE_TTY" ]; then
-    ps -t "$PANE_TTY" -o args= 2>/dev/null | grep '^ssh ' | awk '{print $NF}' | head -1
+    ps -t "$PANE_TTY" -o args= 2>/dev/null | grep '^ssh ' | head -1 | _parse_ssh_host
     return
   fi
   # Last resort: pane PID itself
-  ps -p "$PANE_PID" -o args= 2>/dev/null | awk '{print $NF}'
+  ps -p "$PANE_PID" -o args= 2>/dev/null | _parse_ssh_host
 }
 
 _get_remote_dir() {
@@ -62,7 +74,6 @@ if [ "$PANE_CMD" = "ssh" ] && [ "$SESSION_NAME" != "claude" ]; then
   # --- Remote (SSH) case ---
   SSH_HOST=$(_get_ssh_host)
   REMOTE_DIR=$(_get_remote_dir)
-
   if [ -z "$SSH_HOST" ]; then
     tmux display-message "claude-launch: could not detect SSH host"
     exit 1
