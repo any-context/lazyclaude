@@ -35,7 +35,6 @@ SELECTED=$($TMUX_BIN list-windows -t claude -F "#{window_name}	#{pane_current_co
     --header-first \
     --preview "$TMUX_BIN capture-pane -t {1} -p -e -S - 2>/dev/null | tail -50" \
     --preview-window 'right:60%:wrap:border-left' \
-    --bind 'focus:reload-preview' \
     --bind "1:execute-silent($TMUX_BIN send-keys -t {1} '1' Enter)" \
     --bind "2:execute-silent($TMUX_BIN send-keys -t {1} '2' Enter)" \
     --bind "3:execute-silent($TMUX_BIN send-keys -t {1} '3' Enter)" \
