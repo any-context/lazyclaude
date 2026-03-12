@@ -185,11 +185,7 @@ function triggerPopupForWindow(window) {
 }
 
 function triggerPopup(socket) {
-  const state = socketState.get(socket);
-  const pid = state?.pid;
-  const localWindow = pid ? findTmuxWindowForPid(pid)?.window ?? null : null;
-  // state.window is set for remote connections (direct tunnel)
-  const window = localWindow ?? state?.window ?? null;
+  const window = socketState.get(socket)?.window ?? null;
   triggerPopupForWindow(window);
 }
 
@@ -221,7 +217,7 @@ function handleMcpMessage(socket, msg) {
             if (remoteWindow) fs.unlinkSync(pendingFile);
           } catch { /* no pending remote window */ }
         }
-        socketState.set(socket, { pid, window: remoteWindow });
+        socketState.set(socket, { pid, window: localWindow ?? remoteWindow });
         console.log(`[mcp] ide_connected pid=${pid}${localWindow ? ` local-window=${localWindow}` : ''}${remoteWindow ? ` remote-window=${remoteWindow}` : ''}`);
       }
       break;
@@ -249,7 +245,6 @@ function handleMcpMessage(socket, msg) {
 const connections = new Set();
 
 function handleConnection(socket) {
-  console.log(`[mcp] tcp connection from ${socket.remoteAddress}:${socket.remotePort}`);
   socketState.set(socket, { pid: null });
   let upgraded = false;
   let buf = Buffer.alloc(0);

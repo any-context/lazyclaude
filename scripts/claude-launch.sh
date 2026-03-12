@@ -104,8 +104,6 @@ if [ "$PANE_CMD" = "ssh" ] && [ "$SESSION_NAME" != "claude" ]; then
     REMOTE_MCP_ENV="CLAUDE_CODE_AUTO_CONNECT_IDE=true CLAUDE_CODE_SSE_PORT=$MCP_PORT CLAUDE_CODE_IDE_SKIP_VALID_CHECK=1"
     # Write window name locally so MCP server knows which window to notify
     echo "$WINDOW" > /tmp/tmux-claude-next-remote-window
-  else
-    REMOTE_MCP_ENV=""
   fi
   if [ -n "$REMOTE_DIR" ]; then
     REMOTE_CMD="ssh -t $MCP_TUNNEL_FLAGS '$SSH_HOST' 'zsh -lic \"${MCP_NOTIFY_SETUP}cd \\\"$REMOTE_DIR\\\" && ${REMOTE_MCP_ENV:+$REMOTE_MCP_ENV }claude $FLAGS${MCP_NOTIFY_CLEANUP}\"'"
