@@ -10,10 +10,16 @@ fi
 
 CURRENT_WINDOW=$($TMUX_BIN display-message -p -t claude '#{window_name}' 2>/dev/null)
 
-SELECTED=$($TMUX_BIN list-windows -t claude -F "#{window_name} #{pane_current_command} #{pane_current_path}" | \
-  while read name cmd dirpath; do
+SELECTED=$($TMUX_BIN list-windows -t claude -F "#{window_name}	#{pane_current_command}	#{pane_current_path}	#{pane_path}" | \
+  while IFS=$'\t' read name cmd dirpath oscpath; do
     if [ "$cmd" = "ssh" ]; then
-      label="[remote] $name"
+      remote_host=$(echo "$oscpath" | sed 's|file://\([^/]*\).*|\1|')
+      remote_path=$(echo "$oscpath" | sed 's|file://[^/]*||')
+      if [ -n "$remote_path" ]; then
+        label="[$remote_host] $remote_path"
+      else
+        label="[remote] $name"
+      fi
     else
       label=$(echo "$dirpath" | sed "s|$HOME|~|")
     fi
