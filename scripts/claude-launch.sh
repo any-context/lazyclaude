@@ -12,6 +12,8 @@ SESSION_NAME="$5"
 PANE_TTY="${6##/dev/}"  # strip /dev/ prefix, e.g. ttys007
 FLAGS="${7:-}"          # e.g. --resume
 
+echo "[launch] PANE_CMD=$PANE_CMD SESSION=$SESSION_NAME LOCAL_PATH=$LOCAL_PATH OSC=$OSC_PATH" >> /tmp/tmux-claude-launch-debug.log
+
 # Resolve local claude binary
 CLAUDE_BIN=$(command -v claude 2>/dev/null)
 CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
