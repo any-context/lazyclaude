@@ -60,9 +60,9 @@ if [ "$PANE_CMD" = "ssh" ] && [ "$SESSION_NAME" != "claude" ]; then
 
   # Use login shell on remote so PATH (~/.profile, ~/.zprofile) is loaded
   if [ -n "$REMOTE_DIR" ]; then
-    REMOTE_CMD="ssh -t '$SSH_HOST' 'bash -lic \"cd \\\"$REMOTE_DIR\\\" && claude $FLAGS\"'"
+    REMOTE_CMD="ssh -t '$SSH_HOST' 'zsh -lic \"cd \\\"$REMOTE_DIR\\\" && claude $FLAGS\"'"
   else
-    REMOTE_CMD="ssh -t '$SSH_HOST' 'bash -lic \"claude $FLAGS\"'"
+    REMOTE_CMD="ssh -t '$SSH_HOST' 'zsh -lic \"claude $FLAGS\"'"
   fi
 
   if ! tmux has-session -t "claude" 2>/dev/null; then
