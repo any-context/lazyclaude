@@ -96,10 +96,11 @@ if [ "$PANE_CMD" = "ssh" ] && [ "$SESSION_NAME" != "claude" ]; then
   fi
 
   # Use login shell on remote so PATH (~/.profile, ~/.zprofile) is loaded
+  REMOTE_MCP_ENV="CLAUDE_CODE_AUTO_CONNECT_IDE=true CLAUDE_CODE_IDE_SKIP_VALID_CHECK=1"
   if [ -n "$REMOTE_DIR" ]; then
-    REMOTE_CMD="ssh -t $MCP_TUNNEL_FLAGS '$SSH_HOST' 'zsh -lic \"${MCP_NOTIFY_SETUP}cd \\\"$REMOTE_DIR\\\" && claude $FLAGS${MCP_NOTIFY_CLEANUP}\"'"
+    REMOTE_CMD="ssh -t $MCP_TUNNEL_FLAGS '$SSH_HOST' 'zsh -lic \"${MCP_NOTIFY_SETUP}cd \\\"$REMOTE_DIR\\\" && $REMOTE_MCP_ENV claude $FLAGS${MCP_NOTIFY_CLEANUP}\"'"
   else
-    REMOTE_CMD="ssh -t $MCP_TUNNEL_FLAGS '$SSH_HOST' 'zsh -lic \"${MCP_NOTIFY_SETUP}claude $FLAGS${MCP_NOTIFY_CLEANUP}\"'"
+    REMOTE_CMD="ssh -t $MCP_TUNNEL_FLAGS '$SSH_HOST' 'zsh -lic \"${MCP_NOTIFY_SETUP}$REMOTE_MCP_ENV claude $FLAGS${MCP_NOTIFY_CLEANUP}\"'"
   fi
 
   if ! tmux has-session -t "claude" 2>/dev/null; then
