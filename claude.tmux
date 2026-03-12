@@ -22,7 +22,7 @@ suppress_keys="${suppress_keys:-w}"
 tmux bind-key "$launch_key" run-shell "${SCRIPTS_DIR}/claude-launch.sh \"#{pane_current_command}\" \"#{pane_pid}\" \"#{pane_current_path}\" \"#{pane_path}\" \"#{session_name}\" \"#{pane_tty}\""
 tmux bind-key "$resume_key" run-shell "${SCRIPTS_DIR}/claude-launch.sh \"#{pane_current_command}\" \"#{pane_pid}\" \"#{pane_current_path}\" \"#{pane_path}\" \"#{session_name}\" \"#{pane_tty}\" \"--resume\""
 tmux bind-key "$switch_key" if -F '#{==:#{session_name},claude}' \
-  "run-shell \"echo '#{client_name}' > /tmp/tmux-claude-switch-client && tmux display-popup -w80% -h70% -E 'CLAUDE_SWITCH_MODE=switch ${SCRIPTS_DIR}/claude-switch.sh'\"" \
+  "detach-client" \
   "display-popup -w80% -h70% -E '${SCRIPTS_DIR}/claude-switch.sh'"
 
 # Suppress specified keys inside claude popup, preserving original binding elsewhere
