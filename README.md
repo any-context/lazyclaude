@@ -81,6 +81,49 @@ set -g @claude-launch-key 'Space'
 set -g @claude-notify-type 'menu'
 ```
 
+## Hooks (permission prompt detection)
+
+tmux-claude can detect when Claude shows a tool permission dialog and automatically raise a popup — even when you're in another window.
+
+### Setup
+
+Add the following to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const i=JSON.parse(d);if(i.notification_type!=='permission_prompt')return;const fs=require('fs'),path=require('path'),http=require('http'),home=require('os').homedir();const lockDir=path.join(home,'.claude','ide');const locks=fs.readdirSync(lockDir).filter(f=>f.endsWith('.lock'));if(!locks.length)return;const lock=JSON.parse(fs.readFileSync(path.join(lockDir,locks[0]),'utf8'));const port=parseInt(locks[0],10);const body=JSON.stringify({pid:process.ppid});const req=http.request({hostname:'127.0.0.1',port,path:'/notify',method:'POST',timeout:2000,headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body),'X-Claude-Code-Ide-Authorization':lock.authToken}});req.on('error',()=>{});req.on('timeout',()=>{req.destroy()});req.write(body);req.end()}catch{}});\""
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### How it works
+
+When Claude shows a permission dialog, the `Notification` hook fires with `notification_type: "permission_prompt"`. The inline hook command:
+
+1. Reads `~/.claude/ide/<port>.lock` to find the MCP server port and auth token
+2. Exits silently if no lock file exists (MCP server not running)
+3. Sends `POST /notify` to `127.0.0.1:<port>` with `{ pid: process.ppid }`
+4. The MCP server walks the process tree upward from that PID to find the matching Claude session, then opens a popup
+
+If the user is already inside the Claude popup, no new popup is opened.
+
+### Remote support
+
+For remote SSH sessions, the same hook works without any changes. The SSH reverse tunnel set up by tmux-claude forwards the MCP server port to the remote host, so `localhost:<port>` on the remote machine reaches the local MCP server. The lock file at `~/.claude/ide/<port>.lock` is also created on the remote host automatically.
+
+Copy `~/.claude/settings.json` to the remote host to enable permission prompt detection there.
+
 ## OSC 7 integration
 
 tmux-claude uses [OSC 7](https://iterm2.com/documentation-escape-codes.html) (`file://hostname/path`) to track the working directory in remote shells. When your shell emits OSC 7 on each prompt, tmux exposes it as `#{pane_path}`.

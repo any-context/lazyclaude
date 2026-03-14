@@ -120,6 +120,7 @@ function reply(socket, id, result) {
 // --- Per-connection state ---
 
 const socketState = new Map(); // socket → { pid: number | null }
+const pidToWindow = new Map(); // pid → window name
 
 // --- Popup ---
 
@@ -217,7 +218,9 @@ function handleMcpMessage(socket, msg) {
             if (remoteWindow) fs.unlinkSync(pendingFile);
           } catch { /* no pending remote window */ }
         }
-        socketState.set(socket, { pid, window: localWindow ?? remoteWindow });
+        const window = localWindow ?? remoteWindow;
+        socketState.set(socket, { pid, window });
+        pidToWindow.set(pid, window);
         console.log(`[mcp] ide_connected pid=${pid}${localWindow ? ` local-window=${localWindow}` : ''}${remoteWindow ? ` remote-window=${remoteWindow}` : ''}`);
       }
       break;
@@ -272,7 +275,50 @@ function handleConnection(socket) {
       }
 
       const key = headers['sec-websocket-key'];
-      if (!key) { sendHttpError(socket, 400, 'Bad Request'); return; }
+      if (!key) {
+        // HTTP POST /notify
+        const requestLine = headerText.split('\r\n')[0];
+        if (requestLine.startsWith('POST /notify')) {
+          const contentLength = parseInt(headers['content-length'] || '0', 10);
+          const readBody = (cb) => {
+            if (buf.length >= contentLength) {
+              cb(buf.slice(0, contentLength));
+            } else {
+              socket.once('data', chunk => {
+                buf = Buffer.concat([buf, chunk]);
+                readBody(cb);
+              });
+            }
+          };
+          readBody(body => {
+            try {
+              const data = JSON.parse(body.toString('utf8'));
+              if (data.pid) {
+                let current = Number(data.pid);
+                for (let i = 0; i < 15; i++) {
+                  if (pidToWindow.has(current)) {
+                    const window = pidToWindow.get(current);
+                    console.log(`[mcp] /notify pid=${data.pid} matched=${current} window=${window ?? '?'}`);
+                    triggerPopupForWindow(window);
+                    break;
+                  }
+                  try {
+                    const ppid = execSync(`ps -o ppid= -p ${current} 2>/dev/null`, { encoding: 'utf8' }).trim();
+                    if (!ppid || ppid === '1' || ppid === '0' || ppid === String(current)) break;
+                    current = Number(ppid);
+                  } catch { break; }
+                }
+              }
+            } catch (e) {
+              console.warn('[mcp] /notify parse error', e.message);
+            }
+            socket.end('HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n');
+          });
+        } else {
+          sendHttpError(socket, 400, 'Bad Request');
+        }
+        return;
+      }
 
       send101(socket, key);
       upgraded = true;
@@ -299,6 +345,10 @@ function handleConnection(socket) {
   });
 
   socket.on('close', () => {
+    const pid = socketState.get(socket)?.pid;
+    if (pid) {
+      pidToWindow.delete(pid);
+    }
     connections.delete(socket);
     socketState.delete(socket);
     console.log(`[mcp] client disconnected (total: ${connections.size})`);
