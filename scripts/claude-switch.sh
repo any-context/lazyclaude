@@ -2,6 +2,7 @@
 # claude-switch.sh - claude session manager with preview and send keys
 
 TMUX_BIN=$(command -v tmux)
+SCRIPTS_DIR="${0:A:h}"
 
 if ! $TMUX_BIN has-session -t "claude" 2>/dev/null; then
   $TMUX_BIN display-message "No claude session running"
@@ -33,7 +34,7 @@ SELECTED=$($TMUX_BIN list-windows -t claude -F "#{window_name}	#{pane_current_co
     --with-nth=2 \
     --header $'  Claude Sessions\n  Enter: open  1/2/3: send  ctrl-x: kill' \
     --header-first \
-    --preview "while true; do $TMUX_BIN capture-pane -t {1} -p -e -S -40 2>/dev/null; sleep 0.2; done" \
+    --preview "bash $SCRIPTS_DIR/claude-live-preview.sh {1}" \
     --preview-window 'up:80%:wrap:border-bottom:follow:noinfo' \
     --bind "1:execute-silent($TMUX_BIN send-keys -t {1} '1')" \
     --bind "2:execute-silent($TMUX_BIN send-keys -t {1} '2')" \
