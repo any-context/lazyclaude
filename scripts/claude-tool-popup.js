@@ -1,12 +1,21 @@
 #!/usr/bin/env node
 'use strict';
 
-// claude-tool-popup.js - standalone permission confirmation popup for Claude Code tool use
+// claude-tool-popup.js - permission confirmation popup for Claude Code tool use
+// Responsibility: CONTENT — what to display and which choices to offer
 // Args: window
-// Env:  TOOL_NAME, TOOL_INPUT (JSON string)
-// Writes choice ('1'|'2'|'3') to CHOICE_FILE for MCP server to send-keys.
+// Env:  TOOL_NAME, TOOL_INPUT (JSON string), TOOL_CWD (optional)
+// Writes choice ('1'|'2'|'3') to CHOICE_FILE then exits.
 
 const fs = require('fs');
+const { spawnSync } = require('child_process');
+const {
+  R, BOLD, DIM,
+  GREEN, YELLOW, RED,
+  dim, sep,
+  enterAltScreen, renderActionBar,
+  readChoice,
+} = require('./popup-ui');
 
 const WINDOW     = process.argv[2] ?? '';
 const safeWindow = WINDOW.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -14,119 +23,141 @@ const CHOICE_FILE = `/tmp/tmux-claude-tool-choice-${safeWindow}.txt`;
 
 const toolName  = process.env.TOOL_NAME  ?? '';
 const toolInput = (() => { try { return JSON.parse(process.env.TOOL_INPUT ?? '{}'); } catch { return {}; } })();
-
-// ANSI helpers (matching claude-diff.js style)
-const A       = (c) => `\x1b[${c}m`;
-const R       = A(0);
-const BOLD    = A(1);
-const DIM     = A(2);
-const GREEN   = A('38;2;64;160;43');
-const YELLOW  = A('38;2;223;142;29');
-const RED     = A('38;2;192;72;72');
-const CYAN    = A('38;2;23;146;153');
-const BULLET  = '\u23fa'; // ⏺
-const CORNER  = '\u23bf'; // ⎿
+const toolCwd   = (() => { const c = process.env.TOOL_CWD ?? ''; return c ? c.replace(require('os').homedir(), '~') : ''; })();
 
 const COLS = process.stdout.columns || Number(process.env.COLUMNS) || 80;
 const ROWS = process.stdout.rows    || Number(process.env.LINES)   || 24;
 
-// Extract the main "subject" from tool input depending on tool type
-function formatToolInput(name, input) {
+// --- Content ---
+
+// Capture actual dialog choices from Claude Code's permission dialog via capture-pane
+function captureDialogOptions(window) {
+  if (!window) return [];
+  const result = spawnSync('tmux', ['capture-pane', '-t', `claude:=${window}`, '-p'], { encoding: 'utf8' });
+  const pane = result.stdout ?? '';
+  const options = [];
+  for (const line of pane.split('\n')) {
+    const m = line.match(/^\s*(?:[❯➜>]\s+)?(\d+)[.)]\s+(.+)/);
+    if (m) {
+      const text = m[2].replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
+      options.push({ num: Number(m[1]), text });
+    }
+  }
+  return options;
+}
+
+// Truncate a plain string to maxLen visible chars, appending '…' if cut
+function trunc(s, maxLen) {
+  if (s.length <= maxLen) return s;
+  return s.slice(0, maxLen - 1) + '…';
+}
+
+// Build plain-text body lines from tool input (no ANSI — styling via popup-ui helpers only)
+function buildBodyLines(name, input) {
+  const maxW = Math.max(20, COLS - 6);
   const lines = [];
   switch (name) {
     case 'Bash': {
-      const cmd = input.command ?? '';
-      for (const l of cmd.split('\n').slice(0, 20)) lines.push(l);
+      for (const l of (input.command ?? '').split('\n').slice(0, 20)) lines.push(trunc(l, maxW));
       break;
     }
     case 'Read':
-      lines.push(input.file_path ?? '');
+      lines.push(trunc(input.file_path ?? '', maxW));
       break;
     case 'Write':
-      lines.push(input.file_path ?? '');
-      if (input.content) lines.push(`${DIM}(${input.content.split('\n').length} lines)${R}`);
+      lines.push(trunc(input.file_path ?? '', maxW));
+      if (input.content) lines.push(dim(`(${input.content.split('\n').length} lines)`));
       break;
     case 'Edit': {
-      lines.push(input.file_path ?? '');
+      lines.push(trunc(input.file_path ?? '', maxW));
       const old = (input.old_string ?? '').split('\n').slice(0, 5);
       const nw  = (input.new_string ?? '').split('\n').slice(0, 5);
-      if (old.length) lines.push(`${DIM}─ old ─${R}`, ...old.map(l => `  ${l}`));
-      if (nw.length)  lines.push(`${DIM}─ new ─${R}`, ...nw.map(l => `  ${l}`));
+      if (old.length) lines.push(sep('old'), ...old.map(l => `  ${trunc(l, maxW - 2)}`));
+      if (nw.length)  lines.push(sep('new'), ...nw.map(l => `  ${trunc(l, maxW - 2)}`));
       break;
     }
     case 'Agent':
     case 'Task': {
-      const prompt = input.prompt ?? input.description ?? '';
-      for (const l of prompt.split('\n').slice(0, 10)) lines.push(l);
+      for (const l of (input.prompt ?? input.description ?? '').split('\n').slice(0, 10)) lines.push(trunc(l, maxW));
       break;
     }
     default: {
-      // Generic: key: value pairs
       for (const [k, v] of Object.entries(input).slice(0, 8)) {
         const val = typeof v === 'string' ? v : JSON.stringify(v);
-        lines.push(`${DIM}${k}:${R} ${val.split('\n')[0]}`);
+        lines.push(`${dim(k + ':')} ${trunc(val.split('\n')[0], maxW)}`);
       }
     }
   }
   return lines;
 }
 
-const inputLines = formatToolInput(toolName, toolInput);
-const viewHeight = Math.max(1, ROWS - 4);
-
-// Alternate screen + hide cursor
-process.stdout.write('\x1b[?1049h\x1b[?25l');
-
-// Header
-process.stdout.write(`\n  ${BULLET} ${BOLD}${toolName || 'Tool'}${R}\n`);
-process.stdout.write(`  ${CYAN}${CORNER}${R}  `);
-
-let bodyLines = 0;
-for (const l of inputLines.slice(0, viewHeight - 4)) {
-  if (bodyLines === 0) {
-    process.stdout.write(l + '\x1b[K\n');
-  } else {
-    process.stdout.write(`       ${l}\x1b[K\n`);
+// Map dialog options to action bar entries (content: labels + key bindings)
+function buildActions(dialogOptions) {
+  const KEY_CHARS  = ['y', 'a', 'n'];
+  const KEY_COLORS = [GREEN, YELLOW, RED];
+  if (dialogOptions.length === 0) {
+    // fallback when capture-pane returns nothing
+    return [
+      { key: 'y', label: 'Yes',                  color: GREEN  },
+      { key: 'a', label: 'Allow always',           color: YELLOW },
+      { key: 'n', label: 'No',                   color: RED    },
+    ];
   }
-  bodyLines++;
-}
-if (bodyLines === 0) process.stdout.write('\x1b[K\n');
-
-// Fill remaining space
-const used = bodyLines + 2; // header lines
-for (let i = used; i < viewHeight; i++) {
-  process.stdout.write('\x1b[K\n');
+  return dialogOptions.map((opt, i) => ({
+    key:   KEY_CHARS[i]  ?? String(opt.num),
+    label: opt.text,
+    color: KEY_COLORS[i] ?? DIM,
+  }));
 }
 
-// y/a/n bar (matching claude-diff.js)
-process.stdout.write('─'.repeat(COLS) + '\x1b[K\n');
-process.stdout.write(`  ${GREEN}${BOLD}y${R}  Yes        ${YELLOW}${BOLD}a${R}  Allow all in session        ${RED}${BOLD}n${R}  No\x1b[K\n`);
-process.stdout.write(`  ${BOLD}❯${R} \x1b[K`);
+// --- Draw ---
 
-function cleanup() {
-  process.stdout.write('\x1b[?25h\x1b[?1049l');
+// Layout:
+//   ~/path/to/cwd        (dim, if available)
+//   ─────────────────
+//   Bash                 (bold tool name)
+//       echo ...         (body lines, 4-space indent)
+//   ─────────────────
+//   Yes: y  | No: n  | cancel: Esc
+//   ❯
+function draw(bodyLines, actions) {
+  // Overhead rows: cwd(1?) + topsep(1) + toolname(1) + botsep+action(2) = 5 or 4
+  const overhead = toolCwd ? 5 : 4;
+  const maxBody = Math.max(1, ROWS - overhead);
+  const SEP = `${DIM}${'─'.repeat(COLS)}${R}`;
+
+  enterAltScreen();
+
+  if (toolCwd) {
+    process.stdout.write(`${DIM}${toolCwd}${R}\x1b[K\n`);
+  }
+  process.stdout.write(SEP + '\x1b[K\n');
+  process.stdout.write(`${BOLD}${toolName || 'Tool'}${R}\x1b[K\n`);
+
+  for (const l of bodyLines.slice(0, maxBody)) {
+    process.stdout.write(`    ${l}\x1b[K\n`);
+  }
+
+  renderActionBar(COLS, actions);
 }
 
-if (!process.stdin.isTTY) {
-  // Not interactive — default deny
-  cleanup();
-  try { fs.writeFileSync(CHOICE_FILE, '3'); } catch {}
-  process.exit(0);
-}
+// --- Main ---
 
-process.stdin.setRawMode(true);
-process.stdin.resume();
-process.stdin.once('data', (buf) => {
-  const ch = buf.toString()[0];
-  process.stdin.setRawMode(false);
-  cleanup();
-  const choice = (ch === 'y' || ch === 'Y' || ch === '1') ? '1'
-               : (ch === 'a' || ch === 'A' || ch === '2') ? '2'
-               : '3';
-  try {
-    fs.writeFileSync(CHOICE_FILE, choice);
-  } catch (e) {
-    process.stderr.write(`[claude-tool-popup] failed to write choice: ${e.message}\n`);
+const dialogOptions = captureDialogOptions(WINDOW);
+const bodyLines     = buildBodyLines(toolName, toolInput);
+const actions       = buildActions(dialogOptions);
+draw(bodyLines, actions);
+
+(async () => {
+  const maxOption = dialogOptions.length > 0 ? dialogOptions.length : 3;
+  const choice = await readChoice(maxOption);
+
+  if (WINDOW && choice !== null) {
+    try {
+      fs.writeFileSync(CHOICE_FILE, choice);
+    } catch (e) {
+      process.stderr.write(`[claude-tool-popup] failed to write choice: ${e.message}\n`);
+    }
   }
   process.exit(0);
-});
+})();

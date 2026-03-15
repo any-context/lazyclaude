@@ -32,7 +32,11 @@ const PORT_FILE = '/tmp/tmux-claude-mcp.port';
 const TOKEN_FILE = '/tmp/tmux-claude-mcp.token';
 const WS_MAGIC = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
-const AUTH_TOKEN = process.env.TMUX_CLAUDE_TOKEN || crypto.randomUUID();
+// 再起動をまたいで token を保持（同じ token で Claude Code が自動再接続できる）
+const AUTH_TOKEN = process.env.TMUX_CLAUDE_TOKEN || (() => {
+  try { return fs.readFileSync(TOKEN_FILE, 'utf8').trim(); } catch {}
+  return crypto.randomUUID();
+})();
 
 // シェルのシングルクォートエスケープ（-E オプション等でシェル経由で実行される文字列に使用）
 function shellQuote(s) {
@@ -41,6 +45,17 @@ function shellQuote(s) {
 
 // diff popup の選択を permission dialog の send-keys に渡すための一時保管
 const pendingDiffChoices = new Map(); // window → choice ('1'|'2'|'3')
+
+// PreToolUse hook から受け取ったツール情報（Notification 時に popup に渡す）
+const pendingToolInfo = new Map(); // window → {tool_name, tool_input, ts}
+
+// 期限切れエントリを定期削除（メモリリーク防止）
+setInterval(() => {
+  const cutoff = Date.now() - 15000;
+  for (const [key, val] of pendingToolInfo) {
+    if (val.ts < cutoff) pendingToolInfo.delete(key);
+  }
+}, 60_000).unref();
 
 // --- WebSocket helpers ---
 
@@ -134,21 +149,22 @@ const pidToWindow = new Map(); // pid → window name
 
 function findActiveClient() {
   try {
-    const out = execSync('tmux list-clients -F "#{client_name} #{client_session} #{client_activity}"', { encoding: 'utf8' });
+    // タブ区切りでパース（セッション名にスペースが含まれる場合を考慮）
+    const out = execSync('tmux list-clients -F "#{client_name}\t#{client_session}\t#{client_activity}"', { encoding: 'utf8' });
     const clients = out.trim().split('\n')
       .filter(Boolean)
-      .map(l => { const [name, sess, activity] = l.split(' '); return { name, sess, activity: Number(activity) }; })
+      .map(l => { const [name, sess, act] = l.split('\t'); return { name, sess, activity: Number(act) }; })
       .sort((a, b) => b.activity - a.activity);
-    // Prefer non-claude client, fall back to any client
-    return (clients.find(c => c.sess !== 'claude') ?? clients[0])?.name ?? null;
+    // claude セッションのクライアントを優先（Claude Code が動いているセッション）
+    return (clients.find(c => c.sess === 'claude') ?? clients[0])?.name ?? null;
   } catch { return null; }
 }
 
 function findTmuxWindowForPid(pid) {
   const paneMap = new Map();
   try {
-    for (const line of execSync('tmux list-panes -a -F "#{pane_pid} #{session_name} #{window_name}"', { encoding: 'utf8' }).trim().split('\n').filter(Boolean)) {
-      const [panePid, session, window] = line.split(' ');
+    for (const line of execSync('tmux list-panes -a -F "#{pane_pid}\t#{session_name}\t#{window_name}"', { encoding: 'utf8' }).trim().split('\n').filter(Boolean)) {
+      const [panePid, session, window] = line.split('\t');
       paneMap.set(panePid, { session, window });
     }
   } catch { return null; }
@@ -163,6 +179,95 @@ function findTmuxWindowForPid(pid) {
     } catch { break; }
   }
   return null;
+}
+
+// PID から tmux window 名を解決（WebSocket 接続なしでも動作する）
+function resolveWindow(rawPid) {
+  // 1. pidToWindow（WebSocket ide_connected で登録済み）を優先
+  let current = rawPid;
+  for (let i = 0; i < 15; i++) {
+    if (pidToWindow.has(current)) return pidToWindow.get(current);
+    try {
+      const ppid = execSync(`ps -o ppid= -p ${current} 2>/dev/null`, { encoding: 'utf8' }).trim();
+      if (!ppid || ppid === '1' || ppid === '0' || ppid === String(current)) break;
+      current = Number(ppid);
+    } catch { break; }
+  }
+  // 2. フォールバック: tmux ペインを直接スキャン
+  const info = findTmuxWindowForPid(rawPid);
+  return info?.session === 'claude' ? info.window : null;
+}
+
+// Permission dialog の選択肢数を capture-pane の出力から検出
+// Claude Code のダイアログは "1." "2." ... のように番号付きで表示される
+function detectMaxOption(paneContent) {
+  let max = 0;
+  for (const line of paneContent.split('\n')) {
+    const m = line.match(/^\s*(?:[❯>]\s+)?(\d+)[.)]/);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return max > 0 ? max : 3; // 検出失敗時は 3 をデフォルト（Edit/Write 等）
+}
+
+// ツール名・入力から popup サイズ (%単位) を推定
+function estimateToolPopupSize(toolName, toolInput, termW, termH, hasCwd = false, cwdLen = 0) {
+  let lines = 1; // ヘッダー行（tool name）
+  // アクションバー最低幅: "  Yes: y  |  Allow always: a  |  No: n  |  cancel: Esc" ≈ 54 chars
+  let maxLen = 54;
+
+  const clampLines = (arr, limit) => Math.min(arr.length, limit);
+  const maxLineLen = (arr) => arr.reduce((m, l) => Math.max(m, l.length), 0);
+
+  switch (toolName) {
+    case 'Bash': {
+      const cmd = (toolInput.command ?? '').split('\n');
+      lines += clampLines(cmd, 20);
+      maxLen = Math.max(maxLen, maxLineLen(cmd.slice(0, 20)));
+      break;
+    }
+    case 'Read':
+      lines += 1;
+      maxLen = Math.max(maxLen, (toolInput.file_path ?? '').length);
+      break;
+    case 'Write':
+      lines += 2;
+      maxLen = Math.max(maxLen, (toolInput.file_path ?? '').length);
+      break;
+    case 'Edit': {
+      const fp = toolInput.file_path ?? '';
+      const old = (toolInput.old_string ?? '').split('\n').slice(0, 5);
+      const nw  = (toolInput.new_string ?? '').split('\n').slice(0, 5);
+      lines += 1 + 1 + old.length + 1 + nw.length;
+      maxLen = Math.max(maxLen, fp.length, maxLineLen(old), maxLineLen(nw));
+      break;
+    }
+    case 'Agent':
+    case 'Task': {
+      const prompt = (toolInput.prompt ?? toolInput.description ?? '').split('\n').slice(0, 10);
+      lines += prompt.length;
+      maxLen = Math.max(maxLen, maxLineLen(prompt));
+      break;
+    }
+    default: {
+      const entries = Object.entries(toolInput ?? {}).slice(0, 8);
+      lines += entries.length;
+      for (const [k, v] of entries) {
+        const val = typeof v === 'string' ? v : JSON.stringify(v);
+        maxLen = Math.max(maxLen, k.length + 2 + val.split('\n')[0].length);
+      }
+    }
+  }
+
+  if (hasCwd) {
+    lines += 1; // CWD 行（claude-tool-popup.js が先頭に追加）
+    maxLen = Math.max(maxLen, cwdLen); // CWD 行の長さも幅に反映
+  }
+  lines += 3; // セパレーター + アクションバー + プロンプト行
+
+  const wPct = termW > 0 ? Math.min(95, Math.max(25, Math.round((maxLen + 8) / termW * 100))) : 70;
+  // +3: tmux ボーダー上下(2) + ❯partial行(1) 分、ceil で切り上げて不足を防ぐ
+  const hPct = termH > 0 ? Math.min(90, Math.max(10, Math.ceil((lines + 3)    / termH * 100))) : 60;
+  return { wPct, hPct };
 }
 
 function getNotifyType() {
@@ -194,23 +299,45 @@ function triggerPopupForWindow(window, toolName, toolInput) {
   }
 
   // popup path: launch display-popup asynchronously so HTTP 200 can be sent immediately
+  // claude-tool-popup.js handles keyboard input itself via process.stdin.on('data', ...)
+  // (same approach as claude-diff.js — display-popup provides a PTY for stdin)
   const toolPopupScript = path.join(__dirname, 'claude-tool-popup.js');
   const toolInputJson = JSON.stringify(toolInput ?? {});
-  const proc = spawn('tmux', [
-    'display-popup', '-c', client, '-w90%', '-h60%', '-E',
-    `TOOL_NAME=${shellQuote(toolName || '')} TOOL_INPUT=${shellQuote(toolInputJson)} node ${shellQuote(toolPopupScript)} ${shellQuote(window ?? '')}`,
-  ], { detached: false });
+  const safeWin = (window ?? '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const choiceFile = `/tmp/tmux-claude-tool-choice-${safeWin}.txt`;
+  const cwdResult = window ? spawnSync('tmux', ['display-message', '-t', `claude:=${window}`, '-p', '#{pane_current_path}'], { encoding: 'utf8' }) : null;
+  const toolCwd = (cwdResult?.stdout ?? '').trim();
+  const popupCmd = `TOOL_NAME=${shellQuote(toolName || '')} TOOL_INPUT=${shellQuote(toolInputJson)} TOOL_CWD=${shellQuote(toolCwd)} node ${shellQuote(toolPopupScript)} ${shellQuote(window ?? '')}`;
 
-  proc.on('close', () => {
+  const dimResult = spawnSync('tmux', ['display-message', '-c', client, '-p', '#{client_width} #{client_height}'], { encoding: 'utf8' });
+  const [termW, termH] = (dimResult.stdout ?? '').trim().split(' ').map(Number);
+  // CWD は claude-tool-popup.js 内で ~ 置換されるので近似値として使用
+  const cwdDisplayLen = toolCwd ? toolCwd.replace(os.homedir(), '~').length : 0;
+  const { wPct, hPct } = estimateToolPopupSize(toolName, toolInput ?? {}, termW, termH, !!toolCwd, cwdDisplayLen);
+  console.log(`[mcp] popup size=${wPct}%x${hPct}% (term=${termW}x${termH})`);
+
+  const proc = spawn('tmux', [
+    'display-popup', '-c', client, `-w${wPct}%`, `-h${hPct}%`, '-E', popupCmd,
+  ], { detached: false });
+  proc.stderr.on('data', d => console.warn(`[mcp] display-popup stderr: ${d.toString().trim()}`));
+  proc.on('error', e => console.warn(`[mcp] display-popup error: ${e.message}`));
+
+  proc.on('close', (code) => {
+    console.log(`[mcp] display-popup closed code=${code}`);
     if (!window) return;
-    const safeWindow = window.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const choiceFile = `/tmp/tmux-claude-tool-choice-${safeWindow}.txt`;
     try {
       const c = fs.readFileSync(choiceFile, 'utf8').trim();
       fs.unlinkSync(choiceFile);
+      // Claude Code の permission dialog は数字キー '1'/'2'/'3' で即選択
+      // capture-pane で選択肢数を検出し、choice > max の場合は最大値にクランプ（2択ダイアログ対応）
       if (['1', '2', '3'].includes(c)) {
-        console.log(`[mcp] send-keys tool-choice=${c} to ${window}`);
-        setTimeout(() => spawnSync('tmux', ['send-keys', '-t', `claude:=${window}`, c]), 50);
+        setTimeout(() => {
+          const paneOut = spawnSync('tmux', ['capture-pane', '-t', `claude:=${window}`, '-p'], { encoding: 'utf8' }).stdout ?? '';
+          const maxOption = detectMaxOption(paneOut);
+          const key = Number(c) > maxOption ? String(maxOption) : c;
+          console.log(`[mcp] send-keys tool-choice=${c} key=${key} maxOption=${maxOption} tool=${toolName} to ${window}`);
+          spawnSync('tmux', ['send-keys', '-t', `claude:=${window}`, key]);
+        }, 100);
       }
     } catch { /* no choice file — user closed popup without selecting */ }
   });
@@ -218,7 +345,7 @@ function triggerPopupForWindow(window, toolName, toolInput) {
 
 function triggerPopup(socket) {
   const window = socketState.get(socket)?.window ?? null;
-  triggerPopupForWindow(window);
+  triggerPopupForWindow(window, '', {});
 }
 
 // --- MCP message handler ---
@@ -338,7 +465,7 @@ function handleConnection(socket) {
   let buf = Buffer.alloc(0);
 
   socket.on('data', chunk => {
-    buf = Buffer.concat([buf, chunk]);
+buf = Buffer.concat([buf, chunk]);
 
     if (!upgraded) {
       const end = buf.indexOf('\r\n\r\n');
@@ -378,35 +505,50 @@ function handleConnection(socket) {
           readBody(body => {
             try {
               const data = JSON.parse(body.toString('utf8'));
+              console.log('[mcp] /notify raw:', JSON.stringify(data));
               const rawPid = Number(data.pid);
+
               if (Number.isInteger(rawPid) && rawPid > 0) {
-                let current = rawPid;
-                for (let i = 0; i < 15; i++) {
-                  if (pidToWindow.has(current)) {
-                    const window = pidToWindow.get(current);
-                    console.log(`[mcp] /notify pid=${data.pid} matched=${current} window=${window ?? '?'}`);
-                    const pendingChoice = pendingDiffChoices.get(window);
-                    if (pendingChoice) {
-                      pendingDiffChoices.delete(window);
-                      // HTTP 200 を先に送ってから send-keys（hook 完了後に Claude Code がキーを受け付ける）
-                      socket.end('HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n');
-                      setTimeout(() => {
-                        // 1=allow once, 2=allow always, 3=deny
-                        console.log(`[mcp] send-keys diff-choice=${pendingChoice} to ${window}`);
-                        spawnSync('tmux', ['send-keys', '-t', `claude:=${window}`, pendingChoice]);
-                      }, 50);
-                      return;
-                    } else {
-                      // popup は非同期で起動し、HTTP 200 は即座に返す
-                      triggerPopupForWindow(window, data.tool_name, data.tool_input);
-                    }
-                    break;
+                // PreToolUse hook からのツール情報を保存
+                if (data.type === 'tool_info') {
+                  const window = resolveWindow(rawPid);
+                  if (window) {
+                    pendingToolInfo.set(window, { tool_name: data.tool_name, tool_input: data.tool_input, ts: Date.now() });
+                    console.log(`[mcp] tool_info stored window=${window} tool=${data.tool_name}`);
                   }
-                  try {
-                    const ppid = execSync(`ps -o ppid= -p ${current} 2>/dev/null`, { encoding: 'utf8' }).trim();
-                    if (!ppid || ppid === '1' || ppid === '0' || ppid === String(current)) break;
-                    current = Number(ppid);
-                  } catch { break; }
+                  socket.end('HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n');
+                  return;
+                }
+
+                const window = resolveWindow(rawPid);
+                if (window) {
+                  console.log(`[mcp] /notify pid=${data.pid} window=${window}`);
+                  const pendingChoice = pendingDiffChoices.get(window);
+                  if (pendingChoice) {
+                    pendingDiffChoices.delete(window);
+                    socket.end('HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n');
+                    setTimeout(() => {
+                      console.log(`[mcp] send-keys diff-choice=${pendingChoice} to ${window}`);
+                      spawnSync('tmux', ['send-keys', '-t', `claude:=${window}`, pendingChoice]);
+                    }, 50);
+                    return;
+                  }
+                  // ツール情報を取得（pendingToolInfo → message parse の順でフォールバック）
+                  const info = pendingToolInfo.get(window);
+                  const fresh = info && Date.now() - info.ts < 15000;
+                  const msgTool = (data.message || '').match(/\buse (\w+)$/)?.[1] || '';
+                  const toolName  = (fresh ? info.tool_name  : null) || data.tool_name || msgTool || '';
+                  const toolInput = (fresh ? info.tool_input : null) || data.tool_input || {};
+                  if (info) pendingToolInfo.delete(window);
+                  console.log(`[mcp] tool resolve: pending=${fresh ? info.tool_name : 'none'} msg=${msgTool} => ${toolName}`);
+                  // Edit/Write/MultiEdit/NotebookEdit は openDiff (diff popup) で処理される
+                  const DIFF_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+                  if (DIFF_TOOLS.has(toolName)) {
+                    console.log(`[mcp] skip tool-popup for ${toolName} (handled by diff popup)`);
+                    socket.end('HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n');
+                    return;
+                  }
+                  triggerPopupForWindow(window, toolName, toolInput);
                 }
               }
             } catch (e) {
@@ -471,7 +613,7 @@ function writeLockFile(port) {
     ideName: 'tmux-claude',
     transport: 'ws',
     authToken: AUTH_TOKEN,
-  }));
+  }), { mode: 0o600 });
   return lockPath;
 }
 
@@ -490,9 +632,11 @@ server.listen(LISTEN_PORT, '127.0.0.1', () => {
   const { port } = server.address();
   const lockPath = writeLockFile(port);
 
-  fs.writeFileSync(PID_FILE, String(process.pid));
-  fs.writeFileSync(PORT_FILE, String(port));
-  fs.writeFileSync(TOKEN_FILE, AUTH_TOKEN);
+  fs.writeFileSync(PID_FILE,   String(process.pid), { mode: 0o600 });
+  fs.writeFileSync(PORT_FILE,  String(port),        { mode: 0o600 });
+  fs.writeFileSync(TOKEN_FILE, AUTH_TOKEN,           { mode: 0o600 });
+  // 既存ファイルの場合 mode が反映されないため明示的に変更
+  fs.chmodSync(TOKEN_FILE, 0o600);
 
   console.log(`[mcp] started  port=${port}  pid=${process.pid}`);
   console.log(`[mcp] lock     ${lockPath}`);
@@ -501,7 +645,7 @@ server.listen(LISTEN_PORT, '127.0.0.1', () => {
     deleteLockFile(port);
     try { fs.unlinkSync(PID_FILE); } catch { /* ok */ }
     try { fs.unlinkSync(PORT_FILE); } catch { /* ok */ }
-    try { fs.unlinkSync(TOKEN_FILE); } catch { /* ok */ }
+    // TOKEN_FILE は削除しない — 再起動後も同じ token で Claude Code が自動再接続できる
     console.log('[mcp] stopped');
     process.exit(0);
   }
