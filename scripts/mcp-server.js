@@ -277,6 +277,108 @@ function getNotifyType() {
   } catch { return 'popup'; }
 }
 
+// Builds new file contents from tool_input for diff popup.
+// Returns { newContents, oldContent } — oldContent is null for Write or on read failure.
+// newContents is null when not computable (fallback to tool popup).
+function buildNewContents(toolName, toolInput) {
+  try {
+    if (toolName === 'Write') {
+      return { newContents: toolInput.content ?? null, oldContent: null };
+    }
+    if (toolName === 'Edit') {
+      const filePath = toolInput.file_path;
+      if (!filePath) return { newContents: null, oldContent: null };
+      if (!path.isAbsolute(filePath) || filePath.split(path.sep).includes('..')) return { newContents: null, oldContent: null };
+      const oldContent = fs.readFileSync(filePath, 'utf8');
+      const oldStr = toolInput.old_string ?? '';
+      const newStr = toolInput.new_string ?? '';
+      if (!oldStr) return { newContents: null, oldContent: null };
+      const newContents = toolInput.replace_all
+        ? oldContent.replaceAll(oldStr, newStr)
+        : oldContent.replace(oldStr, newStr);
+      return { newContents, oldContent };
+    }
+  } catch { /* unreadable */ }
+  return { newContents: null, oldContent: null };
+}
+
+// Attaches a close handler to a popup proc: reads choice file and sends key to Claude.
+function installChoiceHandler(proc, window, choiceFile, logTag) {
+  proc.on('close', () => {
+    console.log(`[mcp] ${logTag} closed`);
+    if (!window) return;
+    try {
+      const c = fs.readFileSync(choiceFile, 'utf8').trim();
+      fs.unlinkSync(choiceFile);
+      if (['1', '2', '3'].includes(c)) {
+        setTimeout(() => {
+          const paneOut = spawnSync('tmux', ['capture-pane', '-t', `claude:=${window}`, '-p'], { encoding: 'utf8' }).stdout ?? '';
+          const maxOption = detectMaxOption(paneOut);
+          const key = Number(c) > maxOption ? String(maxOption) : c;
+          console.log(`[mcp] send-keys ${logTag}-choice=${c} key=${key} to ${window}`);
+          spawnSync('tmux', ['send-keys', '-t', `claude:=${window}`, key]);
+        }, 100);
+      }
+    } catch { /* no choice file — user closed popup without selecting */ }
+  });
+}
+
+// Edit/Write の diff popup を非同期で起動（WebSocket openDiff の代替）
+function triggerDiffPopupForWindow(window, toolName, toolInput, httpSocket) {
+  const filePath = toolInput.file_path;
+  const { newContents, oldContent } = buildNewContents(toolName, toolInput);
+
+  if (!filePath || newContents === null) {
+    console.log(`[mcp] diff fallback to tool-popup for ${toolName}`);
+    httpSocket.end('HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n');
+    triggerPopupForWindow(window, toolName, toolInput);
+    return;
+  }
+
+  const client = findActiveClient();
+  if (!client) {
+    console.log('[mcp] diff popup: no active client');
+    httpSocket.end('HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n');
+    return;
+  }
+
+  const diffScript = path.join(__dirname, 'claude-diff.js');
+  const encoded = Buffer.from(newContents, 'utf8').toString('base64');
+  const safeWin = (window ?? '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const choiceFile = `/tmp/tmux-claude-diff-choice-${safeWin}.txt`;
+
+  // reuse oldContent from buildNewContents (Edit) to avoid a second file read
+  const oldLines = oldContent ? oldContent.split('\n') : (() => { try { return fs.readFileSync(filePath, 'utf8').split('\n'); } catch { return []; } })();
+  const newLines = newContents.split('\n');
+  const diffLineCount = Math.abs(newLines.length - oldLines.length) + Math.min(newLines.length, oldLines.length);
+  const maxLineLen = Math.max(
+    newLines.reduce((m, l) => Math.max(m, l.length), 0),
+    oldLines.reduce((m, l) => Math.max(m, l.length), 0),
+    40
+  );
+
+  const dimResult = spawnSync('tmux', ['display-message', '-c', client, '-p', '#{client_width} #{client_height}'], { encoding: 'utf8' });
+  const [termW, termH] = (dimResult.stdout ?? '').trim().split(' ').map(Number);
+  const wPct = termW > 0 ? Math.min(95, Math.max(70, Math.round((maxLineLen + 12) / termW * 100))) : 90;
+  const hPct = termH > 0 ? Math.min(95, Math.max(50, Math.round((diffLineCount + 8) / termH * 100))) : 80;
+
+  const cwdResult = window ? spawnSync('tmux', ['display-message', '-t', `claude:=${window}`, '-p', '#{pane_current_path}'], { encoding: 'utf8' }) : null;
+  const diffCwd = (cwdResult?.stdout ?? '').trim();
+
+  console.log(`[mcp] diff popup ${toolName} file=${filePath} size=${wPct}%x${hPct}%`);
+
+  // HTTP 200 を即返してから diff popup を非同期起動（hook timeout 対策）
+  httpSocket.end('HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n');
+
+  const proc = spawn('tmux', [
+    'display-popup', '-c', client, `-w${wPct}%`, `-h${hPct}%`, '-E',
+    `TMUX_CLAUDE_NEW_CONTENTS=${shellQuote(encoded)} TOOL_CWD=${shellQuote(diffCwd)} node ${shellQuote(diffScript)} ${shellQuote(filePath)} ${shellQuote(window ?? '')}`,
+  ], { detached: false });
+  proc.stderr.on('data', d => console.warn(`[mcp] diff popup stderr: ${d.toString().trim()}`));
+  proc.on('error', e => console.warn(`[mcp] diff popup error: ${e.message}`));
+  installChoiceHandler(proc, window, choiceFile, 'diff-popup');
+}
+
 // Launches the tool confirmation popup asynchronously.
 // After the popup closes, reads CHOICE_FILE and sends the key to Claude.
 function triggerPopupForWindow(window, toolName, toolInput) {
@@ -322,25 +424,7 @@ function triggerPopupForWindow(window, toolName, toolInput) {
   proc.stderr.on('data', d => console.warn(`[mcp] display-popup stderr: ${d.toString().trim()}`));
   proc.on('error', e => console.warn(`[mcp] display-popup error: ${e.message}`));
 
-  proc.on('close', (code) => {
-    console.log(`[mcp] display-popup closed code=${code}`);
-    if (!window) return;
-    try {
-      const c = fs.readFileSync(choiceFile, 'utf8').trim();
-      fs.unlinkSync(choiceFile);
-      // Claude Code の permission dialog は数字キー '1'/'2'/'3' で即選択
-      // capture-pane で選択肢数を検出し、choice > max の場合は最大値にクランプ（2択ダイアログ対応）
-      if (['1', '2', '3'].includes(c)) {
-        setTimeout(() => {
-          const paneOut = spawnSync('tmux', ['capture-pane', '-t', `claude:=${window}`, '-p'], { encoding: 'utf8' }).stdout ?? '';
-          const maxOption = detectMaxOption(paneOut);
-          const key = Number(c) > maxOption ? String(maxOption) : c;
-          console.log(`[mcp] send-keys tool-choice=${c} key=${key} maxOption=${maxOption} tool=${toolName} to ${window}`);
-          spawnSync('tmux', ['send-keys', '-t', `claude:=${window}`, key]);
-        }, 100);
-      }
-    } catch { /* no choice file — user closed popup without selecting */ }
-  });
+  installChoiceHandler(proc, window, choiceFile, 'tool-popup');
 }
 
 function triggerPopup(socket) {
@@ -392,6 +476,7 @@ function handleMcpMessage(socket, msg) {
         const oldPath = args.old_file_path;
         const newContents = args.new_file_contents;
         const window = socketState.get(socket)?.window ?? null;
+        console.log(`[mcp] openDiff called oldPath=${oldPath} window=${window ?? 'null'}`);
         if (oldPath && newContents != null && window) {
           try {
             const client = findActiveClient();
@@ -411,14 +496,18 @@ function handleMcpMessage(socket, msg) {
               }
               const newLines = newContents.split('\n');
               const diffLineCount = Math.abs(newLines.length - oldLines.length) + Math.min(newLines.length, oldLines.length);
-              const maxLineLen = Math.max(...newLines.map(l => l.length), ...oldLines.map(l => l.length), 40);
+              const maxLineLen = Math.max(
+                newLines.reduce((m, l) => Math.max(m, l.length), 0),
+                oldLines.reduce((m, l) => Math.max(m, l.length), 0),
+                40
+              );
 
               const wPct = termW > 0 ? Math.min(95, Math.max(70, Math.round((maxLineLen + 12) / termW * 100))) : 90;
               const hPct = termH > 0 ? Math.min(95, Math.max(50, Math.round((diffLineCount + 8) / termH * 100))) : 80;
 
               spawnSync('tmux', [
                 'display-popup', '-c', client, `-w${wPct}%`, `-h${hPct}%`, '-E',
-                `TMUX_CLAUDE_NEW_CONTENTS=${encoded} node ${shellQuote(diffScript)} ${shellQuote(oldPath)} ${shellQuote(window)}`,
+                `TMUX_CLAUDE_NEW_CONTENTS=${shellQuote(encoded)} node ${shellQuote(diffScript)} ${shellQuote(oldPath)} ${shellQuote(window)}`,
               ]);
             }
           } catch (e) {
@@ -541,11 +630,10 @@ buf = Buffer.concat([buf, chunk]);
                   const toolInput = (fresh ? info.tool_input : null) || data.tool_input || {};
                   if (info) pendingToolInfo.delete(window);
                   console.log(`[mcp] tool resolve: pending=${fresh ? info.tool_name : 'none'} msg=${msgTool} => ${toolName}`);
-                  // Edit/Write/MultiEdit/NotebookEdit は openDiff (diff popup) で処理される
+                  // Edit/Write は diff popup で処理（WebSocket 不要、tool_input から直接 diff を生成）
                   const DIFF_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
                   if (DIFF_TOOLS.has(toolName)) {
-                    console.log(`[mcp] skip tool-popup for ${toolName} (handled by diff popup)`);
-                    socket.end('HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n');
+                    triggerDiffPopupForWindow(window, toolName, toolInput, socket);
                     return;
                   }
                   triggerPopupForWindow(window, toolName, toolInput);

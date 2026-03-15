@@ -31,6 +31,22 @@ const CORNER = '\u23bf'; // ⎿
 function dim(text)  { return `${DIM}${text}${R}`; }
 function bold(text) { return `${BOLD}${text}${R}`; }
 function sep(label) { return `${DIM}─ ${label} ─${R}`; }
+function resolveCwd() {
+  const c = process.env.TOOL_CWD ?? '';
+  return c ? c.replace(require('os').homedir(), '~') : '';
+}
+
+// Build header lines array for popup (used by both tool popup and diff popup).
+// Returns a string[] that can be written line-by-line or pushed into a scrollable lines array.
+// No stdout writes — pure data function.
+function headerLines(cols, cwd, title, subtitle = null) {
+  const lines = [];
+  if (cwd) lines.push(`${DIM}${cwd}${R}`);
+  lines.push(`${DIM}${'─'.repeat(cols)}${R}`);
+  lines.push(`${BOLD}${title}${R}`);
+  if (subtitle !== null) lines.push(`${DIM}${subtitle}${R}`);
+  return lines;
+}
 
 // --- CSI helper ---
 
@@ -184,7 +200,7 @@ module.exports = {
   RESET_FG, LINE_ADD, LINE_DEL, BG_RED, BG_GREEN,
   BULLET, CORNER,
   // Text styling helpers
-  dim, bold, sep,
+  dim, bold, sep, headerLines, resolveCwd,
   // CSI
   isCSIFinal,
   // Screen lifecycle

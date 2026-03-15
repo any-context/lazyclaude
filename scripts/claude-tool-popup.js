@@ -12,7 +12,7 @@ const { spawnSync } = require('child_process');
 const {
   R, BOLD, DIM,
   GREEN, YELLOW, RED,
-  dim, sep,
+  dim, sep, headerLines, resolveCwd,
   enterAltScreen, renderActionBar,
   readChoice,
 } = require('./popup-ui');
@@ -23,7 +23,7 @@ const CHOICE_FILE = `/tmp/tmux-claude-tool-choice-${safeWindow}.txt`;
 
 const toolName  = process.env.TOOL_NAME  ?? '';
 const toolInput = (() => { try { return JSON.parse(process.env.TOOL_INPUT ?? '{}'); } catch { return {}; } })();
-const toolCwd   = (() => { const c = process.env.TOOL_CWD ?? ''; return c ? c.replace(require('os').homedir(), '~') : ''; })();
+const toolCwd   = resolveCwd();
 
 const COLS = process.stdout.columns || Number(process.env.COLUMNS) || 80;
 const ROWS = process.stdout.rows    || Number(process.env.LINES)   || 24;
@@ -93,16 +93,16 @@ function buildBodyLines(name, input) {
 
 // Map dialog options to action bar entries (content: labels + key bindings)
 function buildActions(dialogOptions) {
-  const KEY_CHARS  = ['y', 'a', 'n'];
   const KEY_COLORS = [GREEN, YELLOW, RED];
   if (dialogOptions.length === 0) {
     // fallback when capture-pane returns nothing
     return [
-      { key: 'y', label: 'Yes',                  color: GREEN  },
-      { key: 'a', label: 'Allow always',           color: YELLOW },
-      { key: 'n', label: 'No',                   color: RED    },
+      { key: 'y', label: 'Yes',         color: GREEN  },
+      { key: 'a', label: 'Allow always', color: YELLOW },
+      { key: 'n', label: 'No',          color: RED    },
     ];
   }
+  const KEY_CHARS = dialogOptions.length <= 2 ? ['y', 'n'] : ['y', 'a', 'n'];
   return dialogOptions.map((opt, i) => ({
     key:   KEY_CHARS[i]  ?? String(opt.num),
     label: opt.text,
@@ -121,18 +121,13 @@ function buildActions(dialogOptions) {
 //   Yes: y  | No: n  | cancel: Esc
 //   ❯
 function draw(bodyLines, actions) {
-  // Overhead rows: cwd(1?) + topsep(1) + toolname(1) + botsep+action(2) = 5 or 4
-  const overhead = toolCwd ? 5 : 4;
-  const maxBody = Math.max(1, ROWS - overhead);
-  const SEP = `${DIM}${'─'.repeat(COLS)}${R}`;
+  const hdrLines = headerLines(COLS, toolCwd, toolName || 'Tool');
+  // Overhead: header lines + action bar (sep+actions = 2 rows)
+  const maxBody = Math.max(1, ROWS - hdrLines.length - 2);
 
   enterAltScreen();
 
-  if (toolCwd) {
-    process.stdout.write(`${DIM}${toolCwd}${R}\x1b[K\n`);
-  }
-  process.stdout.write(SEP + '\x1b[K\n');
-  process.stdout.write(`${BOLD}${toolName || 'Tool'}${R}\x1b[K\n`);
+  for (const l of hdrLines) process.stdout.write(l + '\x1b[K\n');
 
   for (const l of bodyLines.slice(0, maxBody)) {
     process.stdout.write(`    ${l}\x1b[K\n`);
