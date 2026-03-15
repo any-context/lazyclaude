@@ -710,6 +710,54 @@ buf = Buffer.concat([buf, chunk]);
   });
 }
 
+// --- Remote lock file update ---
+
+// ポートが変わった際に claude セッションのリモートウィンドウのロックファイルを更新する。
+// SSH の OSC 7 パス (pane_path) からホスト名を取得し、ssh コマンドで書き換える。
+function updateRemoteLockFiles(newPort, oldPort) {
+  const lockContent = JSON.stringify({
+    pid: process.pid,
+    workspaceFolders: [],
+    ideName: 'tmux-claude',
+    transport: 'ws',
+    authToken: AUTH_TOKEN,
+  });
+  const b64 = Buffer.from(lockContent).toString('base64');
+
+  let windows;
+  try {
+    windows = execSync(
+      'tmux list-windows -t claude -F "#{window_name}\t#{pane_current_command}\t#{pane_path}"',
+      { encoding: 'utf8' }
+    ).trim().split('\n').filter(Boolean);
+  } catch { return; }
+
+  const seen = new Set();
+  for (const line of windows) {
+    const [, cmd, oscPath] = line.split('\t');
+    if (cmd !== 'ssh') continue;
+
+    // OSC 7: file://hostname/path → extract hostname
+    const hostMatch = oscPath?.match(/^file:\/\/([^/]+)/);
+    if (!hostMatch) continue;
+    const host = hostMatch[1];
+    const localHost = os.hostname();
+    if (host === localHost || host === localHost.split('.')[0]) continue;
+    if (seen.has(host)) continue;
+    seen.add(host);
+
+    // 新ポートのロックファイルを書き込み、旧ポートのロックファイルを削除
+    const rmOld = oldPort ? `rm -f ~/.claude/ide/${oldPort}.lock && ` : '';
+    const remoteCmd = `mkdir -p ~/.claude/ide && ${rmOld}printf '%s' ${b64} | base64 -d > ~/.claude/ide/${newPort}.lock`;
+    const r = spawnSync('ssh', ['-o', 'ConnectTimeout=3', '-o', 'BatchMode=yes', host, remoteCmd]);
+    if (r.status === 0) {
+      console.log(`[mcp] updated remote lock file on ${host}: port ${oldPort} → ${newPort}`);
+    } else {
+      console.warn(`[mcp] failed to update remote lock file on ${host}: ${r.stderr?.toString().trim()}`);
+    }
+  }
+}
+
 // --- Lock file ---
 
 function writeLockFile(port) {
@@ -736,18 +784,23 @@ const server = net.createServer(handleConnection);
 // 環境変数でポートを固定可能（再起動後も同じポートで起動し Claude Code が自動再接続できる）
 const LISTEN_PORT = parseInt(process.env.TMUX_CLAUDE_PORT || '0', 10);
 
-server.listen(LISTEN_PORT, '127.0.0.1', () => {
+function onListening() {
   const { port } = server.address();
   const lockPath = writeLockFile(port);
 
   fs.writeFileSync(PID_FILE,   String(process.pid), { mode: 0o600 });
   fs.writeFileSync(PORT_FILE,  String(port),        { mode: 0o600 });
   fs.writeFileSync(TOKEN_FILE, AUTH_TOKEN,           { mode: 0o600 });
-  // 既存ファイルの場合 mode が反映されないため明示的に変更
   fs.chmodSync(TOKEN_FILE, 0o600);
 
   console.log(`[mcp] started  port=${port}  pid=${process.pid}`);
   console.log(`[mcp] lock     ${lockPath}`);
+
+  // ポートが変わった場合、リモート Claude セッションのロックファイルを更新する
+  if (LISTEN_PORT !== 0 && port !== LISTEN_PORT) {
+    console.log(`[mcp] port changed ${LISTEN_PORT} → ${port}, updating remote lock files`);
+    updateRemoteLockFiles(port, LISTEN_PORT);
+  }
 
   function cleanup() {
     deleteLockFile(port);
@@ -760,4 +813,20 @@ server.listen(LISTEN_PORT, '127.0.0.1', () => {
 
   process.on('SIGTERM', cleanup);
   process.on('SIGINT', cleanup);
+}
+
+// EADDRINUSE の場合は最大 5 回リトライして同ポートを確保する
+// （TIME_WAIT 状態のソケットが残っている場合など）
+let retries = 0;
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE' && LISTEN_PORT !== 0 && retries < 5) {
+    retries++;
+    console.warn(`[mcp] port ${LISTEN_PORT} in use, retry ${retries}/5 in 500ms...`);
+    setTimeout(() => server.listen(LISTEN_PORT, '127.0.0.1', onListening), 500);
+  } else {
+    console.error(`[mcp] listen error: ${err.message}`);
+    process.exit(1);
+  }
 });
+
+server.listen(LISTEN_PORT, '127.0.0.1', onListening);
