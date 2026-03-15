@@ -173,12 +173,12 @@ function getNotifyType() {
 }
 
 // Returns the user's choice ('1'|'2'|'3') after the popup closes, or null for menu path.
-function triggerPopupForWindow(window) {
+function triggerPopupForWindow(window, toolName, toolInput) {
   const client = findActiveClient();
   if (!client) { console.warn('[mcp] no active client for popup'); return null; }
 
   const type = getNotifyType();
-  console.log(`[mcp] popup type=${type} window=${window ?? '?'} client=${client}`);
+  console.log(`[mcp] popup type=${type} window=${window ?? '?'} tool=${toolName || '?'} client=${client}`);
 
   if (type === 'menu') {
     const popupScript = path.join(__dirname, 'claude-popup.sh');
@@ -194,9 +194,10 @@ function triggerPopupForWindow(window) {
 
   // popup path: show tool confirmation UI, then read CHOICE_FILE
   const toolPopupScript = path.join(__dirname, 'claude-tool-popup.js');
+  const toolInputJson = JSON.stringify(toolInput ?? {});
   spawnSync('tmux', [
-    'display-popup', '-c', client, '-w90%', '-h80%', '-E',
-    `node ${shellQuote(toolPopupScript)} ${shellQuote(window ?? '')}`,
+    'display-popup', '-c', client, '-w90%', '-h60%', '-E',
+    `TOOL_NAME=${shellQuote(toolName || '')} TOOL_INPUT=${shellQuote(toolInputJson)} node ${shellQuote(toolPopupScript)} ${shellQuote(window ?? '')}`,
   ]);
 
   if (window) {
@@ -395,7 +396,7 @@ function handleConnection(socket) {
                       }, 50);
                       return;
                     } else {
-                      const toolChoice = triggerPopupForWindow(window);
+                      const toolChoice = triggerPopupForWindow(window, data.tool_name, data.tool_input);
                       if (toolChoice) {
                         socket.end('HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n');
                         setTimeout(() => {
