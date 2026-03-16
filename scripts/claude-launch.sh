@@ -123,7 +123,7 @@ if [ "$PANE_CMD" = "ssh" ] && [ "$SESSION_NAME" != "claude" ]; then
       tmux respawn-window -t "claude:=$WINDOW" -k "$REMOTE_CMD"
     fi
   else
-    tmux new-window -t "claude" -n "$WINDOW" "$REMOTE_CMD"
+    tmux new-window -d -t "claude" -n "$WINDOW" "$REMOTE_CMD"
   fi
 
   tmux display-popup -w80% -h90% -E "$SCRIPT_DIR/claude-popup.sh $WINDOW"
@@ -149,7 +149,7 @@ else
         tmux respawn-window -t "claude:=$WINDOW" -k "$CLAUDE_CMD"
       fi
     else
-      tmux new-window -t "claude" -n "$WINDOW" "$CLAUDE_CMD"
+      tmux new-window -d -t "claude" -n "$WINDOW" "$CLAUDE_CMD"
     fi
 
     tmux display-popup -w80% -h90% -E "$SCRIPT_DIR/claude-popup.sh $WINDOW"
