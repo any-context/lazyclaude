@@ -290,12 +290,17 @@ func claudeEnv() map[string]string {
 
 // cleanSessionCommands returns tmux commands to disable status bar and all keybindings.
 // These are chained after new-session via ";".
+// IMPORTANT: automatic-rename and remain-on-exit are set WITHOUT -w flag
+// so they become session-level defaults that apply to ALL windows (not just the first).
+// With -w they only apply to the current window, causing new windows created via
+// NewWindow to get tmux's defaults (automatic-rename=on), which renames windows
+// and breaks SyncWithTmux's name-based matching.
 func cleanSessionCommands() [][]string {
 	return [][]string{
 		{"set-option", "status", "off"},
 		{"set-option", "prefix", "None"},
-		{"set-option", "-w", "automatic-rename", "off"},
-		{"set-option", "-w", "remain-on-exit", "on"},
+		{"set-option", "automatic-rename", "off"},
+		{"set-option", "remain-on-exit", "on"},
 		{"unbind-key", "-a", "-T", "prefix"},
 		{"unbind-key", "-a", "-T", "root"},
 		{"unbind-key", "-a", "-T", "copy-mode"},

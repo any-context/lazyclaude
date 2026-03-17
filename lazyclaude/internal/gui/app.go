@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/KEMSHlM/lazyclaude/internal/gui/context"
 	"github.com/jesseduffield/gocui"
@@ -57,9 +58,10 @@ type App struct {
 	sessions       SessionProvider
 	cursor         int // selected session index
 	previewMu      sync.Mutex
-	previewCache   string // cached preview content
-	previewCursor  int    // cursor position when cache was taken
-	previewBusy    bool   // async capture in progress
+	previewCache   string    // cached preview content
+	previewCursor  int       // cursor position when cache was taken
+	previewBusy    bool      // async capture in progress
+	previewTime    time.Time // last fetch timestamp
 	lastWidth      int
 	lastHeight     int
 }
@@ -127,7 +129,25 @@ func (a *App) TestLayout(g *gocui.Gui) error {
 // Run starts the main event loop. Blocks until quit.
 func (a *App) Run() error {
 	defer a.gui.Close()
-	if err := a.gui.MainLoop(); err != nil {
+
+	// Periodic refresh for live preview (gocui only re-renders on events)
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				a.gui.Update(func(g *gocui.Gui) error { return nil })
+			}
+		}
+	}()
+
+	err := a.gui.MainLoop()
+	close(done)
+	if err != nil {
 		if strings.Contains(err.Error(), "quit") {
 			return nil
 		}
@@ -315,7 +335,8 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 	a.previewMu.Lock()
 	cache := a.previewCache
 	cachedCursor := a.previewCursor
-	needFetch := !a.previewBusy && (a.previewCursor != a.cursor || a.previewCache == "")
+	stale := time.Since(a.previewTime) > 500*time.Millisecond
+	needFetch := !a.previewBusy && (a.previewCursor != a.cursor || a.previewCache == "" || stale)
 	if needFetch {
 		a.previewBusy = true
 	}
@@ -332,6 +353,7 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 				a.previewCursor = cursorSnapshot
 			}
 			a.previewBusy = false
+			a.previewTime = time.Now()
 			a.previewMu.Unlock()
 		}()
 	}
@@ -421,23 +443,31 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// j/k: cursor movement
-	if err := a.gui.SetKeybinding("", 'j', gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+	// j/k and arrow keys: cursor movement
+	cursorDown := func(g *gocui.Gui, v *gocui.View) error {
 		if a.mode == ModeMain && a.sessions != nil {
 			if a.cursor < len(a.sessions.Sessions())-1 {
 				a.cursor++
 			}
 		}
 		return nil
-	}); err != nil {
-		return err
 	}
-	if err := a.gui.SetKeybinding("", 'k', gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+	cursorUp := func(g *gocui.Gui, v *gocui.View) error {
 		if a.mode == ModeMain && a.cursor > 0 {
 			a.cursor--
 		}
 		return nil
-	}); err != nil {
+	}
+	if err := a.gui.SetKeybinding("", 'j', gocui.ModNone, cursorDown); err != nil {
+		return err
+	}
+	if err := a.gui.SetKeybinding("", gocui.KeyArrowDown, gocui.ModNone, cursorDown); err != nil {
+		return err
+	}
+	if err := a.gui.SetKeybinding("", 'k', gocui.ModNone, cursorUp); err != nil {
+		return err
+	}
+	if err := a.gui.SetKeybinding("", gocui.KeyArrowUp, gocui.ModNone, cursorUp); err != nil {
 		return err
 	}
 

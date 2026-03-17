@@ -242,6 +242,19 @@ func (s *Store) GenerateName(dirPath, host string) string {
 	return candidate
 }
 
+// BackdateForTest moves a session's CreatedAt backwards by the given duration.
+// Only for testing — not for production use.
+func (s *Store) BackdateForTest(id string, d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.sessions {
+		if s.sessions[i].ID == id {
+			s.sessions[i].CreatedAt = s.sessions[i].CreatedAt.Add(-d)
+			return
+		}
+	}
+}
+
 func (s *Store) nameExistsLocked(name string) bool {
 	for _, sess := range s.sessions {
 		if sess.Name == name {

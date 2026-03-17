@@ -52,15 +52,24 @@ func (gc *GC) Stop() {
 	gc.wg.Wait()
 }
 
+// gcGracePeriod is the minimum age before GC considers deleting a session.
+// Prevents race: Create → Sync (before tmux window is fully ready) → Orphan → Delete.
+const gcGracePeriod = 10 * time.Second
+
 func (gc *GC) collect(ctx context.Context) {
 	if err := gc.mgr.Sync(ctx); err != nil {
 		gc.mgr.log.Debug("gc.sync.error", "err", err)
 		return
 	}
 
+	now := time.Now()
 	sessions := gc.mgr.Sessions()
 	for _, s := range sessions {
 		if s.Status == StatusDead || s.Status == StatusOrphan {
+			if now.Sub(s.CreatedAt) < gcGracePeriod {
+				gc.mgr.log.Debug("gc.skip.grace", "name", s.Name, "age", now.Sub(s.CreatedAt))
+				continue
+			}
 			gc.mgr.log.Info("gc.delete", "name", s.Name, "id", s.ID[:8], "status", s.Status)
 			gc.mgr.Delete(ctx, s.ID)
 		}

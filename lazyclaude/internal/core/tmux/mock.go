@@ -16,6 +16,9 @@ type MockClient struct {
 	Options  map[string]string
 	Messages map[string]string
 
+	// Captured arguments for assertions
+	LastNewSessionOpts NewSessionOpts
+
 	// Error injection
 	ErrListClients     error
 	ErrHasSession      error
@@ -79,6 +82,7 @@ func (m *MockClient) NewSession(_ context.Context, opts NewSessionOpts) error {
 	if m.ErrNewSession != nil {
 		return m.ErrNewSession
 	}
+	m.LastNewSessionOpts = opts
 	m.Sessions[opts.Name] = []WindowInfo{
 		{ID: "@0", Index: 0, Name: opts.WindowName, Session: opts.Name, Active: true},
 	}

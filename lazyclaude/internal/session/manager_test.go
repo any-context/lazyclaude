@@ -165,6 +165,40 @@ func TestManager_Sync_WithTmux(t *testing.T) {
 	assert.Equal(t, 5555, all[0].PID)
 }
 
+func TestManager_Create_PostCommands_NoWindowFlag(t *testing.T) {
+	t.Parallel()
+	mgr, mock := newTestManager(t)
+
+	_, err := mgr.Create(context.Background(), "/home/user/app", "")
+	require.NoError(t, err)
+
+	// Verify automatic-rename and remain-on-exit are session-level (no -w flag).
+	// With -w they only apply to the first window, causing new windows to get
+	// tmux's default automatic-rename=on, which renames windows and breaks
+	// SyncWithTmux's name-based matching.
+	opts := mock.LastNewSessionOpts
+	require.NotEmpty(t, opts.PostCommands, "PostCommands should be set")
+
+	for _, cmd := range opts.PostCommands {
+		if len(cmd) < 2 || cmd[0] != "set-option" {
+			continue
+		}
+		optName := cmd[len(cmd)-1]
+		if optName == "off" || optName == "on" {
+			// The option name is the second-to-last arg
+			if len(cmd) >= 3 {
+				optName = cmd[len(cmd)-2]
+			}
+		}
+		if optName == "automatic-rename" || optName == "remain-on-exit" {
+			for _, arg := range cmd {
+				assert.NotEqual(t, "-w", arg,
+					"%s must be session-level (no -w flag) to affect all windows", optName)
+			}
+		}
+	}
+}
+
 func TestManager_Persistence(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
