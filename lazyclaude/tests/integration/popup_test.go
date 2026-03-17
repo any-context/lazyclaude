@@ -8,62 +8,68 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTmux_DiffCommand_InPane(t *testing.T) {
+func TestTmux_DiffPopup_ShowsContent(t *testing.T) {
 	bin := ensureBinary(t)
 	h := newTmuxHelper(t)
-
-	h.startSession("diff-test", 120, 40)
+	h.startSession("diff-test", 80, 20)
 
 	oldFile := testdataPath(t, "old.go")
 	newFile := testdataPath(t, "new.go")
 
-	// Run lazyclaude diff in the pane
-	// Current stub prints "diff popup - not yet implemented" and exits
+	// Launch diff as pane command (gocui needs PTY)
 	h.sendKeys("diff-test",
 		fmt.Sprintf("%s diff --window lc-test --old %s --new %s", bin, oldFile, newFile),
 		"Enter")
 
-	found := h.waitForText("diff-test", "diff popup", 5000000000) // 5s
-	assert.True(t, found, "expected to see 'diff popup' in pane output")
+	// gocui should render diff content
+	found := h.waitForText("diff-test", "hello", 5000000000)
+	assert.True(t, found, "expected diff content")
+
+	// Action bar should be visible
+	content := h.capturePane("diff-test")
+	assert.Contains(t, content, "y:")
+
+	// Press y to exit
+	h.sendKeys("diff-test", "y")
 }
 
-func TestTmux_ToolCommand_InPane(t *testing.T) {
+func TestTmux_ToolPopup_ShowsContent(t *testing.T) {
 	bin := ensureBinary(t)
 	h := newTmuxHelper(t)
+	h.startSession("tool-test", 80, 15)
 
-	h.startSession("tool-test", 120, 40)
-
+	// Set env vars for tool popup
 	h.sendKeys("tool-test",
-		fmt.Sprintf("%s tool", bin),
+		fmt.Sprintf("TOOL_NAME=Bash TOOL_INPUT='{\"command\":\"ls\"}' TOOL_CWD=/tmp %s tool --window lc-tool", bin),
 		"Enter")
 
-	found := h.waitForText("tool-test", "tool popup", 5000000000)
-	assert.True(t, found, "expected to see 'tool popup' in pane output")
+	found := h.waitForText("tool-test", "Bash", 5000000000)
+	assert.True(t, found, "expected tool name in popup")
+
+	content := h.capturePane("tool-test")
+	assert.Contains(t, content, "y:")
+
+	h.sendKeys("tool-test", "n")
 }
 
 func TestTmux_ServerCommand_StartsAndStops(t *testing.T) {
 	bin := ensureBinary(t)
 	h := newTmuxHelper(t)
-
 	h.startSession("server-test", 120, 40)
 
-	// Start server in background
 	h.sendKeys("server-test",
 		fmt.Sprintf("%s server --port 0 &", bin),
 		"Enter")
 
-	// Give it time to start
 	found := h.waitForText("server-test", "MCP server", 5000000000)
 	require.True(t, found, "expected MCP server started message")
 
-	// Kill it
 	h.sendKeys("server-test", "kill %1", "Enter")
 }
 
 func TestTmux_HelpCommand_InPane(t *testing.T) {
 	bin := ensureBinary(t)
 	h := newTmuxHelper(t)
-
 	h.startSession("help-test", 120, 40)
 
 	h.sendKeys("help-test",
