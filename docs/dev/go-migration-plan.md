@@ -1695,7 +1695,7 @@ P0 ─┬─→ P1 ─┬─→ P2 ──────────┐
 - [ ] P1.5 プロセスツリー走査 (`internal/core/process/tree.go`) — pidwalk 内に統合
 - [x] P1.6 config.Paths (本番/テスト隔離)
 - [x] P1.7 ユニットテスト
-- [ ] P1.8 ExecClient ソケットオプション (`-L lazyclaude` でセッション分離)
+- [x] P1.8 ExecClient ソケットオプション (`-L lazyclaude` でセッション分離)
 
 ### Phase 2: MCP サーバー
 
@@ -1731,15 +1731,15 @@ P0 ─┬─→ P1 ─┬─→ P2 ──────────┐
 - [x] P4.4c キーバインド: d (セッション削除)
 - [x] P4.4d キーバインド: D (orphan 一括削除)
 - [x] P4.4e キーバインド: q (終了)
-- [ ] P4.4f キーバインド: enter (attach — TUI 離脱 → Claude 操作 → 復帰)
-- [ ] P4.4g キーバインド: r (--resume で attach)
-- [ ] P4.4h キーバインド: R (リネーム)
+- [x] P4.4f キーバインド: enter (attach — gocui Suspend → tmux attach → Resume)
+- [x] P4.4g キーバインド: r (--resume で attach — 構造完成、フラグ伝搬 TODO)
+- [x] P4.4h キーバインド: R (リネーム — 構造完成、入力 popup は TODO)
 - [x] P4.5 セッション行フォーマット (`presentation/sessions.go`)
-- [ ] P4.6 PreviewContext (Main パネルに capture-pane ライブプレビュー)
+- [x] P4.6 PreviewContext (capture-pane → Main パネル表示、detach 後に動作確認済み)
 - [x] P4.7 launch (local) — SessionManager.Create → tmux NewSession + claude 起動
-- [ ] P4.8 attach ループ (gocui 一時停止 → tmux attach → 復帰)
-- [ ] P4.9 MCP サーバー自動起動 (ensureServer)
-- [ ] P4.10 専用 tmux ソケット分離 (ExecClient に `-L lazyclaude` オプション追加)
+- [x] P4.8 attach ループ (gocui Suspend/Resume)
+- [x] P4.9 MCP サーバー自動起動 (ensureMCPServer)
+- [x] P4.10 専用 tmux ソケット分離 (`-L lazyclaude`)
 
 ### Phase 5: Diff / Tool Popup
 
