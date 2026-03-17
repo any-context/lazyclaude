@@ -52,14 +52,21 @@ func (gc *GC) Stop() {
 	gc.wg.Wait()
 }
 
+const gcGracePeriod = 10 * time.Second
+
 func (gc *GC) collect(ctx context.Context) {
 	if err := gc.mgr.Sync(ctx); err != nil {
 		return // tmux might not be running
 	}
 
+	now := time.Now()
 	sessions := gc.mgr.Sessions()
 	for _, s := range sessions {
 		if s.Status == StatusDead || s.Status == StatusOrphan {
+			// Don't delete sessions created recently — process may still be starting
+			if now.Sub(s.CreatedAt) < gcGracePeriod {
+				continue
+			}
 			gc.mgr.Delete(ctx, s.ID)
 		}
 	}

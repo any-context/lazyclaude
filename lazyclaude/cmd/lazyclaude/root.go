@@ -33,6 +33,9 @@ func newRootCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 			}
 
+			// Configure Claude onboarding in background (non-blocking)
+			go mgr.EnsureClaudeConfigured(".")
+
 			// Ensure MCP server is running
 			ensureMCPServer()
 

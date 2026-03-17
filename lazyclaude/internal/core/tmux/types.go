@@ -34,6 +34,8 @@ type NewSessionOpts struct {
 	Command      string
 	Env          map[string]string
 	Detached     bool
+	Width        int        // -x flag (0 = tmux default)
+	Height       int        // -y flag (0 = tmux default)
 	PostCommands [][]string // tmux commands to chain after new-session (e.g. ["set-option", "status", "off"])
 }
 

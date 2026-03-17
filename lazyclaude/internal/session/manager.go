@@ -141,9 +141,6 @@ func (m *Manager) EnsureClaudeConfigured(dirPath string) error {
 
 // Create creates a new session with a tmux window.
 func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, error) {
-	// Ensure Claude Code onboarding is complete before first session
-	m.EnsureClaudeConfigured(dirPath)
-
 	name := m.store.GenerateName(dirPath, host)
 	id := uuid.New().String()
 
