@@ -35,18 +35,37 @@ func validateEnvKey(k string) error {
 // ExecClient implements Client by executing tmux commands.
 type ExecClient struct {
 	tmuxBin string
+	socket  string // tmux -L socket name (empty = default server)
 }
 
-// NewExecClient creates an ExecClient that shells out to the tmux binary.
+// NewExecClient creates an ExecClient using the default tmux server.
 func NewExecClient() *ExecClient {
 	return &ExecClient{tmuxBin: "tmux"}
+}
+
+// NewExecClientWithSocket creates an ExecClient using a dedicated tmux socket.
+// Sessions on this socket are invisible to the user's default `tmux ls`.
+func NewExecClientWithSocket(socket string) *ExecClient {
+	return &ExecClient{tmuxBin: "tmux", socket: socket}
+}
+
+// Socket returns the configured socket name (empty = default).
+func (c *ExecClient) Socket() string {
+	return c.socket
+}
+
+func (c *ExecClient) prependSocket(args []string) []string {
+	if c.socket != "" {
+		return append([]string{"-L", c.socket}, args...)
+	}
+	return args
 }
 
 func (c *ExecClient) run(ctx context.Context, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, c.tmuxBin, args...)
+	cmd := exec.CommandContext(ctx, c.tmuxBin, c.prependSocket(args)...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("tmux %s: %w", strings.Join(args, " "), err)
@@ -118,7 +137,7 @@ func (c *ExecClient) NewSession(ctx context.Context, opts NewSessionOpts) error 
 	ctx2, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx2, c.tmuxBin, args...)
+	cmd := exec.CommandContext(ctx2, c.tmuxBin, c.prependSocket(args)...)
 	if len(opts.Env) > 0 {
 		cmd.Env = os.Environ()
 		for k, v := range opts.Env {
@@ -155,7 +174,7 @@ func (c *ExecClient) NewWindow(ctx context.Context, opts NewWindowOpts) error {
 	ctx2, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx2, c.tmuxBin, args...)
+	cmd := exec.CommandContext(ctx2, c.tmuxBin, c.prependSocket(args)...)
 	if len(opts.Env) > 0 {
 		cmd.Env = os.Environ()
 		for k, v := range opts.Env {

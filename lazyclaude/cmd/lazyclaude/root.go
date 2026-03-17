@@ -21,7 +21,7 @@ func newRootCmd() *cobra.Command {
 		Version: fmt.Sprintf("%s (%s)", version, commit),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			paths := config.DefaultPaths()
-			tmuxClient := tmux.NewExecClient()
+			tmuxClient := tmux.NewExecClientWithSocket("lazyclaude")
 
 			store := session.NewStore(paths.StateFile())
 			mgr := session.NewManager(store, tmuxClient, paths)
@@ -31,7 +31,7 @@ func newRootCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 			}
 
-			adapter := &sessionAdapter{mgr: mgr}
+			adapter := &sessionAdapter{mgr: mgr, tmux: tmuxClient}
 
 			app, err := gui.NewApp(gui.ModeMain)
 			if err != nil {
@@ -52,7 +52,8 @@ func newRootCmd() *cobra.Command {
 
 // sessionAdapter bridges session.Manager to gui.SessionProvider.
 type sessionAdapter struct {
-	mgr *session.Manager
+	mgr  *session.Manager
+	tmux tmux.Client
 }
 
 func (a *sessionAdapter) Sessions() []gui.SessionItem {
@@ -60,15 +61,29 @@ func (a *sessionAdapter) Sessions() []gui.SessionItem {
 	items := make([]gui.SessionItem, len(sessions))
 	for i, s := range sessions {
 		items[i] = gui.SessionItem{
-			ID:     s.ID,
-			Name:   s.Name,
-			Path:   s.Path,
-			Host:   s.Host,
-			Status: s.Status.String(),
-			Flags:  s.Flags,
+			ID:         s.ID,
+			Name:       s.Name,
+			Path:       s.Path,
+			Host:       s.Host,
+			Status:     s.Status.String(),
+			Flags:      s.Flags,
+			TmuxWindow: s.TmuxWindow,
 		}
 	}
 	return items
+}
+
+func (a *sessionAdapter) CapturePreview(id string) (string, error) {
+	sess := a.mgr.Store().FindByID(id)
+	if sess == nil {
+		return "", nil
+	}
+	// Try TmuxWindow first, fall back to window name
+	target := sess.TmuxWindow
+	if target == "" {
+		target = "lazyclaude:" + sess.WindowName()
+	}
+	return a.tmux.CapturePaneContent(context.Background(), target)
 }
 
 func (a *sessionAdapter) Create(path, host string) error {

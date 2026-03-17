@@ -141,4 +141,28 @@ func TestNewExecClient(t *testing.T) {
 	t.Parallel()
 	c := NewExecClient()
 	require.NotNil(t, c)
+	assert.Equal(t, "", c.Socket())
+}
+
+func TestNewExecClientWithSocket(t *testing.T) {
+	t.Parallel()
+	c := NewExecClientWithSocket("lazyclaude")
+	require.NotNil(t, c)
+	assert.Equal(t, "lazyclaude", c.Socket())
+}
+
+func TestPrependSocket(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no socket", func(t *testing.T) {
+		c := NewExecClient()
+		args := c.prependSocket([]string{"list-sessions"})
+		assert.Equal(t, []string{"list-sessions"}, args)
+	})
+
+	t.Run("with socket", func(t *testing.T) {
+		c := NewExecClientWithSocket("lc")
+		args := c.prependSocket([]string{"list-sessions"})
+		assert.Equal(t, []string{"-L", "lc", "list-sessions"}, args)
+	})
 }

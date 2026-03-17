@@ -30,26 +30,31 @@ type SessionProvider interface {
 	Delete(id string) error
 	Rename(id, newName string) error
 	PurgeOrphans() (int, error)
+	CapturePreview(id string) (string, error) // capture-pane content for preview
 }
 
 // SessionItem is a read-only view of a session for display.
 type SessionItem struct {
-	ID     string
-	Name   string
-	Path   string
-	Host   string
-	Status string
-	Flags  []string
+	ID         string
+	Name       string
+	Path       string
+	Host       string
+	Status     string
+	Flags      []string
+	TmuxWindow string
 }
 
 // App is the root TUI application (lazygit Gui equivalent).
 type App struct {
-	gui          *gocui.Gui
-	mode         AppMode
-	contextMgr   *context.Manager
-	activeTabIdx int
-	sessions     SessionProvider
-	cursor       int // selected session index
+	gui            *gocui.Gui
+	mode           AppMode
+	contextMgr     *context.Manager
+	activeTabIdx   int
+	sessions       SessionProvider
+	cursor         int    // selected session index
+	previewCache   string // cached preview content
+	previewCursor  int    // cursor position when cache was taken
+	previewCounter int    // frame counter for throttling
 }
 
 // NewApp creates a new App. Call Run() to start the event loop.
@@ -211,15 +216,9 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 	if err != nil && !isUnknownView(err) {
 		return err
 	}
-	v3.Title = " Main "
 	v3.Wrap = true
-	if isUnknownView(err) {
-		fmt.Fprintln(v3, "")
-		fmt.Fprintln(v3, "  lazyclaude")
-		fmt.Fprintln(v3, "  A standalone TUI for Claude Code")
-		fmt.Fprintln(v3, "")
-		fmt.Fprintln(v3, "  Select a session or press 'n' to create one.")
-	}
+	v3.Clear()
+	a.renderPreview(v3)
 
 	// Options bar (bottom, frameless)
 	v4, err := g.SetView("options", 0, maxY-2, maxX-1, maxY, 0)
@@ -261,6 +260,54 @@ func (a *App) layoutPopup(g *gocui.Gui, maxX, maxY int) error {
 		return err
 	}
 	return nil
+}
+
+func (a *App) renderPreview(v *gocui.View) {
+	if a.sessions == nil {
+		v.Title = " Main "
+		fmt.Fprintln(v, "")
+		fmt.Fprintln(v, "  lazyclaude")
+		fmt.Fprintln(v, "  A standalone TUI for Claude Code")
+		return
+	}
+
+	items := a.sessions.Sessions()
+	if len(items) == 0 || a.cursor >= len(items) {
+		v.Title = " Main "
+		fmt.Fprintln(v, "")
+		fmt.Fprintln(v, "  Select a session or press 'n' to create one.")
+		return
+	}
+
+	item := items[a.cursor]
+	v.Title = fmt.Sprintf(" %s ", item.Name)
+
+	if item.Status == "Orphan" {
+		fmt.Fprintln(v, "")
+		fmt.Fprintln(v, "  Session not found in tmux.")
+		fmt.Fprintln(v, "  Press 'd' to remove.")
+		return
+	}
+
+	// Throttle capture-pane: only fetch every 10 frames or on cursor change
+	a.previewCounter++
+	if a.previewCounter%10 == 0 || a.previewCursor != a.cursor || a.previewCache == "" {
+		content, err := a.sessions.CapturePreview(item.ID)
+		if err == nil && strings.TrimSpace(content) != "" {
+			a.previewCache = content
+		}
+		a.previewCursor = a.cursor
+	}
+
+	if a.previewCache != "" && a.previewCursor == a.cursor {
+		fmt.Fprint(v, a.previewCache)
+		return
+	}
+
+	// Fallback: show session info
+	fmt.Fprintln(v, "")
+	fmt.Fprintf(v, "  %s [%s]\n", item.Name, item.Status)
+	fmt.Fprintf(v, "  %s\n", item.Path)
 }
 
 func (a *App) renderSessionList(v *gocui.View) {
