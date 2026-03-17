@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -95,15 +96,15 @@ func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, e
 	claudeCmd := m.buildClaudeCommand(sess)
 	windowName := sess.WindowName()
 
+	env := claudeEnv()
+
 	if !exists {
 		err = m.tmux.NewSession(ctx, tmux.NewSessionOpts{
-			Name:       tmuxSessionName,
-			WindowName: windowName,
-			Command:    claudeCmd,
-			Detached:   true,
-			Env: map[string]string{
-				"CLAUDE_CODE_AUTO_CONNECT_IDE": "true",
-			},
+			Name:         tmuxSessionName,
+			WindowName:   windowName,
+			Command:      claudeCmd,
+			Detached:     true,
+			Env:          env,
 			PostCommands: cleanSessionCommands(),
 		})
 	} else {
@@ -111,9 +112,7 @@ func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, e
 			Session: tmuxSessionName,
 			Name:    windowName,
 			Command: claudeCmd,
-			Env: map[string]string{
-				"CLAUDE_CODE_AUTO_CONNECT_IDE": "true",
-			},
+			Env:     env,
 		})
 	}
 	if err != nil {
@@ -191,6 +190,27 @@ func (m *Manager) buildClaudeCommand(sess Session) string {
 		cmd = fmt.Sprintf("cd %s && %s", shellQuote(absPath), cmd)
 	}
 	return cmd
+}
+
+// claudeEnv returns environment variables to pass to Claude Code sessions.
+// Inherits auth tokens and Claude-specific vars from the parent process.
+func claudeEnv() map[string]string {
+	env := map[string]string{
+		"CLAUDE_CODE_AUTO_CONNECT_IDE": "true",
+	}
+	// Pass through Claude auth and config env vars
+	passthrough := []string{
+		"CLAUDE_CODE_OAUTH_TOKEN",
+		"ANTHROPIC_API_KEY",
+		"CLAUDE_CODE_API_KEY",
+		"CLAUDE_CODE_SSE_PORT",
+	}
+	for _, key := range passthrough {
+		if val := os.Getenv(key); val != "" {
+			env[key] = val
+		}
+	}
+	return env
 }
 
 // cleanSessionCommands returns tmux commands to disable status bar and all keybindings.

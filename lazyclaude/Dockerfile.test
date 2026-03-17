@@ -1,7 +1,7 @@
 FROM golang:latest
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tmux curl \
+    tmux curl python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code (standalone binary)
@@ -16,6 +16,35 @@ RUN go mod download
 COPY . .
 RUN go build -o /usr/local/bin/lazyclaude ./cmd/lazyclaude
 RUN go build -o /usr/local/bin/gocui-demo ./tests/testdata/minimal_gocui.go
+
+# Script to initialize Claude Code (skip onboarding + trust)
+COPY <<'SCRIPT' /usr/local/bin/claude-init
+#!/bin/bash
+set -e
+if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
+  echo "No auth token set. Skipping Claude init."
+  exit 0
+fi
+echo "hi" | claude -p --output-format text >/dev/null 2>&1
+VERSION=$(claude --version 2>/dev/null | head -1 | awk '{print $1}')
+python3 -c "
+import json, os
+path = os.path.expanduser('~/.claude.json')
+with open(path) as f:
+    d = json.load(f)
+d['hasCompletedOnboarding'] = True
+d['lastOnboardingVersion'] = '${VERSION}'
+d['numStartups'] = 10
+if 'projects' not in d:
+    d['projects'] = {}
+d['projects'][os.getcwd()] = {'hasTrustDialogAccepted': True, 'allowedTools': []}
+d['projects']['/'] = {'hasTrustDialogAccepted': True, 'allowedTools': []}
+with open(path, 'w') as f:
+    json.dump(d, f)
+"
+echo "Claude initialized (onboarding + trust configured)"
+SCRIPT
+RUN chmod +x /usr/local/bin/claude-init
 
 # Default: run all tests
 CMD ["go", "test", "-cover", "./...", "-timeout", "120s"]

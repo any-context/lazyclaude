@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -130,6 +129,10 @@ func (c *ExecClient) NewSession(ctx context.Context, opts NewSessionOpts) error 
 	if opts.Detached {
 		args = append(args, "-d")
 	}
+	// Pass environment variables via tmux -e flag (reaches the shell inside tmux)
+	for k, v := range opts.Env {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
+	}
 	if opts.Command != "" {
 		args = append(args, opts.Command)
 	}
@@ -144,12 +147,6 @@ func (c *ExecClient) NewSession(ctx context.Context, opts NewSessionOpts) error 
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx2, c.tmuxBin, c.prependSocket(args)...)
-	if len(opts.Env) > 0 {
-		cmd.Env = os.Environ()
-		for k, v := range opts.Env {
-			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
-		}
-	}
 	return cmd.Run()
 }
 
@@ -173,6 +170,9 @@ func (c *ExecClient) NewWindow(ctx context.Context, opts NewWindowOpts) error {
 	if opts.Name != "" {
 		args = append(args, "-n", opts.Name)
 	}
+	for k, v := range opts.Env {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
+	}
 	if opts.Command != "" {
 		args = append(args, opts.Command)
 	}
@@ -181,12 +181,6 @@ func (c *ExecClient) NewWindow(ctx context.Context, opts NewWindowOpts) error {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx2, c.tmuxBin, c.prependSocket(args)...)
-	if len(opts.Env) > 0 {
-		cmd.Env = os.Environ()
-		for k, v := range opts.Env {
-			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
-		}
-	}
 	return cmd.Run()
 }
 
