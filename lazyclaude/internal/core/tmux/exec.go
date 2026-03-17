@@ -173,9 +173,14 @@ func (c *ExecClient) NewSession(ctx context.Context, opts NewSessionOpts) error 
 
 	fullArgs := c.prependSocket(args)
 	cmd := exec.CommandContext(ctx2, c.tmuxBin, fullArgs...)
-	out, err := cmd.CombinedOutput()
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	c.logCmd("NewSession", fullArgs, string(out), err)
-	return err
+	if err != nil {
+		return fmt.Errorf("new-session: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
 }
 
 func (c *ExecClient) ListWindows(ctx context.Context, session string) ([]WindowInfo, error) {
@@ -210,9 +215,14 @@ func (c *ExecClient) NewWindow(ctx context.Context, opts NewWindowOpts) error {
 
 	fullArgs := c.prependSocket(args)
 	cmd := exec.CommandContext(ctx2, c.tmuxBin, fullArgs...)
-	out, err := cmd.CombinedOutput()
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	c.logCmd("NewWindow", fullArgs, string(out), err)
-	return err
+	if err != nil {
+		return fmt.Errorf("new-window: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
 }
 
 func (c *ExecClient) RespawnPane(ctx context.Context, target, command string) error {

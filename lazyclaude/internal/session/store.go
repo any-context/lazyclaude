@@ -223,18 +223,6 @@ func (s *Store) MarkAllStatus(status Status) {
 	}
 }
 
-// SetCreatedAt overrides a session's creation time (for testing).
-func (s *Store) SetCreatedAt(id string, t time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.sessions {
-		if s.sessions[i].ID == id {
-			s.sessions[i].CreatedAt = t
-			return
-		}
-	}
-}
-
 // GenerateName creates a unique session name from a directory path.
 func (s *Store) GenerateName(dirPath, host string) string {
 	base := filepath.Base(dirPath)
