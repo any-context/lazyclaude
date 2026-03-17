@@ -154,6 +154,13 @@ func (m *MockClient) CapturePaneContent(_ context.Context, target string) (strin
 	return m.Captured[target], nil
 }
 
+func (m *MockClient) CapturePaneANSI(_ context.Context, target string) (string, error) {
+	if m.ErrCapture != nil {
+		return "", m.ErrCapture
+	}
+	return m.Captured[target], nil
+}
+
 func (m *MockClient) SendKeys(_ context.Context, target string, keys ...string) error {
 	if m.ErrSendKeys != nil {
 		return m.ErrSendKeys
@@ -184,3 +191,5 @@ func (m *MockClient) GetOption(_ context.Context, target, option string) (string
 	key := target + ":" + option
 	return m.Options[key], nil
 }
+
+func (m *MockClient) ResizeWindow(_ context.Context, _ string, _, _ int) error { return nil }

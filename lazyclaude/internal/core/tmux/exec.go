@@ -248,6 +248,12 @@ func (c *ExecClient) KillWindow(ctx context.Context, target string) error {
 	return err
 }
 
+func (c *ExecClient) ResizeWindow(ctx context.Context, target string, width, height int) error {
+	_, err := c.run(ctx, "resize-window", "-t", target,
+		"-x", fmt.Sprintf("%d", width), "-y", fmt.Sprintf("%d", height))
+	return err
+}
+
 func (c *ExecClient) ListPanes(ctx context.Context, session string) ([]PaneInfo, error) {
 	args := []string{"list-panes", "-F", "#{pane_id}\t#{window_id}\t#{pane_pid}\t#{pane_dead}"}
 	if session != "" {
@@ -264,6 +270,11 @@ func (c *ExecClient) ListPanes(ctx context.Context, session string) ([]PaneInfo,
 
 func (c *ExecClient) CapturePaneContent(ctx context.Context, target string) (string, error) {
 	return c.run(ctx, "capture-pane", "-t", target, "-p")
+}
+
+// CapturePaneANSI captures pane content with ANSI color escape codes preserved.
+func (c *ExecClient) CapturePaneANSI(ctx context.Context, target string) (string, error) {
+	return c.run(ctx, "capture-pane", "-t", target, "-ep")
 }
 
 func (c *ExecClient) SendKeys(ctx context.Context, target string, keys ...string) error {

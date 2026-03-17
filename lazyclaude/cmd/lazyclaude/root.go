@@ -14,7 +14,9 @@ import (
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 	"github.com/KEMSHlM/lazyclaude/internal/gui"
 	"github.com/KEMSHlM/lazyclaude/internal/session"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func newRootCmd() *cobra.Command {
@@ -149,17 +151,50 @@ func (a *sessionAdapter) AttachCmd(id string) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-func (a *sessionAdapter) CapturePreview(id string) (string, error) {
+func (a *sessionAdapter) CapturePreview(id string, width, height int) (string, error) {
 	sess := a.mgr.Store().FindByID(id)
 	if sess == nil {
 		return "", nil
 	}
-	// Try TmuxWindow first, fall back to window name
 	target := sess.TmuxWindow
 	if target == "" {
 		target = "lazyclaude:" + sess.WindowName()
 	}
-	return a.tmux.CapturePaneContent(context.Background(), target)
+	ctx := context.Background()
+
+	// Resize pane to preview panel dimensions
+	if width > 0 && height > 0 {
+		if err := a.tmux.ResizeWindow(ctx, target, width, height); err != nil {
+			return "", err
+		}
+		time.Sleep(150 * time.Millisecond) // wait for Claude to re-render
+	}
+
+	// Capture with ANSI colors
+	content, err := a.tmux.CapturePaneANSI(ctx, target)
+
+	// Restore to full terminal size (for Enter/attach)
+	if width > 0 && height > 0 {
+		if w, h, restoreErr := term.GetSize(int(os.Stdin.Fd())); restoreErr == nil && w > 0 && h > 0 {
+			a.tmux.ResizeWindow(ctx, target, w, h) // best-effort restore
+		}
+	}
+
+	if err != nil || width <= 0 {
+		return content, err
+	}
+
+	// Safety truncate: clip lines that didn't fit after resize
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if ansi.StringWidth(line) > width {
+			lines[i] = ansi.Truncate(line, width, "")
+		}
+	}
+	if height > 0 && len(lines) > height {
+		lines = lines[:height]
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 func (a *sessionAdapter) Create(path, host string) error {

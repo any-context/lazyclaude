@@ -31,8 +31,11 @@ type Client interface {
 	// ListPanes returns all panes (optionally filtered by session).
 	ListPanes(ctx context.Context, session string) ([]PaneInfo, error)
 
-	// CapturePaneContent captures the visible content of a pane.
+	// CapturePaneContent captures the visible content of a pane (plain text).
 	CapturePaneContent(ctx context.Context, target string) (string, error)
+
+	// CapturePaneANSI captures pane content with ANSI escape codes.
+	CapturePaneANSI(ctx context.Context, target string) (string, error)
 
 	// SendKeys sends key sequences to a tmux target.
 	SendKeys(ctx context.Context, target string, keys ...string) error
@@ -45,4 +48,7 @@ type Client interface {
 
 	// GetOption returns the value of a tmux option.
 	GetOption(ctx context.Context, target, option string) (string, error)
+
+	// ResizeWindow resizes a tmux window.
+	ResizeWindow(ctx context.Context, target string, width, height int) error
 }

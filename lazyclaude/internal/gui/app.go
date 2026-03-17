@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/KEMSHlM/lazyclaude/internal/gui/context"
 	"github.com/jesseduffield/gocui"
@@ -32,8 +33,8 @@ type SessionProvider interface {
 	Delete(id string) error
 	Rename(id, newName string) error
 	PurgeOrphans() (int, error)
-	CapturePreview(id string) (string, error)
-	AttachCmd(id string) (*exec.Cmd, error) // returns a Cmd to attach to session
+	CapturePreview(id string, width, height int) (string, error)
+	AttachCmd(id string) (*exec.Cmd, error)
 }
 
 // SessionItem is a read-only view of a session for display.
@@ -54,12 +55,13 @@ type App struct {
 	contextMgr     *context.Manager
 	activeTabIdx   int
 	sessions       SessionProvider
-	cursor         int    // selected session index
+	cursor         int // selected session index
+	previewMu      sync.Mutex
 	previewCache   string // cached preview content
 	previewCursor  int    // cursor position when cache was taken
-	previewCounter int    // frame counter for throttling
-	lastWidth      int    // previous terminal width (for resize detection)
-	lastHeight     int    // previous terminal height
+	previewBusy    bool   // async capture in progress
+	lastWidth      int
+	lastHeight     int
 }
 
 // NewApp creates a new App. Call Run() to start the event loop.
@@ -234,9 +236,12 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 	if err != nil && !isUnknownView(err) {
 		return err
 	}
-	v3.Wrap = true
+	v3.Wrap = false
 	v3.Clear()
-	a.renderPreview(v3, items)
+	// Pass preview panel inner dimensions (exclude borders)
+	previewW := maxX - splitX - 2
+	previewH := maxY - 4
+	a.renderPreview(v3, items, previewW, previewH)
 
 	// Options bar (bottom, frameless)
 	v4, err := g.SetView("options", 0, maxY-2, maxX-1, maxY, 0)
@@ -280,7 +285,7 @@ func (a *App) layoutPopup(g *gocui.Gui, maxX, maxY int) error {
 	return nil
 }
 
-func (a *App) renderPreview(v *gocui.View, items []SessionItem) {
+func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previewH int) {
 	if items == nil {
 		v.Title = " Main "
 		fmt.Fprintln(v, "")
@@ -306,22 +311,37 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem) {
 		return
 	}
 
-	// Throttle capture-pane: only fetch every 10 frames or on cursor change
-	a.previewCounter++
-	if a.previewCounter%10 == 0 || a.previewCursor != a.cursor || a.previewCache == "" {
-		content, err := a.sessions.CapturePreview(item.ID)
-		if err == nil && strings.TrimSpace(content) != "" {
-			a.previewCache = content
-		}
-		a.previewCursor = a.cursor
+	// Async preview: launch capture in background, render from cache
+	a.previewMu.Lock()
+	cache := a.previewCache
+	cachedCursor := a.previewCursor
+	needFetch := !a.previewBusy && (a.previewCursor != a.cursor || a.previewCache == "")
+	if needFetch {
+		a.previewBusy = true
+	}
+	a.previewMu.Unlock()
+
+	if needFetch {
+		id := item.ID
+		cursorSnapshot := a.cursor
+		go func() {
+			content, err := a.sessions.CapturePreview(id, previewW, previewH)
+			a.previewMu.Lock()
+			if err == nil && strings.TrimSpace(content) != "" {
+				a.previewCache = content
+				a.previewCursor = cursorSnapshot
+			}
+			a.previewBusy = false
+			a.previewMu.Unlock()
+		}()
 	}
 
-	if a.previewCache != "" && a.previewCursor == a.cursor {
-		fmt.Fprint(v, a.previewCache)
+	if cache != "" && cachedCursor == a.cursor {
+		fmt.Fprint(v, cache)
 		return
 	}
 
-	// Fallback: show session info
+	// Fallback while loading
 	fmt.Fprintln(v, "")
 	fmt.Fprintf(v, "  %s [%s]\n", item.Name, item.Status)
 	fmt.Fprintf(v, "  %s\n", item.Path)
