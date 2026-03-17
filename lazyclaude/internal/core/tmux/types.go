@@ -29,11 +29,12 @@ type PaneInfo struct {
 
 // NewSessionOpts configures a new tmux session.
 type NewSessionOpts struct {
-	Name       string
-	WindowName string
-	Command    string
-	Env        map[string]string
-	Detached   bool
+	Name         string
+	WindowName   string
+	Command      string
+	Env          map[string]string
+	Detached     bool
+	PostCommands [][]string // tmux commands to chain after new-session (e.g. ["set-option", "status", "off"])
 }
 
 // NewWindowOpts configures a new tmux window.

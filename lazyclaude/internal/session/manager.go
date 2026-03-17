@@ -104,6 +104,7 @@ func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, e
 			Env: map[string]string{
 				"CLAUDE_CODE_AUTO_CONNECT_IDE": "true",
 			},
+			PostCommands: cleanSessionCommands(),
 		})
 	} else {
 		err = m.tmux.NewWindow(ctx, tmux.NewWindowOpts{
@@ -190,6 +191,18 @@ func (m *Manager) buildClaudeCommand(sess Session) string {
 		cmd = fmt.Sprintf("cd %s && %s", shellQuote(absPath), cmd)
 	}
 	return cmd
+}
+
+// cleanSessionCommands returns tmux commands to disable status bar and all keybindings.
+// These are chained after new-session via ";".
+func cleanSessionCommands() [][]string {
+	return [][]string{
+		{"set-option", "status", "off"},
+		{"set-option", "prefix", "None"},
+		{"unbind-key", "-a", "-T", "prefix"},
+		{"unbind-key", "-a", "-T", "root"},
+		{"unbind-key", "-a", "-T", "copy-mode"},
+	}
 }
 
 // shellQuote wraps a string in single quotes for safe shell interpolation.

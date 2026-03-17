@@ -123,7 +123,7 @@ func (c *ExecClient) NewSession(ctx context.Context, opts NewSessionOpts) error 
 		}
 	}
 
-	args := []string{"new-session", "-s", opts.Name}
+	args := []string{"-f", "/dev/null", "new-session", "-s", opts.Name}
 	if opts.WindowName != "" {
 		args = append(args, "-n", opts.WindowName)
 	}
@@ -132,6 +132,12 @@ func (c *ExecClient) NewSession(ctx context.Context, opts NewSessionOpts) error 
 	}
 	if opts.Command != "" {
 		args = append(args, opts.Command)
+	}
+
+	// Chain post-creation commands (e.g. set-option, unbind-key)
+	for _, postCmd := range opts.PostCommands {
+		args = append(args, ";")
+		args = append(args, postCmd...)
 	}
 
 	ctx2, cancel := context.WithTimeout(ctx, defaultTimeout)
@@ -251,6 +257,7 @@ func (c *ExecClient) GetOption(ctx context.Context, target, option string) (stri
 	args = append(args, option)
 	return c.run(ctx, args...)
 }
+
 
 // --- Parsers ---
 
