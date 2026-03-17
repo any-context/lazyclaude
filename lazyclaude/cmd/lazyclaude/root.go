@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,17 +17,26 @@ import (
 )
 
 func newRootCmd() *cobra.Command {
+	var debug bool
+
 	cmd := &cobra.Command{
 		Use:     "lazyclaude",
 		Short:   "A standalone TUI for Claude Code",
 		Long:    "lazyclaude is a terminal UI for managing Claude Code sessions, inspired by lazygit.",
 		Version: fmt.Sprintf("%s (%s)", version, commit),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Logger: --debug writes to stderr (gocui uses stdout)
+			logLevel := slog.LevelError
+			if debug {
+				logLevel = slog.LevelDebug
+			}
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+
 			paths := config.DefaultPaths()
 			tmuxClient := tmux.NewExecClientWithSocket("lazyclaude")
 
 			store := session.NewStore(paths.StateFile())
-			mgr := session.NewManager(store, tmuxClient, paths)
+			mgr := session.NewManager(store, tmuxClient, paths, logger)
 
 			if err := mgr.Load(context.Background()); err != nil {
 				// Non-fatal: tmux might not be running
@@ -54,6 +64,8 @@ func newRootCmd() *cobra.Command {
 			return app.Run()
 		},
 	}
+
+	cmd.Flags().BoolVar(&debug, "debug", false, "enable debug logging to stderr")
 
 	cmd.AddCommand(newServerCmd())
 	cmd.AddCommand(newDiffCmd())

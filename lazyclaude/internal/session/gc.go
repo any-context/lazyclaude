@@ -54,12 +54,14 @@ func (gc *GC) Stop() {
 
 func (gc *GC) collect(ctx context.Context) {
 	if err := gc.mgr.Sync(ctx); err != nil {
-		return // tmux might not be running
+		gc.mgr.log.Debug("gc.sync.error", "err", err)
+		return
 	}
 
 	sessions := gc.mgr.Sessions()
 	for _, s := range sessions {
 		if s.Status == StatusDead || s.Status == StatusOrphan {
+			gc.mgr.log.Info("gc.delete", "name", s.Name, "id", s.ID[:8], "status", s.Status)
 			gc.mgr.Delete(ctx, s.ID)
 		}
 	}

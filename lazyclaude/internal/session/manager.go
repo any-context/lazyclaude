@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,15 +23,20 @@ type Manager struct {
 	store *Store
 	tmux  tmux.Client
 	paths config.Paths
+	log   *slog.Logger
 	mu    sync.Mutex // guards Create/Delete/Sync against concurrent GC
 }
 
 // NewManager creates a session manager.
-func NewManager(store *Store, tmuxClient tmux.Client, paths config.Paths) *Manager {
+func NewManager(store *Store, tmuxClient tmux.Client, paths config.Paths, log *slog.Logger) *Manager {
+	if log == nil {
+		log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	}
 	return &Manager{
 		store: store,
 		tmux:  tmuxClient,
 		paths: paths,
+		log:   log,
 	}
 }
 
@@ -54,16 +60,18 @@ func (m *Manager) Sync(ctx context.Context) error {
 	defer m.mu.Unlock()
 	exists, err := m.tmux.HasSession(ctx, tmuxSessionName)
 	if err != nil {
+		m.log.Warn("sync.hasSession.error", "err", err)
 		return fmt.Errorf("check session: %w", err)
 	}
 	if !exists {
-		// No tmux session — mark all as orphan in the store directly
+		m.log.Debug("sync.noSession", "action", "markAllOrphan", "count", len(m.store.All()))
 		m.store.MarkAllStatus(StatusOrphan)
 		return nil
 	}
 
 	windows, err := m.tmux.ListWindows(ctx, tmuxSessionName)
 	if err != nil {
+		m.log.Warn("sync.listWindows.error", "err", err)
 		return fmt.Errorf("list windows: %w", err)
 	}
 
@@ -72,7 +80,14 @@ func (m *Manager) Sync(ctx context.Context) error {
 		return fmt.Errorf("list panes: %w", err)
 	}
 
+	m.log.Debug("sync", "windows", len(windows), "panes", len(panes), "sessions", len(m.store.All()))
+	for _, w := range windows {
+		m.log.Debug("sync.window", "id", w.ID, "name", w.Name)
+	}
 	m.store.SyncWithTmux(windows, panes)
+	for _, s := range m.store.All() {
+		m.log.Debug("sync.result", "name", s.Name, "status", s.Status, "tmuxWindow", s.TmuxWindow)
+	}
 	return nil
 }
 
@@ -121,6 +136,7 @@ func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, e
 	defer m.mu.Unlock()
 	name := m.store.GenerateName(dirPath, host)
 	id := uuid.New().String()
+	m.log.Info("create.start", "name", name, "id", id[:8], "path", dirPath)
 
 	sess := Session{
 		ID:        id,
@@ -160,9 +176,11 @@ func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, e
 		})
 	}
 	if err != nil {
+		m.log.Error("create.tmux.error", "err", err, "name", name)
 		return nil, fmt.Errorf("create tmux window: %w", err)
 	}
 
+	m.log.Info("create.done", "name", name, "window", windowName)
 	sess.Status = StatusRunning
 	m.store.Add(sess)
 
@@ -183,9 +201,8 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	}
 
 	// Kill tmux window by name (best-effort, window may already be gone).
-	// Use WindowName() instead of TmuxWindow because SyncWithTmux clears
-	// TmuxWindow for orphaned sessions, which would skip the kill.
 	target := tmuxSessionName + ":" + sess.WindowName()
+	m.log.Info("delete", "name", sess.Name, "id", id[:8], "target", target, "status", sess.Status)
 	_ = m.tmux.KillWindow(ctx, target)
 
 	m.store.Remove(id)

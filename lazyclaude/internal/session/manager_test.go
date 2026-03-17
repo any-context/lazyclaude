@@ -18,7 +18,7 @@ func newTestManager(t *testing.T) (*session.Manager, *tmux.MockClient) {
 	paths := config.TestPaths(tmp)
 	store := session.NewStore(filepath.Join(paths.DataDir, "state.json"))
 	mock := tmux.NewMockClient()
-	mgr := session.NewManager(store, mock, paths)
+	mgr := session.NewManager(store, mock, paths, nil)
 	return mgr, mock
 }
 
@@ -174,14 +174,14 @@ func TestManager_Persistence(t *testing.T) {
 	// Create and save
 	store1 := session.NewStore(statePath)
 	mock := tmux.NewMockClient()
-	mgr1 := session.NewManager(store1, mock, paths)
+	mgr1 := session.NewManager(store1, mock, paths, nil)
 
 	_, err := mgr1.Create(context.Background(), "/home/user/app", "")
 	require.NoError(t, err)
 
 	// Load in a new manager
 	store2 := session.NewStore(statePath)
-	mgr2 := session.NewManager(store2, mock, paths)
+	mgr2 := session.NewManager(store2, mock, paths, nil)
 	require.NoError(t, store2.Load())
 
 	all := mgr2.Sessions()

@@ -19,7 +19,7 @@ func TestGC_RemovesDeadSessions(t *testing.T) {
 	paths := config.TestPaths(tmp)
 	store := session.NewStore(filepath.Join(paths.DataDir, "state.json"))
 	mock := tmux.NewMockClient()
-	mgr := session.NewManager(store, mock, paths)
+	mgr := session.NewManager(store, mock, paths, nil)
 
 	// Create a session and backdate it past the grace period
 	sess, err := mgr.Create(context.Background(), "/home/user/app", "")
@@ -52,7 +52,7 @@ func TestGC_RemovesOrphanSessions(t *testing.T) {
 	paths := config.TestPaths(tmp)
 	store := session.NewStore(filepath.Join(paths.DataDir, "state.json"))
 	mock := tmux.NewMockClient()
-	mgr := session.NewManager(store, mock, paths)
+	mgr := session.NewManager(store, mock, paths, nil)
 
 	_, err := mgr.Create(context.Background(), "/home/user/app", "")
 	require.NoError(t, err)
@@ -77,7 +77,7 @@ func TestGC_KeepsRunningSessions(t *testing.T) {
 	paths := config.TestPaths(tmp)
 	store := session.NewStore(filepath.Join(paths.DataDir, "state.json"))
 	mock := tmux.NewMockClient()
-	mgr := session.NewManager(store, mock, paths)
+	mgr := session.NewManager(store, mock, paths, nil)
 
 	sess, err := mgr.Create(context.Background(), "/home/user/app", "")
 	require.NoError(t, err)
@@ -108,7 +108,7 @@ func TestGC_StopIsIdempotent(t *testing.T) {
 	paths := config.TestPaths(tmp)
 	store := session.NewStore(filepath.Join(paths.DataDir, "state.json"))
 	mock := tmux.NewMockClient()
-	mgr := session.NewManager(store, mock, paths)
+	mgr := session.NewManager(store, mock, paths, nil)
 
 	gc := session.NewGC(mgr, 50*time.Millisecond)
 	gc.Start()
