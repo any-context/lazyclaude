@@ -145,6 +145,38 @@ docker run --rm --env-file .env lazyclaude-test bash -c '
 
 ---
 
+## テストの制約と対策
+
+### capture-pane テストの限界
+
+`tmux capture-pane` はサーバー内部バッファを返す。tmux クライアントが
+ターミナルに描画する内容とは異なる。以下の問題は capture-pane では検出不可:
+
+- UTF-8 文字の underscore 置換 (tmux -u フラグ)
+- locale 依存の表示崩れ
+- gocui Suspend → tmux attach の遷移アーティファクト
+- ターミナルサイズ不一致によるレイアウトずれ
+
+### クライアントレンダリングの検証方法
+
+`script` コマンドで PTY を割り当て、tmux attach のクライアント出力をキャプチャ:
+
+```bash
+script -qc "tmux -u -L lazyclaude attach-session -t lazyclaude" /tmp/render.log &
+PID=$!; sleep 3; kill $PID
+cat /tmp/render.log | strings | grep "╭"  # UTF-8 表示確認
+```
+
+### 推奨テストフロー
+
+1. 自動テスト (`go test`, `capture-pane`): ロジック・状態管理の検証
+2. `script` ラップテスト: クライアントレンダリングの自動検証
+3. ユーザーの仮想環境 (`docker run -it`): 最終的な表示確認
+
+表示に関わる修正は必ず 2 または 3 で確認すること。
+
+---
+
 ## 作業順序
 
 ```

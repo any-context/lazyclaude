@@ -54,16 +54,40 @@ docker run --rm lazyclaude-test bash -c '
 # bash で入る
 docker run --rm -it --env-file .env lazyclaude-test bash
 
-# lazyclaude で Claude 起動
+# Docker 内で lazyclaude 起動
+lazyclaude
+```
+
+### クライアントレンダリングのテスト
+
+`capture-pane` はサーバー内部バッファを返すため、クライアント側の表示問題
+(UTF-8, locale, gocui Suspend 遷移) を検出できない。
+
+クライアントレンダリングを非インタラクティブでテストするには `script` コマンドで
+PTY を割り当てる:
+
+```bash
 docker run --rm --env-file .env lazyclaude-test bash -c '
-  tmux -f /dev/null new-session -d -s ui -x 100 -y 25 "lazyclaude; sleep 999"
-  sleep 2
+  # セッション作成
+  tmux -u -f /dev/null new-session -d -s ui -x 80 -y 20 "lazyclaude; sleep 999"
+  sleep 3
   tmux send-keys -t ui n
-  sleep 8
-  tmux -L lazyclaude capture-pane -p -t lazyclaude | head -10
-  tmux kill-server 2>/dev/null
-  tmux -L lazyclaude kill-server 2>/dev/null
+  sleep 5
+
+  # script コマンドでクライアントレンダリングをキャプチャ
+  script -qc "tmux -u -L lazyclaude attach-session -t lazyclaude" /tmp/render.log &
+  PID=$!
+  sleep 3
+  kill $PID 2>/dev/null
+
+  # レンダリング結果を確認 (ANSI エスケープ含む)
+  cat /tmp/render.log | strings | grep -o "╭\|╰\|│" | head -5
+  # ╭ が表示されれば UTF-8 レンダリング正常
 '
+```
+
+capture-pane テストが PASS でも「表示が正しい」とは限らない。
+表示に関わる修正は必ずユーザーの仮想環境で確認すること。
 ```
 
 ### 任意のコマンド実行
