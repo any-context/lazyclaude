@@ -32,6 +32,9 @@ func newRootCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 			}
 
+			// Ensure MCP server is running
+			ensureMCPServer()
+
 			adapter := &sessionAdapter{mgr: mgr, tmux: tmuxClient}
 
 			app, err := gui.NewApp(gui.ModeMain)
@@ -49,6 +52,26 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newSetupCmd())
 
 	return cmd
+}
+
+// ensureMCPServer starts the MCP server if not already running.
+func ensureMCPServer() {
+	// Check if server is running by reading port file
+	paths := config.DefaultPaths()
+	portFile := paths.PortFile()
+	if _, err := os.Stat(portFile); err == nil {
+		return // port file exists, server likely running
+	}
+
+	// Start server in background
+	cmd := exec.Command(os.Args[0], "server", "--port", "0")
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: start MCP server: %v\n", err)
+		return
+	}
+	cmd.Process.Release() // detach
 }
 
 // sessionAdapter bridges session.Manager to gui.SessionProvider.
