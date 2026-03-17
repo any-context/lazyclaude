@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/KEMSHlM/lazyclaude/internal/core/config"
@@ -21,6 +22,7 @@ type Manager struct {
 	store *Store
 	tmux  tmux.Client
 	paths config.Paths
+	mu    sync.Mutex // guards Create/Delete/Sync against concurrent GC
 }
 
 // NewManager creates a session manager.
@@ -46,17 +48,17 @@ func (m *Manager) Load(ctx context.Context) error {
 }
 
 // Sync updates runtime state by comparing store with tmux windows.
+// Acquires the manager mutex to prevent races with Create/Delete.
 func (m *Manager) Sync(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	exists, err := m.tmux.HasSession(ctx, tmuxSessionName)
 	if err != nil {
 		return fmt.Errorf("check session: %w", err)
 	}
 	if !exists {
-		// No tmux session — all sessions are orphans
-		sessions := m.store.All()
-		for i := range sessions {
-			sessions[i].Status = StatusOrphan
-		}
+		// No tmux session — mark all as orphan in the store directly
+		m.store.MarkAllStatus(StatusOrphan)
 		return nil
 	}
 
@@ -113,7 +115,10 @@ func (m *Manager) EnsureClaudeConfigured(dirPath string) {
 }
 
 // Create creates a new session with a tmux window.
+// Holds the manager mutex throughout to prevent GC from orphaning the new session.
 func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	name := m.store.GenerateName(dirPath, host)
 	id := uuid.New().String()
 
@@ -170,15 +175,18 @@ func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, e
 
 // Delete removes a session and kills its tmux window.
 func (m *Manager) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	sess := m.store.FindByID(id)
 	if sess == nil {
 		return fmt.Errorf("session not found: %s", id)
 	}
 
-	// Kill tmux window if it exists (best-effort, window may already be gone)
-	if sess.TmuxWindow != "" {
-		_ = m.tmux.KillWindow(ctx, sess.TmuxWindow)
-	}
+	// Kill tmux window by name (best-effort, window may already be gone).
+	// Use WindowName() instead of TmuxWindow because SyncWithTmux clears
+	// TmuxWindow for orphaned sessions, which would skip the kill.
+	target := tmuxSessionName + ":" + sess.WindowName()
+	_ = m.tmux.KillWindow(ctx, target)
 
 	m.store.Remove(id)
 
@@ -258,6 +266,7 @@ func cleanSessionCommands() [][]string {
 	return [][]string{
 		{"set-option", "status", "off"},
 		{"set-option", "prefix", "None"},
+		{"set-option", "-w", "automatic-rename", "off"},
 		{"unbind-key", "-a", "-T", "prefix"},
 		{"unbind-key", "-a", "-T", "root"},
 		{"unbind-key", "-a", "-T", "copy-mode"},

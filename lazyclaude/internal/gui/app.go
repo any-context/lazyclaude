@@ -201,7 +201,12 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 	v.SelBgColor = gocui.ColorBlue
 	v.SelFgColor = gocui.ColorWhite
 	v.Clear()
-	a.renderSessionList(v)
+	// Take a single snapshot of sessions for this frame (prevents TOCTOU with GC)
+	var items []SessionItem
+	if a.sessions != nil {
+		items = a.sessions.Sessions()
+	}
+	a.renderSessionList(v, items)
 
 	// Server view (lower left)
 	v2, err := g.SetView("server", 0, leftMidY+1, splitX-1, maxY-2, 0)
@@ -221,7 +226,7 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 	}
 	v3.Wrap = true
 	v3.Clear()
-	a.renderPreview(v3)
+	a.renderPreview(v3, items)
 
 	// Options bar (bottom, frameless)
 	v4, err := g.SetView("options", 0, maxY-2, maxX-1, maxY, 0)
@@ -265,8 +270,8 @@ func (a *App) layoutPopup(g *gocui.Gui, maxX, maxY int) error {
 	return nil
 }
 
-func (a *App) renderPreview(v *gocui.View) {
-	if a.sessions == nil {
+func (a *App) renderPreview(v *gocui.View, items []SessionItem) {
+	if items == nil {
 		v.Title = " Main "
 		fmt.Fprintln(v, "")
 		fmt.Fprintln(v, "  lazyclaude")
@@ -274,7 +279,6 @@ func (a *App) renderPreview(v *gocui.View) {
 		return
 	}
 
-	items := a.sessions.Sessions()
 	if len(items) == 0 || a.cursor >= len(items) {
 		v.Title = " Main "
 		fmt.Fprintln(v, "")
@@ -313,15 +317,7 @@ func (a *App) renderPreview(v *gocui.View) {
 	fmt.Fprintf(v, "  %s\n", item.Path)
 }
 
-func (a *App) renderSessionList(v *gocui.View) {
-	if a.sessions == nil {
-		fmt.Fprintln(v, "  (no sessions)")
-		fmt.Fprintln(v, "")
-		fmt.Fprintln(v, "  Press 'n' to create")
-		return
-	}
-
-	items := a.sessions.Sessions()
+func (a *App) renderSessionList(v *gocui.View, items []SessionItem) {
 	if len(items) == 0 {
 		fmt.Fprintln(v, "  (no sessions)")
 		fmt.Fprintln(v, "")

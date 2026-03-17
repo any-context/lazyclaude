@@ -212,6 +212,17 @@ func (s *Store) Rename(id, newName string) bool {
 	return false
 }
 
+// MarkAllStatus sets the status of all sessions.
+func (s *Store) MarkAllStatus(status Status) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.sessions {
+		s.sessions[i].Status = status
+		s.sessions[i].TmuxWindow = ""
+		s.sessions[i].PID = 0
+	}
+}
+
 // SetCreatedAt overrides a session's creation time (for testing).
 func (s *Store) SetCreatedAt(id string, t time.Time) {
 	s.mu.Lock()
