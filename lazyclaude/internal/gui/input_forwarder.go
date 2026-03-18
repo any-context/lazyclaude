@@ -64,14 +64,3 @@ func RuneToTmuxKey(ch rune) string {
 	return string(ch)
 }
 
-// SpecialKeyToTmux maps gocui special keys to tmux send-keys names.
-var SpecialKeyToTmux = map[string]string{
-	"Enter":     "Enter",
-	"Tab":       "Tab",
-	"Backspace": "BSpace",
-	"ArrowUp":   "Up",
-	"ArrowDown": "Down",
-	"ArrowLeft": "Left",
-	"ArrowRight": "Right",
-	"Escape":    "Escape",
-}

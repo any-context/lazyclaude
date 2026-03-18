@@ -251,28 +251,45 @@ func (a *App) Gui() *gocui.Gui {
 	return a.gui
 }
 
-// forwardKey sends a key to the Claude Code pane in full-screen mode.
-// Called synchronously from gocui event loop — tmux send-keys is fast (~5ms).
-// Does nothing if not in full-screen, no forwarder, or popup is showing.
-func (a *App) forwardKey(ch rune) {
-	if !a.fullScreen || a.inputForwarder == nil || a.hasPopup() {
-		return
-	}
-	if a.sessions == nil {
-		return
+// resolveForwardTarget returns the tmux target for key forwarding.
+// Returns empty string if forwarding should be skipped.
+func (a *App) resolveForwardTarget() string {
+	if !a.fullScreen || a.inputForwarder == nil || a.hasPopup() || a.sessions == nil {
+		return ""
 	}
 	items := a.sessions.Sessions()
 	if a.cursor < 0 || a.cursor >= len(items) {
-		return
+		return ""
 	}
-	target := items[a.cursor].TmuxWindow
-	if target == "" {
-		return
+	t := items[a.cursor].TmuxWindow
+	if t == "" {
+		return ""
 	}
-	key := RuneToTmuxKey(ch)
-	if err := a.inputForwarder.ForwardKey("lazyclaude:"+target, key); err != nil {
-		a.setStatusAsync(fmt.Sprintf("forward key: %v", err))
+	return "lazyclaude:" + t
+}
+
+// forwardKey sends a rune key to the Claude Code pane in full-screen mode.
+// Called synchronously from gocui event loop — tmux send-keys is fast (~5ms).
+func (a *App) forwardKey(ch rune) {
+	if target := a.resolveForwardTarget(); target != "" {
+		if err := a.inputForwarder.ForwardKey(target, RuneToTmuxKey(ch)); err != nil {
+			a.setStatusAsync(fmt.Sprintf("forward key: %v", err))
+		}
 	}
+}
+
+// forwardSpecialKey sends a named special key (Enter, Tab, Up, Down, etc.).
+func (a *App) forwardSpecialKey(tmuxKey string) {
+	if target := a.resolveForwardTarget(); target != "" {
+		if err := a.inputForwarder.ForwardKey(target, tmuxKey); err != nil {
+			a.setStatusAsync(fmt.Sprintf("forward key: %v", err))
+		}
+	}
+}
+
+// ForwardSpecialKeyForTest simulates forwarding a special key in full-screen mode.
+func (a *App) ForwardSpecialKeyForTest(tmuxKey string) {
+	a.forwardSpecialKey(tmuxKey)
 }
 
 func (a *App) setStatusAsync(msg string) {
@@ -611,9 +628,13 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// q to quit in main mode
+	// q: quit or forward in full-screen
 	if err := a.gui.SetKeybinding("", 'q', gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		if a.hasPopup() {
+			return nil
+		}
+		if a.fullScreen {
+			a.forwardKey('q')
 			return nil
 		}
 		if a.mode == ModeMain {
@@ -632,10 +653,14 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// Esc: dismiss popup, quit in popup mode, pop context in main mode
+	// Esc: dismiss popup, forward in full-screen, quit in popup mode
 	if err := a.gui.SetKeybinding("", gocui.KeyEsc, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		if a.hasPopup() {
 			a.dismissPopup(ChoiceCancel)
+			return nil
+		}
+		if a.fullScreen {
+			a.forwardSpecialKey("Escape")
 			return nil
 		}
 		if a.mode == ModeDiff || a.mode == ModeTool {
@@ -649,66 +674,81 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// j/k and arrow keys: cursor movement (blocked during popup)
-	cursorDown := func(g *gocui.Gui, v *gocui.View) error {
-		if a.hasPopup() {
-			// Scroll diff popup
-			if a.pendingTool.IsDiff() && a.popupDiffCache != nil {
-				if a.popupScrollY < len(a.popupDiffCache)-1 {
-					a.popupScrollY++
+	// Cursor/scroll handler factory: runeKey for j/k literal, tmuxSpecial for arrow keys
+	makeCursorHandler := func(runeKey rune, tmuxSpecial string, isDown bool) func(*gocui.Gui, *gocui.View) error {
+		return func(g *gocui.Gui, v *gocui.View) error {
+			if a.hasPopup() {
+				if isDown && a.pendingTool.IsDiff() && a.popupDiffCache != nil {
+					if a.popupScrollY < len(a.popupDiffCache)-1 {
+						a.popupScrollY++
+					}
+				}
+				if !isDown && a.pendingTool.IsDiff() && a.popupScrollY > 0 {
+					a.popupScrollY--
+				}
+				return nil
+			}
+			if a.fullScreen {
+				if tmuxSpecial != "" {
+					a.forwardSpecialKey(tmuxSpecial)
+				} else {
+					a.forwardKey(runeKey)
+				}
+				return nil
+			}
+			if a.mode != ModeMain {
+				return nil
+			}
+			if isDown && a.sessions != nil {
+				if a.cursor < len(a.sessions.Sessions())-1 {
+					a.cursor++
 				}
 			}
-			return nil
-		}
-		if a.mode == ModeMain && a.sessions != nil {
-			if a.cursor < len(a.sessions.Sessions())-1 {
-				a.cursor++
-			}
-		}
-		return nil
-	}
-	cursorUp := func(g *gocui.Gui, v *gocui.View) error {
-		if a.hasPopup() {
-			if a.pendingTool.IsDiff() && a.popupScrollY > 0 {
-				a.popupScrollY--
+			if !isDown && a.cursor > 0 {
+				a.cursor--
 			}
 			return nil
 		}
-		if a.mode == ModeMain && a.cursor > 0 {
-			a.cursor--
-		}
-		return nil
 	}
-	if err := a.gui.SetKeybinding("", 'j', gocui.ModNone, cursorDown); err != nil {
+
+	jDown := makeCursorHandler('j', "", true)
+	kUp := makeCursorHandler('k', "", false)
+	arrowDown := makeCursorHandler(0, "Down", true)
+	arrowUp := makeCursorHandler(0, "Up", false)
+
+	if err := a.gui.SetKeybinding("", 'j', gocui.ModNone, jDown); err != nil {
 		return err
 	}
-	if err := a.gui.SetKeybinding("", gocui.KeyArrowDown, gocui.ModNone, cursorDown); err != nil {
+	if err := a.gui.SetKeybinding("", gocui.KeyArrowDown, gocui.ModNone, arrowDown); err != nil {
 		return err
 	}
-	if err := a.gui.SetKeybinding("", 'k', gocui.ModNone, cursorUp); err != nil {
+	if err := a.gui.SetKeybinding("", 'k', gocui.ModNone, kUp); err != nil {
 		return err
 	}
-	if err := a.gui.SetKeybinding("", gocui.KeyArrowUp, gocui.ModNone, cursorUp); err != nil {
+	if err := a.gui.SetKeybinding("", gocui.KeyArrowUp, gocui.ModNone, arrowUp); err != nil {
 		return err
 	}
-	// j/k on popup view for diff scrolling
-	if err := a.gui.SetKeybinding(popupViewName, 'j', gocui.ModNone, cursorDown); err != nil {
+	if err := a.gui.SetKeybinding(popupViewName, 'j', gocui.ModNone, jDown); err != nil {
 		return err
 	}
-	if err := a.gui.SetKeybinding(popupViewName, 'k', gocui.ModNone, cursorUp); err != nil {
+	if err := a.gui.SetKeybinding(popupViewName, 'k', gocui.ModNone, kUp); err != nil {
 		return err
 	}
-	if err := a.gui.SetKeybinding(popupViewName, gocui.KeyArrowDown, gocui.ModNone, cursorDown); err != nil {
+	if err := a.gui.SetKeybinding(popupViewName, gocui.KeyArrowDown, gocui.ModNone, arrowDown); err != nil {
 		return err
 	}
-	if err := a.gui.SetKeybinding(popupViewName, gocui.KeyArrowUp, gocui.ModNone, cursorUp); err != nil {
+	if err := a.gui.SetKeybinding(popupViewName, gocui.KeyArrowUp, gocui.ModNone, arrowUp); err != nil {
 		return err
 	}
 
-	// n: create new session (CWD) — blocked during popup
+	// n: create session, reject popup, or forward in full-screen
 	if err := a.gui.SetKeybinding("", 'n', gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		if a.hasPopup() {
 			a.dismissPopup(ChoiceReject)
+			return nil
+		}
+		if a.fullScreen {
+			a.forwardKey('n')
 			return nil
 		}
 		if a.mode != ModeMain || a.sessions == nil {
@@ -730,12 +770,16 @@ func (a *App) setupGlobalKeybindings() error {
 	popupAccept := func(g *gocui.Gui, v *gocui.View) error {
 		if a.hasPopup() {
 			a.dismissPopup(ChoiceAccept)
+		} else if a.fullScreen {
+			a.forwardKey('y')
 		}
 		return nil
 	}
 	popupAllow := func(g *gocui.Gui, v *gocui.View) error {
 		if a.hasPopup() {
 			a.dismissPopup(ChoiceAllow)
+		} else if a.fullScreen {
+			a.forwardKey('a')
 		}
 		return nil
 	}
@@ -776,9 +820,13 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// d: delete selected session (blocked during popup)
+	// d: delete or forward in full-screen
 	if err := a.gui.SetKeybinding("", 'd', gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		if a.hasPopup() {
+			return nil
+		}
+		if a.fullScreen {
+			a.forwardKey('d')
 			return nil
 		}
 		if a.mode != ModeMain || a.sessions == nil {
@@ -800,13 +848,14 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// enter: toggle full-screen view (blocked during popup)
+	// enter: enter full-screen or forward
 	if err := a.gui.SetKeybinding("", gocui.KeyEnter, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		if a.hasPopup() {
 			return nil
 		}
 		if a.fullScreen {
-			return nil // already in full screen
+			a.forwardSpecialKey("Enter")
+			return nil
 		}
 		if a.mode != ModeMain || a.sessions == nil {
 			return nil
@@ -830,9 +879,13 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// r: resume (blocked during popup and full-screen)
+	// r: resume or forward in full-screen
 	if err := a.gui.SetKeybinding("", 'r', gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		if a.hasPopup() || a.fullScreen {
+		if a.hasPopup() {
+			return nil
+		}
+		if a.fullScreen {
+			a.forwardKey('r')
 			return nil
 		}
 		// TODO: pass --resume flag to the session
@@ -841,9 +894,13 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// R: rename selected session (blocked during popup)
+	// R: rename or forward in full-screen
 	if err := a.gui.SetKeybinding("", 'R', gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		if a.hasPopup() {
+			return nil
+		}
+		if a.fullScreen {
+			a.forwardKey('R')
 			return nil
 		}
 		if a.mode != ModeMain || a.sessions == nil {
@@ -865,9 +922,13 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// D: purge orphans (blocked during popup)
+	// D: purge or forward in full-screen
 	if err := a.gui.SetKeybinding("", 'D', gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		if a.hasPopup() {
+			return nil
+		}
+		if a.fullScreen {
+			a.forwardKey('D')
 			return nil
 		}
 		if a.mode != ModeMain || a.sessions == nil {
@@ -882,6 +943,40 @@ func (a *App) setupGlobalKeybindings() error {
 		return nil
 	}); err != nil {
 		return err
+	}
+
+	// Full-screen: forward remaining printable ASCII on "main" view.
+	// Keys already handled above (q/j/k/n/d/r/R/D/y/a) have fullScreen guards.
+	for ch := rune(32); ch <= 126; ch++ {
+		c := ch
+		if err := a.gui.SetKeybinding("main", c, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+			if a.fullScreen && !a.hasPopup() {
+				a.forwardKey(c)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+
+	// Full-screen: forward special keys on "main" view
+	fwdSpecialKeys := map[gocui.Key]string{
+		gocui.KeyTab:        "Tab",
+		gocui.KeyBackspace:  "BSpace",
+		gocui.KeyBackspace2: "BSpace",
+		gocui.KeyArrowLeft:  "Left",
+		gocui.KeyArrowRight: "Right",
+	}
+	for gKey, tmuxKey := range fwdSpecialKeys {
+		tk := tmuxKey
+		if err := a.gui.SetKeybinding("main", gKey, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+			if a.fullScreen && !a.hasPopup() {
+				a.forwardSpecialKey(tk)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
 
 	return nil

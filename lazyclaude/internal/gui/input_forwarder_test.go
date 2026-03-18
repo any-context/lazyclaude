@@ -58,6 +58,47 @@ func TestFullScreen_ForwardsKeys(t *testing.T) {
 	assert.Equal(t, []string{"h"}, fwd.Keys())
 }
 
+func TestFullScreen_ForwardsSpecialKey(t *testing.T) {
+	app, err := gui.NewAppHeadless(gui.ModeMain, 80, 24)
+	require.NoError(t, err)
+
+	mock := &mockSessionProvider{
+		sessions: []gui.SessionItem{
+			{ID: "s1", Name: "test", Status: "Running", TmuxWindow: "@0"},
+		},
+	}
+	app.SetSessions(mock)
+
+	fwd := &gui.MockInputForwarder{}
+	app.SetInputForwarder(fwd)
+	app.EnterFullScreenForTest("s1")
+
+	app.ForwardSpecialKeyForTest("Enter")
+	assert.Equal(t, []string{"Enter"}, fwd.Keys())
+}
+
+func TestFullScreen_ExistingKeysForwardInFullMode(t *testing.T) {
+	app, err := gui.NewAppHeadless(gui.ModeMain, 80, 24)
+	require.NoError(t, err)
+
+	mock := &mockSessionProvider{
+		sessions: []gui.SessionItem{
+			{ID: "s1", Name: "test", Status: "Running", TmuxWindow: "@0"},
+		},
+	}
+	app.SetSessions(mock)
+
+	fwd := &gui.MockInputForwarder{}
+	app.SetInputForwarder(fwd)
+	app.EnterFullScreenForTest("s1")
+
+	// j in full mode should forward, not move cursor
+	cursorBefore := app.CursorForTest()
+	app.ForwardKeyForTest('j')
+	assert.Equal(t, cursorBefore, app.CursorForTest(), "cursor should not change in full mode")
+	assert.Equal(t, []string{"j"}, fwd.Keys())
+}
+
 func TestFullScreen_PopupBlocksForwarding(t *testing.T) {
 	app, err := gui.NewAppHeadless(gui.ModeMain, 80, 24)
 	require.NoError(t, err)
