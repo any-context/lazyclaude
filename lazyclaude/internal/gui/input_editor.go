@@ -22,6 +22,7 @@ type inputEditor struct {
 var specialKeyMap = map[gocui.Key]string{
 	gocui.KeySpace:      "Space",
 	gocui.KeyTab:        "Tab",
+	gocui.KeyBacktab:    "BTab",
 	gocui.KeyBackspace:  "BSpace",
 	gocui.KeyBackspace2: "BSpace",
 	gocui.KeyArrowUp:    "Up",
