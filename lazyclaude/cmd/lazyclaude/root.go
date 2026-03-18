@@ -83,6 +83,18 @@ func newRootCmd() *cobra.Command {
 				return fmt.Errorf("init TUI: %w", err)
 			}
 			app.SetSessions(adapter)
+
+			// Start control mode for event-driven refresh (non-fatal if tmux not ready)
+			ctrl, ctrlErr := tmux.NewControlClient("lazyclaude", "lazyclaude", func(_ string) {
+				app.NotifyOutput()
+			})
+			if ctrlErr == nil {
+				defer ctrl.Close()
+
+				// Use control mode for key forwarding (faster than subprocess per keystroke)
+				app.SetInputForwarder(&controlInputForwarder{ctrl: ctrl})
+			}
+
 			return app.Run()
 		},
 	}
@@ -210,6 +222,15 @@ func (a *sessionAdapter) Rename(id, newName string) error {
 
 func (a *sessionAdapter) PurgeOrphans() (int, error) {
 	return a.mgr.PurgeOrphans()
+}
+
+// controlInputForwarder sends keys via tmux control mode connection (no subprocess).
+type controlInputForwarder struct {
+	ctrl *tmux.ControlClient
+}
+
+func (f *controlInputForwarder) ForwardKey(target string, key string) error {
+	return f.ctrl.SendKeys(target, key)
 }
 
 func (a *sessionAdapter) PendingNotification() *notify.ToolNotification {

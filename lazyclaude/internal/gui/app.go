@@ -74,6 +74,7 @@ type App struct {
 	inputMode        InputMode                     // insert (forward) or normal (lazyclaude handles)
 	inputForwarder   InputForwarder                // forwards keys to tmux pane in full-screen
 	keyMap           *KeyMap                       // configurable key bindings
+	outputNotify     chan struct{}                 // signals pane output (from control mode)
 }
 
 // NewApp creates a new App. Call Run() to start the event loop.
@@ -87,10 +88,11 @@ func NewApp(mode AppMode) (*App, error) {
 	}
 
 	app := &App{
-		gui:        g,
-		mode:       mode,
-		contextMgr: context.NewManager(),
-		keyMap:     DefaultKeyMap(),
+		gui:          g,
+		mode:         mode,
+		contextMgr:   context.NewManager(),
+		keyMap:       DefaultKeyMap(),
+		outputNotify: make(chan struct{}, 1),
 	}
 
 	g.SetManagerFunc(app.layout)
@@ -117,10 +119,11 @@ func NewAppHeadless(mode AppMode, width, height int) (*App, error) {
 	}
 
 	app := &App{
-		gui:        g,
-		mode:       mode,
-		contextMgr: context.NewManager(),
-		keyMap:     DefaultKeyMap(),
+		gui:          g,
+		mode:         mode,
+		contextMgr:   context.NewManager(),
+		keyMap:       DefaultKeyMap(),
+		outputNotify: make(chan struct{}, 1),
 	}
 
 	g.SetManagerFunc(app.layout)
@@ -137,7 +140,8 @@ func NewAppHeadless(mode AppMode, width, height int) (*App, error) {
 func (a *App) Run() error {
 	defer a.gui.Close()
 
-	// Periodic refresh for live preview and notification polling
+	// Refresh loop: event-driven via outputNotify (from control mode),
+	// with a fallback ticker for notification polling and non-control scenarios.
 	done := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
@@ -146,9 +150,14 @@ func (a *App) Run() error {
 			select {
 			case <-done:
 				return
+			case <-a.outputNotify:
+				// Pane output detected — clear preview cache to force re-capture
+				a.previewMu.Lock()
+				a.previewCache = ""
+				a.previewMu.Unlock()
+				a.gui.Update(func(g *gocui.Gui) error { return nil })
 			case <-ticker.C:
-				// All pendingTool access inside gui.Update to avoid data race
-				// with gocui's layout/keybinding goroutine.
+				// Fallback: poll for tool notifications
 				a.gui.Update(func(g *gocui.Gui) error {
 					if a.sessions != nil && !a.hasPopup() {
 						if n := a.sessions.PendingNotification(); n != nil {
@@ -190,6 +199,15 @@ func (a *App) SetSessions(sp SessionProvider) {
 // SetInputForwarder sets the input forwarder for full-screen mode.
 func (a *App) SetInputForwarder(fwd InputForwarder) {
 	a.inputForwarder = fwd
+}
+
+// NotifyOutput signals that a pane has new output.
+// Called from the control mode callback. Non-blocking.
+func (a *App) NotifyOutput() {
+	select {
+	case a.outputNotify <- struct{}{}:
+	default: // already signaled, skip
+	}
 }
 
 // Gui returns the underlying gocui.Gui (for testing).
