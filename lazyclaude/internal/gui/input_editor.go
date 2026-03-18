@@ -18,6 +18,7 @@ type inputEditor struct {
 
 // specialKeyMap maps gocui Key constants to tmux send-keys names.
 var specialKeyMap = map[gocui.Key]string{
+	gocui.KeySpace:      " ",
 	gocui.KeyTab:        "Tab",
 	gocui.KeyBackspace:  "BSpace",
 	gocui.KeyBackspace2: "BSpace",

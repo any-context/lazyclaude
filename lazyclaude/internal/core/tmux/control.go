@@ -69,7 +69,6 @@ type ControlClient struct {
 }
 
 // NewControlClient creates and starts a control mode connection.
-// NewControlClient creates and starts a control mode connection.
 // onOutput is called (from a goroutine) when any pane produces output.
 // Pass nil if output events are not needed.
 func NewControlClient(socket, session string, onOutput func(paneID string)) (*ControlClient, error) {
@@ -113,13 +112,14 @@ func NewControlClient(socket, session string, onOutput func(paneID string)) (*Co
 // SendKeys sends keystrokes to a target pane through the control connection.
 // Much faster than spawning a subprocess for each keystroke.
 func (c *ControlClient) SendKeys(target string, keys ...string) error {
-	// Validate target and keys to prevent tmux command injection.
-	// Control mode commands are newline-delimited — reject newlines and semicolons.
-	if err := validateControlArg(target, "target"); err != nil {
+	// Validate to prevent tmux command injection.
+	// Target must not contain spaces (would split tmux args) or injection chars.
+	if err := validateControlTarget(target); err != nil {
 		return err
 	}
+	// Keys may contain spaces (e.g., " " for Space) but not injection chars.
 	for _, k := range keys {
-		if err := validateControlArg(k, "key"); err != nil {
+		if err := validateControlKey(k); err != nil {
 			return err
 		}
 	}
@@ -138,11 +138,25 @@ func (c *ControlClient) SendKeys(target string, keys ...string) error {
 }
 
 // validateControlArg rejects strings that could inject tmux commands.
-func validateControlArg(s, field string) error {
+// validateControlTarget rejects tmux command injection in target strings.
+// Spaces are blocked because they would split the command into multiple args.
+func validateControlTarget(s string) error {
+	for _, c := range s {
+		switch c {
+		case '\n', '\r', ';', ' ':
+			return fmt.Errorf("target contains unsafe character %q", c)
+		}
+	}
+	return nil
+}
+
+// validateControlKey rejects injection chars in key strings.
+// Spaces are allowed (e.g., " " for Space key).
+func validateControlKey(s string) error {
 	for _, c := range s {
 		switch c {
 		case '\n', '\r', ';':
-			return fmt.Errorf("%s contains unsafe character %q", field, c)
+			return fmt.Errorf("key contains unsafe character %q", c)
 		}
 	}
 	return nil

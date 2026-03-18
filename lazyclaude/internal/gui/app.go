@@ -152,8 +152,17 @@ func (a *App) Run() error {
 			case <-done:
 				return
 			case <-a.outputNotify:
-				// Pane output detected — mark stale to trigger re-capture.
-				// Keep old cache for display (prevents flicker during fetch).
+				// Pane output detected — debounce: drain rapid events,
+				// then mark stale once. Prevents spawning capture-pane
+				// goroutines on every keystroke.
+				drainLoop:
+				for {
+					select {
+					case <-a.outputNotify:
+					default:
+						break drainLoop
+					}
+				}
 				a.previewMu.Lock()
 				a.previewTime = time.Time{} // zero time = stale
 				a.previewMu.Unlock()
