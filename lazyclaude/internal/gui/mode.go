@@ -86,7 +86,11 @@ func (a *App) enterFullScreen(sessionID string) {
 	a.fullScreenTarget = sessionID
 	a.inputMode = ModeInsert
 	a.fullScreenScrollY = 0
+	// Force immediate re-capture with new dimensions
+	a.previewMu.Lock()
 	a.previewCache = ""
+	a.previewTime = time.Time{} // stale → triggers capture on next layout
+	a.previewMu.Unlock()
 	// Set cursor to the target session once at entry (not in layout)
 	if a.sessions != nil {
 		for i, item := range a.sessions.Sessions() {
