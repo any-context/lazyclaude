@@ -152,9 +152,10 @@ func (a *App) Run() error {
 			case <-done:
 				return
 			case <-a.outputNotify:
-				// Pane output detected — clear preview cache to force re-capture
+				// Pane output detected — mark stale to trigger re-capture.
+				// Keep old cache for display (prevents flicker during fetch).
 				a.previewMu.Lock()
-				a.previewCache = ""
+				a.previewTime = time.Time{} // zero time = stale
 				a.previewMu.Unlock()
 				a.gui.Update(func(g *gocui.Gui) error { return nil })
 			case <-ticker.C:
