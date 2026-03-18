@@ -100,6 +100,7 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 		return err
 	}
 	v3.Wrap = false
+	v3.Editable = false
 	v3.Clear()
 	// Pass preview panel inner dimensions (exclude borders)
 	previewW := maxX - splitX - 2
@@ -136,6 +137,8 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 		return err
 	}
 	v.Wrap = false
+	v.Editable = true
+	v.Editor = &inputEditor{app: a}
 	v.Clear()
 
 	// Render preview content (same pipeline as split-panel mode)

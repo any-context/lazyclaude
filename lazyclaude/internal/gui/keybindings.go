@@ -349,7 +349,7 @@ func (a *App) setupGlobalKeybindings() error {
 	}
 
 	// i: switch to insert mode (normal -> insert)
-	// In insert mode, 'i' is forwarded via the bulk ASCII loop on "main" view.
+	// In insert mode, 'i' is forwarded via inputEditor.Edit() on "main" view.
 	if err := a.gui.SetKeybinding("", km.FirstRune(ActionInsertMode), gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		if a.fullScreen && a.inputMode == ModeNormal && !a.hasPopup() {
 			a.inputMode = ModeInsert
@@ -433,39 +433,10 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// Full-screen: forward remaining printable ASCII on "main" view.
-	// Keys already handled above (q/j/k/n/d/r/R/D/y/a) have fullScreen guards.
-	for ch := rune(32); ch <= 126; ch++ {
-		c := ch
-		if err := a.gui.SetKeybinding("main", c, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-			if a.fullScreen && a.inputMode == ModeInsert && !a.hasPopup() {
-				a.forwardKey(c)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-
-	// Full-screen: forward special keys on "main" view
-	fwdSpecialKeys := map[gocui.Key]string{
-		gocui.KeyTab:        "Tab",
-		gocui.KeyBackspace:  "BSpace",
-		gocui.KeyBackspace2: "BSpace",
-		gocui.KeyArrowLeft:  "Left",
-		gocui.KeyArrowRight: "Right",
-	}
-	for gKey, tmuxKey := range fwdSpecialKeys {
-		tk := tmuxKey
-		if err := a.gui.SetKeybinding("main", gKey, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-			if a.fullScreen && a.inputMode == ModeInsert && !a.hasPopup() {
-				a.forwardSpecialKey(tk)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
+	// Full-screen insert mode: forward ALL unhandled keys via View.Editor.
+	// No for-loop registration needed — the Editor catch-all handles any key
+	// not matched by the keybindings above (KeyMap actions only).
+	// This covers: printable ASCII, Unicode, Ctrl combos, F-keys, Home/End, etc.
 
 	return nil
 }
