@@ -164,14 +164,14 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 	previewH := maxY - 3
 	a.renderPreview(v, items, previewW, previewH)
 
-	// Normal mode: show cursor and auto-scroll view to follow it
+	// Normal mode: show cursor with hjkl movement
 	if a.inputMode == ModeNormal {
+		g.Cursor = true
 		v.SetCursor(a.fullScreenCursorX, a.fullScreenCursorY)
-		v.Highlight = true
 	} else {
+		g.Cursor = false
 		v.SetCursor(0, 0)
 		v.SetOrigin(0, 0)
-		v.Highlight = false
 	}
 
 	// Status bar
