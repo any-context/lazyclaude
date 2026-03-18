@@ -13,7 +13,7 @@ const (
 // resolveForwardTarget returns the tmux target for key forwarding.
 // Returns empty string if forwarding should be skipped.
 func (a *App) resolveForwardTarget() string {
-	if !a.fullScreen || a.inputForwarder == nil || a.hasPopup() || a.sessions == nil {
+	if !a.fullScreen || a.inputMode != ModeInsert || a.inputForwarder == nil || a.hasPopup() || a.sessions == nil {
 		return ""
 	}
 	items := a.sessions.Sessions()
@@ -58,21 +58,12 @@ func (a *App) forwardSpecialKey(tmuxKey string) {
 
 // triggerRefreshAfterInput marks preview as stale after sending a key.
 // Rate-limited to 50ms to prevent capture-per-keystroke during fast typing.
+// Only called in insert mode (resolveForwardTarget blocks normal mode).
 func (a *App) triggerRefreshAfterInput() {
-	if a.inputMode == ModeInsert {
-		a.fullScreenScrollY = 0
-	}
+	a.fullScreenScrollY = 0
 	a.previewMu.Lock()
-	// Normal mode: always refresh (infrequent keys, user expects immediate feedback)
-	// Insert mode: rate-limit to 50ms (fast typing, batch captures)
-	if a.inputMode == ModeNormal {
-		if !a.previewBusy {
-			a.previewTime = time.Time{}
-		}
-	} else {
-		if !a.previewBusy && time.Since(a.previewTime) > 50*time.Millisecond {
-			a.previewTime = time.Time{}
-		}
+	if !a.previewBusy && time.Since(a.previewTime) > 50*time.Millisecond {
+		a.previewTime = time.Time{}
 	}
 	a.previewMu.Unlock()
 }
