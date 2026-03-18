@@ -303,7 +303,8 @@ func cleanSessionCommands() [][]string {
 		{"set-option", "remain-on-exit", "on"},
 		{"unbind-key", "-a", "-T", "prefix"},
 		{"unbind-key", "-a", "-T", "root"},
-		{"unbind-key", "-a", "-T", "copy-mode"},
+		// copy-mode keybindings preserved for normal mode scrollback navigation
+		{"set-option", "mode-keys", "vi"},
 	}
 }
 
