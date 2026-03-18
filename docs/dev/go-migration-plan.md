@@ -1704,7 +1704,7 @@ P0 ─┬─→ P1 ─┬─→ P2 ──────────┐
 - [x] P2.3 JSON-RPC 2.0 (パース + バージョン検証)
 - [x] P2.4 MCP ハンドラ (initialize, ide_connected, openDiff)
 - [x] P2.5 接続状態 + PendingStore (TTL 付き)
-- [ ] P2.6 popup サイズ計算 + `lazyclaude diff` 自動起動 → P7 で実装
+- [ ] P2.6 popup 自動起動 → P5.7 で実装
 - [x] P2.7 IDE lock ファイル管理
 - [x] P2.8 統合テスト (実 WebSocket 接続)
 
