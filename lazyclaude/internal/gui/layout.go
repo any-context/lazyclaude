@@ -236,7 +236,10 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 	cache := a.previewCache
 	cachedCursor := a.previewCursor
 	stale := time.Since(a.previewTime) > 500*time.Millisecond
-	needFetch := !a.previewBusy && (a.previewCursor != a.cursor || a.previewCache == "" || stale)
+	// Only fetch if: not busy, AND (cursor changed OR cache is stale).
+	// Do NOT use previewCache=="" as a trigger — empty capture results
+	// (Claude Code starting up) would cause a tight fetch loop.
+	needFetch := !a.previewBusy && (a.previewCursor != a.cursor || stale)
 	if needFetch {
 		a.previewBusy = true
 	}
@@ -255,7 +258,6 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 			a.previewBusy = false
 			a.previewTime = time.Now()
 			a.previewMu.Unlock()
-			// Trigger immediate re-render with new cache (don't wait for 500ms ticker)
 			a.gui.Update(func(g *gocui.Gui) error { return nil })
 		}()
 	}

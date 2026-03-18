@@ -1,5 +1,7 @@
 package gui
 
+import "time"
+
 // InputMode controls key handling in full-screen mode (vim-like).
 type InputMode int
 
@@ -36,22 +38,33 @@ func (a *App) resolveForwardTarget() string {
 }
 
 // forwardKey sends a rune key to the Claude Code pane.
-// Synchronous — control mode stdin write is ~μs, subprocess fallback is ~5ms.
 func (a *App) forwardKey(ch rune) {
 	target := a.resolveForwardTarget()
 	if target == "" {
 		return
 	}
 	a.inputForwarder.ForwardKey(target, RuneToTmuxKey(ch))
+	a.triggerRefreshAfterInput()
 }
 
-// forwardSpecialKey sends a named special key (Enter, Tab, Up, Down, etc.).
 func (a *App) forwardSpecialKey(tmuxKey string) {
 	target := a.resolveForwardTarget()
 	if target == "" {
 		return
 	}
 	a.inputForwarder.ForwardKey(target, tmuxKey)
+	a.triggerRefreshAfterInput()
+}
+
+// triggerRefreshAfterInput marks preview as stale after sending a key.
+// When control mode is connected, %output events handle this.
+// Without control mode, this ensures immediate display updates.
+func (a *App) triggerRefreshAfterInput() {
+	a.previewMu.Lock()
+	if !a.previewBusy {
+		a.previewTime = time.Time{}
+	}
+	a.previewMu.Unlock()
 }
 
 // scrollDown moves the full-screen scroll offset down by one line.

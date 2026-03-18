@@ -76,6 +76,7 @@ type App struct {
 	keyMap             *KeyMap                       // configurable key bindings
 	outputNotify       chan struct{}                 // signals pane output (from control mode)
 	fullScreenScrollY  int                          // scroll offset in normal mode
+	onSessionCreated   func()                       // called after first session is created
 }
 
 // NewApp creates a new App. Call Run() to start the event loop.
@@ -152,10 +153,11 @@ func (a *App) Run() error {
 			case <-done:
 				return
 			case <-a.outputNotify:
-				// Pane output detected — mark stale to trigger re-capture.
-				// Channel is buffered(1), so rapid events are already coalesced.
 				a.previewMu.Lock()
-				a.previewTime = time.Time{}
+				busy := a.previewBusy
+				if !busy {
+					a.previewTime = time.Time{}
+				}
 				a.previewMu.Unlock()
 				a.gui.Update(func(g *gocui.Gui) error { return nil })
 			case <-ticker.C:
@@ -201,6 +203,20 @@ func (a *App) SetSessions(sp SessionProvider) {
 // SetInputForwarder sets the input forwarder for full-screen mode.
 func (a *App) SetInputForwarder(fwd InputForwarder) {
 	a.inputForwarder = fwd
+}
+
+// SetOnSessionCreated sets a callback for when the first session is created.
+func (a *App) SetOnSessionCreated(fn func()) {
+	a.onSessionCreated = fn
+}
+
+// NotifySessionCreated triggers the session-created callback once.
+func (a *App) NotifySessionCreated() {
+	if a.onSessionCreated != nil {
+		fn := a.onSessionCreated
+		a.onSessionCreated = nil // fire once
+		go fn()
+	}
 }
 
 // NotifyOutput signals that a pane has new output.

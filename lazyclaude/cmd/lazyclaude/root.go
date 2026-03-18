@@ -89,7 +89,17 @@ func newRootCmd() *cobra.Command {
 			}
 			app.SetInputForwarder(fwd)
 
-			// Try control mode for event-driven refresh (non-fatal if tmux not ready)
+			// Connect control mode for event-driven refresh + fast key forwarding.
+			// If tmux session doesn't exist yet, defer until first session is created.
+			connectControl := func() {
+				c, err := tmux.NewControlClient("lazyclaude", "lazyclaude", func(_ string) {
+					app.NotifyOutput()
+				})
+				if err == nil {
+					fwd.SetControl(c)
+				}
+			}
+
 			ctrl, ctrlErr := tmux.NewControlClient("lazyclaude", "lazyclaude", func(_ string) {
 				app.NotifyOutput()
 			})
@@ -97,20 +107,11 @@ func newRootCmd() *cobra.Command {
 				defer ctrl.Close()
 				fwd.SetControl(ctrl)
 			} else {
-				// Retry control mode in background after sessions are created
-				go func() {
-					ticker := time.NewTicker(2 * time.Second)
-					defer ticker.Stop()
-					for range ticker.C {
-						c, err := tmux.NewControlClient("lazyclaude", "lazyclaude", func(_ string) {
-							app.NotifyOutput()
-						})
-						if err == nil {
-							fwd.SetControl(c)
-							return
-						}
-					}
-				}()
+				// Connect after first session is created (no polling)
+				app.SetOnSessionCreated(func() {
+					time.Sleep(100 * time.Millisecond) // brief wait for tmux session to initialize
+					connectControl()
+				})
 			}
 
 			return app.Run()
@@ -252,10 +253,11 @@ func (f *fallbackInputForwarder) ForwardKey(target string, key string) error {
 		if err := f.ctrl.SendKeys(target, key); err == nil {
 			return nil
 		}
-		// Control mode broken — disable it, use subprocess only
 		f.ctrl = nil
 	}
-	return f.fallback.ForwardKey(target, key)
+	// Subprocess path: run async to avoid blocking gocui event loop (~5ms per call)
+	go f.fallback.ForwardKey(target, key)
+	return nil
 }
 
 func (f *fallbackInputForwarder) SetControl(ctrl *tmux.ControlClient) {
