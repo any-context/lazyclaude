@@ -106,6 +106,22 @@ Current dialog:
 			expected: 2,
 		},
 		{
+			name: "real Claude Bash permission dialog (2-option)",
+			input: ` Bash command
+
+   for i in $(seq 1 10); do echo "line $i"; done && ls /tmp && ps aux | head -5 && echo "done"
+   Long shell script with loop, ls, ps
+
+ Command contains $() command substitution
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+
+ Esc to cancel · Tab to amend · ctrl+e to explain`,
+			expected: 2,
+		},
+		{
 			name: "4-option dialog",
 			input: `❯ 1) first
   2) second
