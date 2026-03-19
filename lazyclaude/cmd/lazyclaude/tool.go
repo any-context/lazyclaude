@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/KEMSHlM/lazyclaude/internal/core/config"
+	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 	"github.com/KEMSHlM/lazyclaude/internal/gui"
+	"github.com/KEMSHlM/lazyclaude/internal/gui/choice"
 	"github.com/KEMSHlM/lazyclaude/internal/gui/presentation"
 	"github.com/jesseduffield/gocui"
 	"github.com/spf13/cobra"
@@ -14,6 +17,7 @@ import (
 
 func newToolCmd() *cobra.Command {
 	var window string
+	var sendKeys bool
 
 	cmd := &cobra.Command{
 		Use:   "tool",
@@ -30,16 +34,17 @@ func newToolCmd() *cobra.Command {
 				toolInput = "{}"
 			}
 
-			return runToolPopup(window, toolName, toolInput, toolCWD)
+			return runToolPopup(window, toolName, toolInput, toolCWD, sendKeys)
 		},
 	}
 
 	cmd.Flags().StringVar(&window, "window", "", "tmux window name")
+	cmd.Flags().BoolVar(&sendKeys, "send-keys", false, "send choice key to Claude pane on exit")
 
 	return cmd
 }
 
-func runToolPopup(window, toolName, toolInput, toolCWD string) error {
+func runToolPopup(window, toolName, toolInput, toolCWD string, sendKeys bool) error {
 	td := presentation.ParseToolInput(toolName, toolInput, toolCWD)
 	bodyLines := presentation.FormatToolLines(td)
 
@@ -49,7 +54,7 @@ func runToolPopup(window, toolName, toolInput, toolCWD string) error {
 	}
 	defer g.Close()
 
-	choice := gui.ChoiceCancel
+	choiceVal := gui.ChoiceCancel
 
 	g.SetManagerFunc(func(g *gocui.Gui) error {
 		maxX, maxY := g.Size()
@@ -79,7 +84,7 @@ func runToolPopup(window, toolName, toolInput, toolCWD string) error {
 
 	makeChoice := func(c gui.Choice) func(*gocui.Gui, *gocui.View) error {
 		return func(g *gocui.Gui, v *gocui.View) error {
-			choice = c
+			choiceVal = c
 			return gocui.ErrQuit
 		}
 	}
@@ -112,8 +117,16 @@ func runToolPopup(window, toolName, toolInput, toolCWD string) error {
 		if err := os.MkdirAll(paths.RuntimeDir, 0o700); err != nil {
 			return fmt.Errorf("create runtime dir: %w", err)
 		}
-		if err := gui.WriteChoiceFile(paths, window, choice); err != nil {
+		if err := gui.WriteChoiceFile(paths, window, choiceVal); err != nil {
 			return fmt.Errorf("write choice: %w", err)
+		}
+	}
+
+	// Send the choice key directly to Claude Code's pane
+	if sendKeys && window != "" && choiceVal != gui.ChoiceCancel {
+		client := tmux.NewExecClient()
+		if err := choice.SendToPane(context.Background(), client, window, choiceVal); err != nil {
+			fmt.Fprintf(os.Stderr, "send-keys: %v\n", err)
 		}
 	}
 

@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/KEMSHlM/lazyclaude/internal/core/config"
+	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 	"github.com/KEMSHlM/lazyclaude/internal/gui"
+	"github.com/KEMSHlM/lazyclaude/internal/gui/choice"
 	"github.com/KEMSHlM/lazyclaude/internal/gui/presentation"
 	"github.com/jesseduffield/gocui"
 	"github.com/spf13/cobra"
@@ -15,6 +18,7 @@ import (
 
 func newDiffCmd() *cobra.Command {
 	var window, oldFile, newFile string
+	var sendKeys bool
 
 	cmd := &cobra.Command{
 		Use:   "diff",
@@ -23,18 +27,19 @@ func newDiffCmd() *cobra.Command {
 			if oldFile == "" || newFile == "" {
 				return fmt.Errorf("--old and --new are required")
 			}
-			return runDiffPopup(window, oldFile, newFile)
+			return runDiffPopup(window, oldFile, newFile, sendKeys)
 		},
 	}
 
 	cmd.Flags().StringVar(&window, "window", "", "tmux window name")
 	cmd.Flags().StringVar(&oldFile, "old", "", "old file path")
 	cmd.Flags().StringVar(&newFile, "new", "", "new file contents path")
+	cmd.Flags().BoolVar(&sendKeys, "send-keys", false, "send choice key to Claude pane on exit")
 
 	return cmd
 }
 
-func runDiffPopup(window, oldFile, newFile string) error {
+func runDiffPopup(window, oldFile, newFile string, sendKeys bool) error {
 	// Generate diff using git diff
 	diffOutput, err := generateDiff(oldFile, newFile)
 	if err != nil {
@@ -55,7 +60,7 @@ func runDiffPopup(window, oldFile, newFile string) error {
 	defer g.Close()
 
 	scrollY := 0
-	choice := gui.ChoiceCancel
+	choiceVal := gui.ChoiceCancel
 
 	g.SetManagerFunc(func(g *gocui.Gui) error {
 		maxX, maxY := g.Size()
@@ -115,7 +120,7 @@ func runDiffPopup(window, oldFile, newFile string) error {
 
 	makeChoice := func(c gui.Choice) func(*gocui.Gui, *gocui.View) error {
 		return func(g *gocui.Gui, v *gocui.View) error {
-			choice = c
+			choiceVal = c
 			return gocui.ErrQuit
 		}
 	}
@@ -180,8 +185,16 @@ func runDiffPopup(window, oldFile, newFile string) error {
 		if err := os.MkdirAll(paths.RuntimeDir, 0o700); err != nil {
 			return fmt.Errorf("create runtime dir: %w", err)
 		}
-		if err := gui.WriteChoiceFile(paths, window, choice); err != nil {
+		if err := gui.WriteChoiceFile(paths, window, choiceVal); err != nil {
 			return fmt.Errorf("write choice: %w", err)
+		}
+	}
+
+	// Send the choice key directly to Claude Code's pane
+	if sendKeys && window != "" && choiceVal != gui.ChoiceCancel {
+		client := tmux.NewExecClient()
+		if err := choice.SendToPane(context.Background(), client, window, choiceVal); err != nil {
+			fmt.Fprintf(os.Stderr, "send-keys: %v\n", err)
 		}
 	}
 
