@@ -25,6 +25,13 @@ test-ssh:
 	docker compose -f docker-compose.ssh.yml run --rm local
 	docker compose -f docker-compose.ssh.yml down
 
+## SSH + real Claude Code E2E (requires Docker Compose + .env with CLAUDE_CODE_OAUTH_TOKEN)
+test-ssh-e2e:
+	docker compose -f docker-compose.ssh.yml build
+	docker compose -f docker-compose.ssh.yml run --rm local \
+		"ssh-keyscan -H remote >> /root/.ssh/known_hosts 2>/dev/null && bash tests/integration/scripts/verify_remote_popup.sh lazyclaude"
+	docker compose -f docker-compose.ssh.yml down
+
 lint:
 	golangci-lint run ./...
 

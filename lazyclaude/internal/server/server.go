@@ -9,7 +9,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -250,16 +252,26 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 
 	window := s.state.WindowForPID(req.PID)
 	if window == "" {
-		// Try to resolve
+		// Try local tmux PID resolution
 		w2, err := tmux.FindWindowForPid(r.Context(), s.tmux, req.PID)
-		if err != nil || w2 == nil {
-			http.Error(w, "window not found", http.StatusNotFound)
-			return
+		if err == nil && w2 != nil {
+			window = w2.ID
 		}
-		window = w2.ID
-		// Cache for future lookups
-		s.state.SetConn(fmt.Sprintf("notify-%d", req.PID), &ConnState{PID: req.PID, Window: window})
 	}
+	if window == "" {
+		// Fallback for remote SSH sessions: read pending window file
+		pending := filepath.Join(s.config.RuntimeDir, pendingWindowFile)
+		if data, err := os.ReadFile(pending); err == nil {
+			window = strings.TrimSpace(string(data))
+			s.log.Printf("notify: using pending remote window %q for pid %d", window, req.PID)
+		}
+	}
+	if window == "" {
+		http.Error(w, "window not found", http.StatusNotFound)
+		return
+	}
+	// Cache for future lookups from same PID
+	s.state.SetConn(fmt.Sprintf("notify-%d", req.PID), &ConnState{PID: req.PID, Window: window})
 
 	s.log.Printf("notify: type=%s pid=%d window=%s tool=%s", req.Type, req.PID, window, req.ToolName)
 
