@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Paths holds all filesystem paths used by lazyclaude.
@@ -41,6 +42,27 @@ func DefaultPaths() Paths {
 		p.IDEDir = v
 	}
 	return p
+}
+
+// PopupMode controls how tool permission popups are displayed.
+type PopupMode int
+
+const (
+	PopupModeAuto    PopupMode = iota // display-popup if tmux available, overlay fallback
+	PopupModeTmux                     // always display-popup
+	PopupModeOverlay                  // always gocui overlay (P5 behavior)
+)
+
+// ParsePopupMode parses a string into a PopupMode. Defaults to Auto.
+func ParsePopupMode(s string) PopupMode {
+	switch strings.ToLower(s) {
+	case "tmux":
+		return PopupModeTmux
+	case "overlay":
+		return PopupModeOverlay
+	default:
+		return PopupModeAuto
+	}
 }
 
 // TestPaths returns isolated paths under a temporary directory.

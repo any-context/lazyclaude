@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KEMSHlM/lazyclaude/internal/core/config"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
 	"github.com/jesseduffield/gocui"
 )
@@ -80,6 +81,12 @@ type App struct {
 	fullScreenScrollY  int                          // mouse scroll offset
 	onTick             func()                       // called every ticker cycle (control mode health check)
 	keyQueue           chan keyCmd                   // serial key forwarding queue (preserves order)
+	popupMode          config.PopupMode             // how popups are displayed (auto/tmux/overlay)
+}
+
+// SetPopupMode sets the popup display mode.
+func (a *App) SetPopupMode(mode config.PopupMode) {
+	a.popupMode = mode
 }
 
 // NewApp creates a new App. Call Run() to start the event loop.
@@ -172,9 +179,10 @@ func (a *App) Run() error {
 				if a.onTick != nil {
 					a.onTick()
 				}
-				// Poll for tool notifications (supports multiple queued)
+				// Poll for tool notifications (overlay mode only).
+				// In tmux mode, the server handles popups via display-popup.
 				a.gui.Update(func(g *gocui.Gui) error {
-					if a.sessions != nil {
+					if a.sessions != nil && a.popupMode != config.PopupModeTmux {
 						for _, n := range a.sessions.PendingNotifications() {
 							a.showToolPopup(n)
 						}

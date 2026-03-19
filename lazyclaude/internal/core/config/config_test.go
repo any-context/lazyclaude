@@ -82,6 +82,26 @@ func TestDefaultPaths_EnvOverride_RuntimeDir(t *testing.T) {
 	assert.Equal(t, filepath.Join(tmp, "custom-runtime"), p.RuntimeDir)
 }
 
+func TestParsePopupMode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input    string
+		expected config.PopupMode
+	}{
+		{"auto", config.PopupModeAuto},
+		{"tmux", config.PopupModeTmux},
+		{"overlay", config.PopupModeOverlay},
+		{"AUTO", config.PopupModeAuto},
+		{"", config.PopupModeAuto},
+		{"invalid", config.PopupModeAuto},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.expected, config.ParsePopupMode(tt.input))
+		})
+	}
+}
+
 func TestDefaultPaths_EnvOverride_IDEDir(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("LAZYCLAUDE_IDE_DIR", filepath.Join(tmp, "custom-ide"))
