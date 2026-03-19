@@ -69,11 +69,49 @@ Some other text with number 99`,
 			expected: 2,
 		},
 		{
-			name: "unicode marker",
+			name: "unicode marker ❯",
 			input: ` ❯ 1. Yes
    2. Yes, allow all edits during this session (shift+tab)
    3. No`,
 			expected: 3,
+		},
+		{
+			name: "unicode marker ➜",
+			input: ` ➜ 1. Yes
+   2. No`,
+			expected: 2,
+		},
+		// JS parity: stale output before the current dialog
+		{
+			name: "stale output then current dialog (uses last block)",
+			input: `Previous output
+  1. Old yes
+  2. Old no
+  3. Old always
+
+Current dialog:
+  1. Yes
+  2. No`,
+			expected: 2, // last consecutive block starting from 1
+		},
+		{
+			name: "non-sequential numbers ignored",
+			input: `  1. Yes
+  3. No`,
+			expected: 1, // 3 is non-sequential (no 2), so block is just [1]
+		},
+		{
+			name: "ANSI escape codes in options",
+			input: "  \x1b[1m❯\x1b[0m 1. Yes\n   2. No",
+			expected: 2,
+		},
+		{
+			name: "4-option dialog",
+			input: `❯ 1) first
+  2) second
+  3) third
+  4) fourth`,
+			expected: 4,
 		},
 	}
 
