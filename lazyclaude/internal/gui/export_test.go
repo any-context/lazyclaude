@@ -42,17 +42,17 @@ func (a *App) ExitFullScreenForTest() {
 
 // IsFullScreenForTest returns full-screen state for testing.
 func (a *App) IsFullScreenForTest() bool {
-	return a.fullScreen
+	return a.state.IsFullScreen()
 }
 
-// InputModeForTest returns the current input mode.
-func (a *App) InputModeForTest() InputMode {
-	return a.inputMode
+// StateForTest returns the current AppState.
+func (a *App) StateForTest() AppState {
+	return a.state
 }
 
-// SetInputModeForTest sets the input mode for testing.
-func (a *App) SetInputModeForTest(mode InputMode) {
-	a.setInputMode(mode)
+// SetStateForTest sets the AppState for testing.
+func (a *App) SetStateForTest(s AppState) {
+	a.transition(s)
 }
 
 // ForwardKeyForTest simulates forwarding a key in full-screen mode.
@@ -81,7 +81,6 @@ func (a *App) drainKeyQueue() {
 		}
 	}
 }
-
 
 // PollNotificationForTest simulates what the ticker does: check for pending
 // notifications and show popup. For testing without running the event loop.

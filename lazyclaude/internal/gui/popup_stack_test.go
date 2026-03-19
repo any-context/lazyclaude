@@ -12,9 +12,13 @@ func makeNotif(tool, window string) *notify.ToolNotification {
 	return &notify.ToolNotification{ToolName: tool, Window: window}
 }
 
+func newTestApp() *App {
+	return &App{popups: NewPopupController(nil)}
+}
+
 func TestPopupStack_PushAndCount(t *testing.T) {
 	t.Parallel()
-	app := &App{}
+	app := newTestApp()
 	assert.Equal(t, 0, app.popupCount())
 	assert.False(t, app.hasPopup())
 
@@ -28,7 +32,7 @@ func TestPopupStack_PushAndCount(t *testing.T) {
 
 func TestPopupStack_ActivePopup(t *testing.T) {
 	t.Parallel()
-	app := &App{}
+	app := newTestApp()
 	app.pushPopup(makeNotif("Bash", "@0"))
 	app.pushPopup(makeNotif("Write", "@1"))
 
@@ -39,7 +43,7 @@ func TestPopupStack_ActivePopup(t *testing.T) {
 
 func TestPopupStack_DismissRemovesActive(t *testing.T) {
 	t.Parallel()
-	app := &App{}
+	app := newTestApp()
 	app.pushPopup(makeNotif("Bash", "@0"))
 	app.pushPopup(makeNotif("Write", "@1"))
 
@@ -50,7 +54,7 @@ func TestPopupStack_DismissRemovesActive(t *testing.T) {
 
 func TestPopupStack_FocusCycle(t *testing.T) {
 	t.Parallel()
-	app := &App{}
+	app := newTestApp()
 	app.pushPopup(makeNotif("Bash", "@0"))
 	app.pushPopup(makeNotif("Write", "@1"))
 	app.pushPopup(makeNotif("Edit", "@2"))
@@ -63,7 +67,6 @@ func TestPopupStack_FocusCycle(t *testing.T) {
 	app.popupFocusPrev()
 	assert.Equal(t, "Bash", app.activePopup().ToolName)
 
-	// Wrap
 	app.popupFocusPrev()
 	assert.Equal(t, "Edit", app.activePopup().ToolName)
 
@@ -71,32 +74,21 @@ func TestPopupStack_FocusCycle(t *testing.T) {
 	assert.Equal(t, "Bash", app.activePopup().ToolName)
 }
 
-func TestPopupStack_Suspend(t *testing.T) {
-	t.Parallel()
-	app := &App{}
-	app.pushPopup(makeNotif("Bash", "@0"))
-	app.pushPopup(makeNotif("Write", "@1"))
-
-	app.suspendActivePopup()
-	assert.Equal(t, 1, app.visiblePopupCount())
-	assert.Equal(t, "Bash", app.activePopup().ToolName)
-}
-
 func TestPopupStack_SuspendAll_HasPopupFalse(t *testing.T) {
 	t.Parallel()
-	app := &App{}
+	app := newTestApp()
 	app.pushPopup(makeNotif("Bash", "@0"))
-	app.suspendActivePopup()
+	app.suspendAllPopups()
 
-	assert.False(t, app.hasPopup(), "hasPopup should be false when all suspended")
-	assert.Equal(t, 1, app.popupCount(), "popupCount includes suspended")
+	assert.False(t, app.hasPopup())
+	assert.Equal(t, 1, app.popupCount())
 }
 
 func TestPopupStack_Unsuspend(t *testing.T) {
 	t.Parallel()
-	app := &App{}
+	app := newTestApp()
 	app.pushPopup(makeNotif("Bash", "@0"))
-	app.suspendActivePopup()
+	app.suspendAllPopups()
 
 	app.unsuspendAll()
 	assert.True(t, app.hasPopup())
@@ -105,25 +97,13 @@ func TestPopupStack_Unsuspend(t *testing.T) {
 
 func TestPopupStack_DismissOnEmpty(t *testing.T) {
 	t.Parallel()
-	app := &App{}
-	app.dismissActivePopup() // should not panic
+	app := newTestApp()
+	app.dismissActivePopup()
 	assert.Equal(t, 0, app.popupCount())
-}
-
-func TestPopupStack_CascadeViewNames(t *testing.T) {
-	t.Parallel()
-	app := &App{}
-	app.pushPopup(makeNotif("Bash", "@0"))
-	app.pushPopup(makeNotif("Write", "@1"))
-	app.pushPopup(makeNotif("Edit", "@2"))
-
-	names := app.popupViewNames()
-	assert.Equal(t, []string{"tool-popup-0", "tool-popup-1", "tool-popup-2"}, names)
 }
 
 func TestPopupStack_CascadeOffset(t *testing.T) {
 	t.Parallel()
-	// Each popup should be offset from the previous
 	x0, y0 := 10, 5
 	for i := 0; i < 3; i++ {
 		cx, cy := popupCascadeOffset(x0, y0, i)
@@ -134,7 +114,7 @@ func TestPopupStack_CascadeOffset(t *testing.T) {
 
 func TestPopupStack_ActiveEntry(t *testing.T) {
 	t.Parallel()
-	app := &App{}
+	app := newTestApp()
 	app.pushPopup(makeNotif("Bash", "@0"))
 
 	entry := app.activeEntry()

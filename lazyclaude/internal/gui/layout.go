@@ -34,7 +34,7 @@ func (a *App) layout(g *gocui.Gui) error {
 
 	switch a.mode {
 	case ModeMain:
-		if a.fullScreen {
+		if a.state.IsFullScreen() {
 			if err := a.layoutFullScreen(g, maxX, maxY); err != nil {
 				return err
 			}
@@ -177,7 +177,7 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 	}
 	v2.Frame = false
 	v2.Clear()
-	if a.inputMode == ModeInsert {
+	if a.state == StateFullInsert {
 		fmt.Fprintf(v2, " INSERT | %s | Ctrl+\\: normal mode", items[targetIdx].Name)
 	} else {
 		fmt.Fprintf(v2, " NORMAL | %s | i: insert  q: exit  j/k: scroll", items[targetIdx].Name)
@@ -274,7 +274,7 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 
 	if cache != "" && cachedCursor == a.cursor {
 		fmt.Fprint(v, cache)
-		if a.fullScreen {
+		if a.state.IsFullScreen() {
 			v.SetCursor(a.paneCursorX, a.paneCursorY)
 		}
 		return

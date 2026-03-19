@@ -79,19 +79,18 @@ var specialKeyMap = map[gocui.Key]string{
 // Handles both insert mode (forward to Claude Code) and normal mode
 // (q exits full-screen, i returns to insert, other keys are no-op).
 func (e *inputEditor) Edit(v *gocui.View, key gocui.Key, ch rune, mod gocui.Modifier) bool {
-	if !e.app.fullScreen || e.app.hasPopup() {
+	if !e.app.state.IsFullScreen() || e.app.hasPopup() {
 		return false
 	}
 
 	// Normal mode: q exits full-screen, i returns to insert.
-	// All other keys are no-op (future implementation per issue).
-	if e.app.inputMode == ModeNormal {
+	if e.app.state == StateFullNormal {
 		switch ch {
 		case 'q':
 			e.app.exitFullScreen()
 			return true
 		case 'i':
-			e.app.setInputMode(ModeInsert)
+			e.app.transition(StateFullInsert)
 			return true
 		}
 		return true // consume key (no-op)

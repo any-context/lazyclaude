@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KEMSHlM/lazyclaude/internal/gui/context"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
 	"github.com/jesseduffield/gocui"
 )
@@ -60,7 +59,6 @@ type PreviewResult struct {
 type App struct {
 	gui              *gocui.Gui
 	mode             AppMode
-	contextMgr       *context.Manager
 	activeTabIdx     int
 	sessions         SessionProvider
 	cursor           int // selected session index
@@ -73,13 +71,11 @@ type App struct {
 	previewTime      time.Time // last fetch timestamp
 	lastWidth        int
 	lastHeight       int
-	popupStack       []popupEntry                // popup stack (last = active)
-	popupFocusIdx    int                         // focused popup index
-	fullScreen       bool                         // true when in full-screen mode
+	popups           *PopupController              // popup stack management
+	state            AppState                     // current UI state (Main, FullInsert, FullNormal)
 	fullScreenTarget string                        // session ID for full-screen view
-	inputMode        InputMode                     // insert (forward) or normal (lazyclaude handles)
 	inputForwarder   InputForwarder                // forwards keys to tmux pane in full-screen
-	keyMap             *KeyMap                       // configurable key bindings
+	keyRegistry        *KeyRegistry                   // single source of truth for key bindings
 	outputNotify       chan struct{}                 // signals pane output (from control mode)
 	fullScreenScrollY  int                          // mouse scroll offset
 	onTick             func()                       // called every ticker cycle (control mode health check)
@@ -99,8 +95,8 @@ func NewApp(mode AppMode) (*App, error) {
 	app := &App{
 		gui:          g,
 		mode:         mode,
-		contextMgr:   context.NewManager(),
-		keyMap:       DefaultKeyMap(),
+		popups:       NewPopupController(nil),
+		keyRegistry:  DefaultKeyRegistry(),
 		outputNotify: make(chan struct{}, 1),
 		keyQueue:     make(chan keyCmd, 64),
 	}
@@ -131,8 +127,8 @@ func NewAppHeadless(mode AppMode, width, height int) (*App, error) {
 	app := &App{
 		gui:          g,
 		mode:         mode,
-		contextMgr:   context.NewManager(),
-		keyMap:       DefaultKeyMap(),
+		popups:       NewPopupController(nil),
+		keyRegistry:  DefaultKeyRegistry(),
 		outputNotify: make(chan struct{}, 1),
 		keyQueue:     make(chan keyCmd, 64),
 	}
@@ -203,11 +199,6 @@ func (a *App) Run() error {
 // Mode returns the current app mode.
 func (a *App) Mode() AppMode {
 	return a.mode
-}
-
-// ContextMgr returns the context manager.
-func (a *App) ContextMgr() *context.Manager {
-	return a.contextMgr
 }
 
 // SetSessions sets the session provider for the main screen.

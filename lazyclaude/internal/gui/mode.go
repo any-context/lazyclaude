@@ -2,18 +2,10 @@ package gui
 
 import "time"
 
-// InputMode controls key handling in full-screen mode (vim-like).
-type InputMode int
-
-const (
-	ModeInsert InputMode = iota // all keys forwarded to Claude Code
-	ModeNormal                  // lazyclaude handles keys (scroll, quit, popup)
-)
-
 // resolveForwardTarget returns the tmux target for key forwarding.
 // Returns empty string if forwarding should be skipped.
 func (a *App) resolveForwardTarget() string {
-	if !a.fullScreen || a.inputMode != ModeInsert || a.inputForwarder == nil || a.hasPopup() || a.sessions == nil {
+	if a.state != StateFullInsert || a.inputForwarder == nil || a.hasPopup() || a.sessions == nil {
 		return ""
 	}
 	items := a.sessions.Sessions()
@@ -68,26 +60,9 @@ func (a *App) triggerRefreshAfterInput() {
 	a.previewMu.Unlock()
 }
 
-
-// setInputMode switches between insert and normal mode.
-func (a *App) setInputMode(mode InputMode) {
-	if a.inputMode == mode {
-		return
-	}
-	a.inputMode = mode
-}
-
 func (a *App) enterFullScreen(sessionID string) {
-	a.fullScreen = true
 	a.fullScreenTarget = sessionID
-	a.inputMode = ModeInsert
-	a.fullScreenScrollY = 0
-	// Force immediate re-capture with new dimensions
-	a.previewMu.Lock()
-	a.previewCache = ""
-	a.previewTime = time.Time{} // stale → triggers capture on next layout
-	a.previewMu.Unlock()
-	// Set cursor to the target session once at entry (not in layout)
+	a.transition(StateFullInsert)
 	if a.sessions != nil {
 		for i, item := range a.sessions.Sessions() {
 			if item.ID == sessionID {
@@ -99,8 +74,6 @@ func (a *App) enterFullScreen(sessionID string) {
 }
 
 func (a *App) exitFullScreen() {
-	a.inputMode = ModeInsert
-	a.fullScreen = false
-	a.fullScreenTarget = ""
-	a.previewCache = ""
+	a.transition(StateMain)
 }
+

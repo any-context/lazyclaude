@@ -10,7 +10,7 @@ import (
 
 func TestApp_HasPopup(t *testing.T) {
 	t.Parallel()
-	app := &App{}
+	app := newTestApp()
 	assert.False(t, app.hasPopup())
 
 	app.showToolPopup(&notify.ToolNotification{
@@ -22,7 +22,7 @@ func TestApp_HasPopup(t *testing.T) {
 
 func TestApp_DismissPopup_RemovesFocusedOnly(t *testing.T) {
 	t.Parallel()
-	app := &App{}
+	app := newTestApp()
 	app.showToolPopup(&notify.ToolNotification{
 		ToolName:  "Bash",
 		Window:    "lc-1",
@@ -48,14 +48,14 @@ func TestApp_DismissPopup_RemovesFocusedOnly(t *testing.T) {
 
 func TestApp_DismissPopup_NopWhenNoPopup(t *testing.T) {
 	t.Parallel()
-	app := &App{}
+	app := newTestApp()
 	app.dismissPopup(ChoiceCancel)
 	assert.False(t, app.hasPopup())
 }
 
 func TestApp_ShowToolPopup_SetsFields(t *testing.T) {
 	t.Parallel()
-	app := &App{}
+	app := newTestApp()
 	n := &notify.ToolNotification{
 		ToolName: "Edit",
 		Input:    `{"file_path":"/tmp/test.go"}`,

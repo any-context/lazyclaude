@@ -105,25 +105,24 @@ func TestE2E_PopupStack_CascadeDisplay(t *testing.T) {
 	found := h.waitForText("stack-e2e", "no sessions", 5*time.Second)
 	require.True(t, found, "TUI should start")
 
-	// Enqueue 3 notifications
+	// Enqueue 3 notifications with spacing to ensure distinct file timestamps
 	for i := 1; i <= 3; i++ {
 		enqueueNotification(t, fmt.Sprintf("Tool%d", i), "@0")
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 
-	// Wait for popups to appear
-	found = h.waitForText("stack-e2e", "Tool", 3*time.Second)
-	require.True(t, found, "at least one popup should appear")
+	// Wait for all 3 popups to be stacked
+	found = h.waitForText("stack-e2e", "[3/3]", 5*time.Second)
+	if !found {
+		content := h.capturePane("stack-e2e")
+		t.Logf("waiting for [3/3], got:\n%s", content)
+	}
+	require.True(t, found, "stack indicator should show 3 popups")
 
 	content := h.capturePane("stack-e2e")
-
-	// All 3 popup titles should be visible (cascade)
 	assert.Contains(t, content, "Tool1", "Tool1 title should be visible in cascade")
 	assert.Contains(t, content, "Tool2", "Tool2 title should be visible in cascade")
 	assert.Contains(t, content, "Tool3", "Tool3 title should be visible in cascade")
-
-	// Stack indicator should show [3/3]
-	assert.Contains(t, content, "[3/3]", "stack indicator should show 3 popups")
 	assert.Contains(t, content, "hide", "Esc:hide should be visible")
 }
 
@@ -140,10 +139,10 @@ func TestE2E_PopupStack_ArrowKeySwitchFocus(t *testing.T) {
 
 	for i := 1; i <= 3; i++ {
 		enqueueNotification(t, fmt.Sprintf("Tool%d", i), "@0")
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 
-	found = h.waitForText("focus-e2e", "[3/3]", 3*time.Second)
+	found = h.waitForText("focus-e2e", "[3/3]", 5*time.Second)
 	require.True(t, found, "3 popups should be stacked")
 
 	// Arrow Up: focus moves from Tool3 to Tool2
@@ -188,7 +187,8 @@ func TestE2E_PopupStack_SuspendAndReopen(t *testing.T) {
 	assert.Contains(t, content, "TestTool", "popup should reappear after p")
 }
 
-// TestE2E_PopupStack_DismissAll verifies y dismisses all popups.
+// TestE2E_PopupStack_DismissAll verifies y dismisses focused popup only,
+// and Y (uppercase) dismisses all popups at once.
 func TestE2E_PopupStack_DismissAll(t *testing.T) {
 	bin := e2eBinary(t)
 	h := newTmuxHelper(t)
@@ -199,25 +199,38 @@ func TestE2E_PopupStack_DismissAll(t *testing.T) {
 	found := h.waitForText("dismiss-e2e", "no sessions", 5*time.Second)
 	require.True(t, found)
 
-	for i := 1; i <= 2; i++ {
-		enqueueNotification(t, fmt.Sprintf("DismissTool%d", i), "@0")
-		time.Sleep(10 * time.Millisecond)
-	}
+	// Enqueue 2 notifications with enough spacing for file ordering
+	enqueueNotification(t, "DismissTool1", "@0")
+	time.Sleep(50 * time.Millisecond)
+	enqueueNotification(t, "DismissTool2", "@0")
 
-	found = h.waitForText("dismiss-e2e", "DismissTool", 3*time.Second)
-	require.True(t, found)
+	// Wait until BOTH popups are visible (stack indicator [2/2])
+	found = h.waitForText("dismiss-e2e", "[2/2]", 3*time.Second)
+	if !found {
+		content := h.capturePane("dismiss-e2e")
+		t.Logf("waiting for [2/2], got:\n%s", content)
+	}
+	require.True(t, found, "both popups should be stacked")
 
 	// y to dismiss focused only (DismissTool2), DismissTool1 should remain
 	h.sendKeys("dismiss-e2e", "y")
 	time.Sleep(300 * time.Millisecond)
 	content := h.capturePane("dismiss-e2e")
 	assert.Contains(t, content, "DismissTool1", "first popup should remain after single y")
+	assert.NotContains(t, content, "DismissTool2", "second popup should be gone after y")
 
-	// y again to dismiss remaining
-	h.sendKeys("dismiss-e2e", "y")
+	// Enqueue 2 more to test Y (accept all)
+	enqueueNotification(t, "DismissTool3", "@0")
+	time.Sleep(50 * time.Millisecond)
+	enqueueNotification(t, "DismissTool4", "@0")
+	found = h.waitForText("dismiss-e2e", "DismissTool4", 3*time.Second)
+	require.True(t, found, "new popups should appear")
+
+	// Y (uppercase) to dismiss all at once
+	h.sendKeys("dismiss-e2e", "Y")
 	time.Sleep(300 * time.Millisecond)
 	content = h.capturePane("dismiss-e2e")
-	assert.NotContains(t, content, "DismissTool", "all popups gone after second y")
+	assert.NotContains(t, content, "DismissTool", "all popups gone after Y")
 	assert.NotContains(t, content, "y/a/n", "action bar should be gone")
 }
 
@@ -228,29 +241,37 @@ func TestE2E_FullScreenMode_EnterAndExit(t *testing.T) {
 	h := newTmuxHelper(t)
 	h.startSession("fs-test", 80, 24)
 
-	// Start lazyclaude, create a session, enter full-screen
 	h.sendKeys("fs-test", fmt.Sprintf("%s; sleep 999", bin), "Enter")
 
 	found := h.waitForText("fs-test", "no sessions", 5*time.Second)
 	require.True(t, found, "TUI should start")
 
-	// Create a session
+	// Create a session and wait for it to appear in the session list
 	h.sendKeys("fs-test", "n")
-	time.Sleep(2 * time.Second) // wait for session creation
+	found = h.waitForText("fs-test", "Session created", 5*time.Second)
+	if !found {
+		// Fallback: wait for the session entry with ">" cursor
+		found = h.waitForText("fs-test", ">", 3*time.Second)
+	}
+	require.True(t, found, "session should be created")
+
+	// Extra wait for tmux window to be synced
+	time.Sleep(1 * time.Second)
 
 	// Enter full-screen
 	h.sendKeys("fs-test", "Enter")
-	time.Sleep(1 * time.Second)
 
 	// Should show INSERT status bar
-	found = h.waitForText("fs-test", "INSERT", 3*time.Second)
+	found = h.waitForText("fs-test", "INSERT", 5*time.Second)
+	if !found {
+		t.Logf("expected INSERT, got:\n%s", h.capturePane("fs-test"))
+	}
 	assert.True(t, found, "full-screen should show INSERT mode")
 
 	// Ctrl+D to exit
 	h.sendKeys("fs-test", "C-d")
-	time.Sleep(500 * time.Millisecond)
 
-	// Should be back to split panel (has session now, so check for options bar)
+	// Should be back to split panel
 	found = h.waitForText("fs-test", "n: new", 3*time.Second)
 	assert.True(t, found, "should return to split panel after Ctrl+D")
 }
@@ -267,12 +288,19 @@ func TestE2E_NormalMode_SwitchAndExit(t *testing.T) {
 	found := h.waitForText("mode-test", "no sessions", 5*time.Second)
 	require.True(t, found)
 
-	// Create session and enter full-screen
+	// Create session and wait for it
 	h.sendKeys("mode-test", "n")
-	time.Sleep(2 * time.Second)
+	found = h.waitForText("mode-test", "Session created", 5*time.Second)
+	if !found {
+		found = h.waitForText("mode-test", ">", 3*time.Second)
+	}
+	require.True(t, found, "session should be created")
+	time.Sleep(1 * time.Second)
+
+	// Enter full-screen
 	h.sendKeys("mode-test", "Enter")
 
-	found = h.waitForText("mode-test", "INSERT", 3*time.Second)
+	found = h.waitForText("mode-test", "INSERT", 5*time.Second)
 	if !found {
 		t.Logf("expected INSERT, got:\n%s", h.capturePane("mode-test"))
 	}

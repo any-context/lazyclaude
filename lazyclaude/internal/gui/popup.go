@@ -15,47 +15,41 @@ import (
 const popupViewName = "tool-popup"
 const popupActionsViewName = "tool-popup-actions"
 
-// hasPopup returns true if any visible (non-suspended) popup exists.
-func (a *App) hasPopup() bool {
-	return a.visiblePopupCount() > 0
-}
-
 // showToolPopup pushes a notification onto the popup stack.
 func (a *App) showToolPopup(n *notify.ToolNotification) {
-	a.pushPopup(n)
+	a.popups.Push(n)
 }
 
 // dismissPopup sends the choice to the focused popup and removes it from the stack.
 func (a *App) dismissPopup(choice Choice) {
-	active := a.activePopup()
+	active := a.popups.ActiveNotification()
 	if active == nil {
 		return
 	}
 	window := active.Window
-	a.dismissActivePopup()
+	a.popups.DismissActive(choice)
 
 	if a.sessions != nil {
 		go func() {
-			// Ignore errors (window may have been closed)
-			a.sessions.SendChoice(window, choice)
+			_ = a.sessions.SendChoice(window, choice)
 		}()
 	}
 }
 
 // dismissAllPopups sends the choice to all popups and clears the stack.
 func (a *App) dismissAllPopups(choice Choice) {
-	if len(a.popupStack) == 0 {
+	stack := a.popups.Stack()
+	if len(stack) == 0 {
 		return
 	}
-	entries := make([]popupEntry, len(a.popupStack))
-	copy(entries, a.popupStack)
-	a.popupStack = nil
-	a.popupFocusIdx = 0
+	entries := make([]popupEntry, len(stack))
+	copy(entries, stack)
+	a.popups.DismissAll(choice)
 
 	if a.sessions != nil {
 		go func() {
 			for _, e := range entries {
-				a.sessions.SendChoice(e.notification.Window, choice)
+				_ = a.sessions.SendChoice(e.notification.Window, choice)
 			}
 		}()
 	}
@@ -63,15 +57,13 @@ func (a *App) dismissAllPopups(choice Choice) {
 
 // layoutToolPopup renders all visible popups as cascaded overlays.
 func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
-	// Clean up old popup views
 	a.cleanupPopupViews(g)
 
-	if !a.hasPopup() {
+	if !a.popups.HasVisible() {
 		g.DeleteView(popupActionsViewName)
 		return nil
 	}
 
-	// Base popup dimensions: 70% width, 60% height, centered
 	popW := maxX * 7 / 10
 	popH := maxY * 6 / 10
 	if popW < 40 {
@@ -83,11 +75,11 @@ func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
 	baseX := (maxX - popW) / 2
 	baseY := (maxY - popH) / 2
 
-	// Render each visible popup with cascade offset
 	var activeViewName string
 	visibleIdx := 0
-	for i := range a.popupStack {
-		e := &a.popupStack[i]
+	stack := a.popups.Stack()
+	for i := range stack {
+		e := &stack[i]
 		if e.suspended {
 			continue
 		}
@@ -97,7 +89,6 @@ func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
 		x1 := cx + popW
 		y1 := cy + popH - 2
 
-		// Clamp to screen
 		if x1 >= maxX {
 			x1 = maxX - 1
 		}
@@ -117,22 +108,19 @@ func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
 			a.renderToolPopup(v, e.notification)
 		}
 
-		if i == a.popupFocusIdx {
+		if i == a.popups.FocusIndex() {
 			activeViewName = viewName
 		}
 		visibleIdx++
 	}
 
-	// Bring focused popup to front
 	if activeViewName != "" {
 		g.SetViewOnTop(activeViewName)
 	}
 
-	// Actions bar for focused popup
-	focusedEntry := a.activeEntry()
+	focusedEntry := a.popups.ActiveEntry()
 	if focusedEntry != nil {
-		// Position actions bar below the focused popup
-		cx, cy := popupCascadeOffset(baseX, baseY, a.visibleIndexOf(a.popupFocusIdx))
+		cx, cy := popupCascadeOffset(baseX, baseY, a.popups.VisibleIndexOf(a.popups.FocusIndex()))
 		ay0 := cy + popH - 1
 		ay1 := ay0 + 2
 		if ay1 >= maxY {
@@ -151,7 +139,7 @@ func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
 		v2.Clear()
 		g.SetViewOnTop(popupActionsViewName)
 
-		visible := a.visiblePopupCount()
+		visible := a.popups.VisibleCount()
 		n := focusedEntry.notification
 
 		base := " y/a/n"
@@ -160,7 +148,7 @@ func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
 		}
 		base += " Esc:hide"
 		if visible > 1 {
-			base += fmt.Sprintf(" Y:all [%d/%d]", a.visibleIndexOf(a.popupFocusIdx)+1, visible)
+			base += fmt.Sprintf(" Y:all [%d/%d]", a.popups.VisibleIndexOf(a.popups.FocusIndex())+1, visible)
 		}
 		fmt.Fprint(v2, base)
 
@@ -174,9 +162,10 @@ func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
 
 // cleanupPopupViews deletes all tool-popup-N views that are no longer needed.
 func (a *App) cleanupPopupViews(g *gocui.Gui) {
+	stack := a.popups.Stack()
 	for i := 0; i < 20; i++ {
 		name := fmt.Sprintf("tool-popup-%d", i)
-		if i < len(a.popupStack) && !a.popupStack[i].suspended {
+		if i < len(stack) && !stack[i].suspended {
 			continue
 		}
 		g.DeleteView(name)
@@ -226,7 +215,6 @@ func (a *App) renderDiffPopup(v *gocui.View, entry *popupEntry) {
 	}
 }
 
-// getDiffLinesForEntry generates and caches diff output for a popup entry.
 func getDiffLinesForEntry(entry *popupEntry) ([]string, []presentation.DiffLineKind) {
 	if entry.diffCache != nil {
 		return entry.diffCache, entry.diffKinds
@@ -248,7 +236,6 @@ func getDiffLinesForEntry(entry *popupEntry) ([]string, []presentation.DiffLineK
 	return lines, kinds
 }
 
-// generateDiffFromContents creates a unified diff between the old file and new contents.
 func generateDiffFromContents(oldFilePath, newContents string) string {
 	tmpDir := os.TempDir()
 	newFile, err := os.CreateTemp(tmpDir, "lazyclaude-diff-new-*")

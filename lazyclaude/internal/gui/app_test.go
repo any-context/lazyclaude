@@ -16,7 +16,6 @@ func TestNewAppHeadless_ModeMain(t *testing.T) {
 	defer app.Gui().Close()
 
 	assert.Equal(t, gui.ModeMain, app.Mode())
-	assert.NotNil(t, app.ContextMgr())
 	assert.NotNil(t, app.Gui())
 }
 
@@ -53,10 +52,3 @@ func TestNewAppHeadless_Layout_Popup_NoError(t *testing.T) {
 	}
 }
 
-func TestApp_ContextMgr_InitiallyEmpty(t *testing.T) {
-	app, err := gui.NewAppHeadless(gui.ModeMain, 120, 40)
-	require.NoError(t, err)
-	defer app.Gui().Close()
-
-	assert.Equal(t, 0, app.ContextMgr().Depth())
-}

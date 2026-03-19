@@ -13,7 +13,7 @@ import (
 //  2. Lazyclaude keymap actions (if key matches current context)
 //  3. Forward to Claude Code (if full-screen + insert mode)
 func (a *App) setupGlobalKeybindings() error {
-	km := a.keyMap
+	km := a.keyRegistry
 
 	// Ctrl+C: always quit
 	if err := a.gui.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
@@ -22,11 +22,10 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// q: quit, exit full-screen (normal mode), or forward (insert mode)
 	// q: quit (fullScreen keys handled by Editor, not here)
 	if err := a.gui.SetKeybinding("", km.FirstRune(ActionQuit), gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		if a.hasPopup() || a.fullScreen {
-			return nil // Editor handles fullScreen keys
+		if a.hasPopup() || a.state.IsFullScreen() {
+			return nil
 		}
 		if a.mode == ModeMain {
 			return gocui.ErrQuit
@@ -50,34 +49,29 @@ func (a *App) setupGlobalKeybindings() error {
 			a.suspendAllPopups()
 			return nil
 		}
-		if a.fullScreen && a.inputMode == ModeInsert {
+		if a.state == StateFullInsert {
 			a.forwardSpecialKey("Escape")
 			return nil
 		}
 		if a.mode == ModeDiff || a.mode == ModeTool {
 			return gocui.ErrQuit
 		}
-		if a.contextMgr.Depth() > 1 {
-			a.contextMgr.Pop()
-		}
 		return nil
 	}); err != nil {
 		return err
 	}
 
-	// Cursor/scroll handler factory: runeKey for j/k literal, tmuxSpecial for arrow keys
-	makeCursorHandler := func(runeKey rune, tmuxSpecial string, isDown bool) func(*gocui.Gui, *gocui.View) error {
+	// Cursor/scroll handler factory: tmuxSpecial for arrow keys, empty for j/k
+	makeCursorHandler := func(tmuxSpecial string, isDown bool) func(*gocui.Gui, *gocui.View) error {
 		return func(g *gocui.Gui, v *gocui.View) error {
 			if a.hasPopup() {
 				if tmuxSpecial != "" {
-					// Arrow keys: switch popup focus
 					if isDown {
 						a.popupFocusNext()
 					} else {
 						a.popupFocusPrev()
 					}
 				} else {
-					// j/k: scroll diff
 					entry := a.activeEntry()
 					if entry != nil && entry.notification.IsDiff() {
 						if isDown && entry.diffCache != nil && entry.scrollY < len(entry.diffCache)-1 {
@@ -90,9 +84,7 @@ func (a *App) setupGlobalKeybindings() error {
 				}
 				return nil
 			}
-			if a.fullScreen {
-				// Arrow keys (special keys) need forwarding here.
-				// Rune keys (j/k) are handled by Editor.
+			if a.state.IsFullScreen() {
 				if tmuxSpecial != "" {
 					a.forwardSpecialKey(tmuxSpecial)
 				}
@@ -113,47 +105,44 @@ func (a *App) setupGlobalKeybindings() error {
 		}
 	}
 
-	jDown := makeCursorHandler(km.FirstRune(ActionCursorDown), "", true)
-	kUp := makeCursorHandler(km.FirstRune(ActionCursorUp), "", false)
-	arrowDown := makeCursorHandler(0, "Down", true)
-	arrowUp := makeCursorHandler(0, "Up", false)
+	jDown := makeCursorHandler("", true)
+	kUp := makeCursorHandler("", false)
+	arrowDown := makeCursorHandler("Down", true)
+	arrowUp := makeCursorHandler("Up", false)
 
-	if err := a.gui.SetKeybinding("", km.FirstRune(ActionCursorDown), gocui.ModNone, jDown); err != nil {
-		return err
-	}
-	if err := a.gui.SetKeybinding("", gocui.KeyArrowDown, gocui.ModNone, arrowDown); err != nil {
-		return err
-	}
-	if err := a.gui.SetKeybinding("", km.FirstRune(ActionCursorUp), gocui.ModNone, kUp); err != nil {
-		return err
-	}
-	if err := a.gui.SetKeybinding("", gocui.KeyArrowUp, gocui.ModNone, arrowUp); err != nil {
-		return err
-	}
-	if err := a.gui.SetKeybinding(popupViewName, km.FirstRune(ActionCursorDown), gocui.ModNone, jDown); err != nil {
-		return err
-	}
-	if err := a.gui.SetKeybinding(popupViewName, km.FirstRune(ActionCursorUp), gocui.ModNone, kUp); err != nil {
-		return err
-	}
-	if err := a.gui.SetKeybinding(popupViewName, gocui.KeyArrowDown, gocui.ModNone, arrowDown); err != nil {
-		return err
-	}
-	if err := a.gui.SetKeybinding(popupViewName, gocui.KeyArrowUp, gocui.ModNone, arrowUp); err != nil {
-		return err
+	for _, b := range []struct {
+		view string
+		key  interface{} // rune or gocui.Key
+		fn   func(*gocui.Gui, *gocui.View) error
+	}{
+		{"", km.FirstRune(ActionCursorDown), jDown},
+		{"", gocui.KeyArrowDown, arrowDown},
+		{"", km.FirstRune(ActionCursorUp), kUp},
+		{"", gocui.KeyArrowUp, arrowUp},
+		{popupViewName, km.FirstRune(ActionCursorDown), jDown},
+		{popupViewName, km.FirstRune(ActionCursorUp), kUp},
+		{popupViewName, gocui.KeyArrowDown, arrowDown},
+		{popupViewName, gocui.KeyArrowUp, arrowUp},
+	} {
+		var err error
+		switch k := b.key.(type) {
+		case rune:
+			err = a.gui.SetKeybinding(b.view, k, gocui.ModNone, b.fn)
+		case gocui.Key:
+			err = a.gui.SetKeybinding(b.view, k, gocui.ModNone, b.fn)
+		}
+		if err != nil {
+			return err
+		}
 	}
 
-	// n: create session, reject popup, or forward in full-screen
 	// n: new session or reject popup (fullScreen handled by Editor)
 	if err := a.gui.SetKeybinding("", km.FirstRune(ActionNewSession), gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		if a.hasPopup() {
 			a.dismissPopup(ChoiceReject)
 			return nil
 		}
-		if a.fullScreen {
-			return nil
-		}
-		if a.mode != ModeMain || a.sessions == nil {
+		if a.state.IsFullScreen() || a.mode != ModeMain || a.sessions == nil {
 			return nil
 		}
 		if err := a.sessions.Create(".", ""); err != nil {
@@ -177,9 +166,6 @@ func (a *App) setupGlobalKeybindings() error {
 	}
 
 	// Popup choice handlers — bind on BOTH global ("") and popup view name.
-	// jesseduffield/gocui dispatches view-specific bindings first when a view has focus.
-	// Global bindings may not fire when the popup view is focused.
-	// Popup handlers (fullScreen rune keys handled by Editor, not here)
 	popupAccept := func(g *gocui.Gui, v *gocui.View) error {
 		if a.hasPopup() {
 			a.dismissPopup(ChoiceAccept)
@@ -198,60 +184,37 @@ func (a *App) setupGlobalKeybindings() error {
 		}
 		return nil
 	}
-
-	// Y (uppercase): accept ALL popups at once
 	popupAcceptAll := func(g *gocui.Gui, v *gocui.View) error {
 		if a.hasPopup() {
 			a.dismissAllPopups(ChoiceAccept)
 		}
 		return nil
 	}
-	if err := a.gui.SetKeybinding("", 'Y', gocui.ModNone, popupAcceptAll); err != nil {
-		return err
-	}
-	if err := a.gui.SetKeybinding(popupViewName, 'Y', gocui.ModNone, popupAcceptAll); err != nil {
-		return err
+
+	for _, b := range []struct {
+		view string
+		ch   rune
+		fn   func(*gocui.Gui, *gocui.View) error
+	}{
+		{"", 'Y', popupAcceptAll},
+		{popupViewName, 'Y', popupAcceptAll},
+		{"", km.FirstRune(ActionPopupAccept), popupAccept},
+		{popupViewName, km.FirstRune(ActionPopupAccept), popupAccept},
+		{"", km.FirstRune(ActionPopupAllow), popupAllow},
+		{popupViewName, km.FirstRune(ActionPopupAllow), popupAllow},
+		{popupViewName, '1', popupAccept},
+		{popupViewName, '2', popupAllow},
+		{popupViewName, '3', popupReject},
+		{popupViewName, km.FirstRune(ActionPopupReject), popupReject},
+	} {
+		if err := a.gui.SetKeybinding(b.view, b.ch, gocui.ModNone, b.fn); err != nil {
+			return err
+		}
 	}
 
-	// y: accept
-	if err := a.gui.SetKeybinding("", km.FirstRune(ActionPopupAccept), gocui.ModNone, popupAccept); err != nil {
-		return err
-	}
-	if err := a.gui.SetKeybinding(popupViewName, km.FirstRune(ActionPopupAccept), gocui.ModNone, popupAccept); err != nil {
-		return err
-	}
-
-	// a: allow always
-	if err := a.gui.SetKeybinding("", km.FirstRune(ActionPopupAllow), gocui.ModNone, popupAllow); err != nil {
-		return err
-	}
-	if err := a.gui.SetKeybinding(popupViewName, km.FirstRune(ActionPopupAllow), gocui.ModNone, popupAllow); err != nil {
-		return err
-	}
-
-	// 1/2/3: direct number selection (same as y/a/n)
-	if err := a.gui.SetKeybinding(popupViewName, '1', gocui.ModNone, popupAccept); err != nil {
-		return err
-	}
-	if err := a.gui.SetKeybinding(popupViewName, '2', gocui.ModNone, popupAllow); err != nil {
-		return err
-	}
-	if err := a.gui.SetKeybinding(popupViewName, '3', gocui.ModNone, popupReject); err != nil {
-		return err
-	}
-	if err := a.gui.SetKeybinding(popupViewName, km.FirstRune(ActionPopupReject), gocui.ModNone, popupReject); err != nil {
-		return err
-	}
-
-	// d: delete or forward in full-screen
+	// d: delete session (main mode only)
 	if err := a.gui.SetKeybinding("", km.FirstRune(ActionDeleteSession), gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		if a.hasPopup() {
-			return nil
-		}
-		if a.fullScreen {
-			return nil
-		}
-		if a.mode != ModeMain || a.sessions == nil {
+		if a.hasPopup() || a.state.IsFullScreen() || a.mode != ModeMain || a.sessions == nil {
 			return nil
 		}
 		items := a.sessions.Sessions()
@@ -270,12 +233,12 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// enter: enter full-screen or forward
+	// Enter: enter full-screen or forward
 	if err := a.gui.SetKeybinding("", km.FirstKey(ActionEnterFull), gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		if a.hasPopup() {
 			return nil
 		}
-		if a.fullScreen {
+		if a.state.IsFullScreen() {
 			a.forwardSpecialKey("Enter")
 			return nil
 		}
@@ -293,7 +256,7 @@ func (a *App) setupGlobalKeybindings() error {
 
 	// Ctrl+D: exit full-screen mode
 	if err := a.gui.SetKeybinding("", km.FirstKey(ActionExitFull), gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		if a.fullScreen {
+		if a.state.IsFullScreen() {
 			a.exitFullScreen()
 		}
 		return nil
@@ -302,23 +265,18 @@ func (a *App) setupGlobalKeybindings() error {
 	}
 
 	// Ctrl+\: switch to normal mode (insert -> normal)
-	// Cannot use Esc or Ctrl+[ because they are the same byte (0x1B)
-	// and Claude Code uses Esc for chat:cancel, autocomplete:dismiss, etc.
 	if err := a.gui.SetKeybinding("", km.FirstKey(ActionNormalMode), gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		if a.fullScreen && a.inputMode == ModeInsert && !a.hasPopup() {
-			a.setInputMode(ModeNormal)
+		if a.state == StateFullInsert && !a.hasPopup() {
+			a.transition(StateFullNormal)
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
 
-	// i: handled by Editor.Edit() in fullScreen (both modes).
-	// No global binding needed — Editable view intercepts rune keys.
-
-	// Mouse scroll in insert mode (scroll captured output)
+	// Mouse scroll in full-screen
 	if err := a.gui.SetKeybinding("", gocui.MouseWheelUp, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		if a.fullScreen && a.fullScreenScrollY > 0 {
+		if a.state.IsFullScreen() && a.fullScreenScrollY > 0 {
 			a.fullScreenScrollY--
 		}
 		return nil
@@ -326,7 +284,7 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 	if err := a.gui.SetKeybinding("", gocui.MouseWheelDown, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		if a.fullScreen {
+		if a.state.IsFullScreen() {
 			a.fullScreenScrollY++
 		}
 		return nil
@@ -334,15 +292,11 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// r: resume or forward in full-screen
+	// r: resume (enter full-screen, same as Enter)
 	if err := a.gui.SetKeybinding("", 'r', gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		if a.hasPopup() {
+		if a.hasPopup() || a.state.IsFullScreen() {
 			return nil
 		}
-		if a.fullScreen {
-			return nil
-		}
-		// r in preview mode: enter full-screen (same as Enter)
 		if a.mode == ModeMain && a.sessions != nil {
 			items := a.sessions.Sessions()
 			if a.cursor >= 0 && a.cursor < len(items) {
@@ -354,19 +308,11 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// R: rename or forward in full-screen
+	// R: rename
 	if err := a.gui.SetKeybinding("", 'R', gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		if a.hasPopup() {
+		if a.hasPopup() || a.state.IsFullScreen() || a.mode != ModeMain || a.sessions == nil {
 			return nil
 		}
-		if a.fullScreen {
-			return nil
-		}
-		if a.mode != ModeMain || a.sessions == nil {
-			return nil
-		}
-		// TODO: prompt for new name (requires input popup)
-		// For now, append "-renamed" as placeholder
 		items := a.sessions.Sessions()
 		if a.cursor >= 0 && a.cursor < len(items) {
 			newName := items[a.cursor].Name + "-renamed"
@@ -381,15 +327,9 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// D: purge or forward in full-screen
+	// D: purge orphans
 	if err := a.gui.SetKeybinding("", 'D', gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		if a.hasPopup() {
-			return nil
-		}
-		if a.fullScreen {
-			return nil
-		}
-		if a.mode != ModeMain || a.sessions == nil {
+		if a.hasPopup() || a.state.IsFullScreen() || a.mode != ModeMain || a.sessions == nil {
 			return nil
 		}
 		count, err := a.sessions.PurgeOrphans()
@@ -402,11 +342,6 @@ func (a *App) setupGlobalKeybindings() error {
 	}); err != nil {
 		return err
 	}
-
-	// Full-screen insert mode: forward ALL unhandled keys via View.Editor.
-	// No for-loop registration needed — the Editor catch-all handles any key
-	// not matched by the keybindings above (KeyMap actions only).
-	// This covers: printable ASCII, Unicode, Ctrl combos, F-keys, Home/End, etc.
 
 	return nil
 }

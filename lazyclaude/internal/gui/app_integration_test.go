@@ -70,7 +70,7 @@ func (m *mockSessionProvider) setPending(n *notify.ToolNotification) {
 }
 
 func TestPopup_ShowAndDismissWithY(t *testing.T) {
-	t.Parallel()
+
 	app, err := gui.NewAppHeadless(gui.ModeMain, 80, 24)
 	require.NoError(t, err)
 	// gocui is owned by App — do not close separately
@@ -107,7 +107,7 @@ func TestPopup_ShowAndDismissWithY(t *testing.T) {
 }
 
 func TestPopup_NotificationPolling(t *testing.T) {
-	t.Parallel()
+
 	app, err := gui.NewAppHeadless(gui.ModeMain, 80, 24)
 	require.NoError(t, err)
 	// gocui is owned by App — do not close separately
@@ -133,7 +133,7 @@ func TestPopup_NotificationPolling(t *testing.T) {
 }
 
 func TestPopup_DiffNotification(t *testing.T) {
-	t.Parallel()
+
 	app, err := gui.NewAppHeadless(gui.ModeMain, 80, 24)
 	require.NoError(t, err)
 	// gocui is owned by App — do not close separately
@@ -158,7 +158,7 @@ func TestPopup_DiffNotification(t *testing.T) {
 }
 
 func TestFullScreen_EnterAndExit(t *testing.T) {
-	t.Parallel()
+
 	app, err := gui.NewAppHeadless(gui.ModeMain, 80, 24)
 	require.NoError(t, err)
 	// gocui is owned by App — do not close separately
@@ -180,7 +180,7 @@ func TestFullScreen_EnterAndExit(t *testing.T) {
 }
 
 func TestFullScreen_LayoutCreatesMainView(t *testing.T) {
-	t.Parallel()
+
 	app, err := gui.NewAppHeadless(gui.ModeMain, 80, 24)
 	require.NoError(t, err)
 
@@ -208,7 +208,7 @@ func TestFullScreen_LayoutCreatesMainView(t *testing.T) {
 }
 
 func TestFullScreen_PopupWorksInFullMode(t *testing.T) {
-	t.Parallel()
+
 	app, err := gui.NewAppHeadless(gui.ModeMain, 80, 24)
 	require.NoError(t, err)
 
@@ -256,7 +256,7 @@ func TestFullScreen_DefaultsToInsertMode(t *testing.T) {
 	app.SetSessions(mock)
 	app.EnterFullScreenForTest("s1")
 
-	assert.Equal(t, gui.ModeInsert, app.InputModeForTest())
+	assert.Equal(t, gui.StateFullInsert, app.StateForTest())
 }
 
 func TestFullScreen_CtrlBackslash_SwitchesToNormal(t *testing.T) {
@@ -270,10 +270,10 @@ func TestFullScreen_CtrlBackslash_SwitchesToNormal(t *testing.T) {
 	}
 	app.SetSessions(mock)
 	app.EnterFullScreenForTest("s1")
-	assert.Equal(t, gui.ModeInsert, app.InputModeForTest())
+	assert.Equal(t, gui.StateFullInsert, app.StateForTest())
 
-	app.SetInputModeForTest(gui.ModeNormal)
-	assert.Equal(t, gui.ModeNormal, app.InputModeForTest())
+	app.SetStateForTest(gui.StateFullNormal)
+	assert.Equal(t, gui.StateFullNormal, app.StateForTest())
 }
 
 func TestFullScreen_NormalMode_IReturnsToInsert(t *testing.T) {
@@ -287,10 +287,10 @@ func TestFullScreen_NormalMode_IReturnsToInsert(t *testing.T) {
 	}
 	app.SetSessions(mock)
 	app.EnterFullScreenForTest("s1")
-	app.SetInputModeForTest(gui.ModeNormal)
+	app.SetStateForTest(gui.StateFullNormal)
 
-	app.SetInputModeForTest(gui.ModeInsert)
-	assert.Equal(t, gui.ModeInsert, app.InputModeForTest())
+	app.SetStateForTest(gui.StateFullInsert)
+	assert.Equal(t, gui.StateFullInsert, app.StateForTest())
 }
 
 func TestFullScreen_InsertMode_ForwardsKeys(t *testing.T) {
@@ -324,7 +324,7 @@ func TestFullScreen_NormalMode_QExitsFullScreen(t *testing.T) {
 	}
 	app.SetSessions(mock)
 	app.EnterFullScreenForTest("s1")
-	app.SetInputModeForTest(gui.ModeNormal)
+	app.SetStateForTest(gui.StateFullNormal)
 
 	// q in normal mode should exit full-screen (tested via exitFullScreen)
 	assert.True(t, app.IsFullScreenForTest())
@@ -343,12 +343,12 @@ func TestFullScreen_ExitResetsToInsertMode(t *testing.T) {
 	}
 	app.SetSessions(mock)
 	app.EnterFullScreenForTest("s1")
-	app.SetInputModeForTest(gui.ModeNormal)
+	app.SetStateForTest(gui.StateFullNormal)
 	app.ExitFullScreenForTest()
 
 	// Re-enter → should be insert mode again
 	app.EnterFullScreenForTest("s1")
-	assert.Equal(t, gui.ModeInsert, app.InputModeForTest())
+	assert.Equal(t, gui.StateFullInsert, app.StateForTest())
 }
 
 func TestFullScreen_NormalMode_KeysAreNoOp(t *testing.T) {
@@ -365,7 +365,7 @@ func TestFullScreen_NormalMode_KeysAreNoOp(t *testing.T) {
 	app.SetInputForwarder(fwd)
 
 	app.EnterFullScreenForTest("s1")
-	app.SetInputModeForTest(gui.ModeNormal)
+	app.SetStateForTest(gui.StateFullNormal)
 
 	// j/k/h/l should NOT forward in normal mode
 	app.ForwardKeyForTest('j')
@@ -386,8 +386,8 @@ func TestFullScreen_PopupPreservesMode(t *testing.T) {
 	app.EnterFullScreenForTest("s1")
 
 	// Enter normal mode
-	app.SetInputModeForTest(gui.ModeNormal)
-	assert.Equal(t, gui.ModeNormal, app.InputModeForTest())
+	app.SetStateForTest(gui.StateFullNormal)
+	assert.Equal(t, gui.StateFullNormal, app.StateForTest())
 
 	// Show popup
 	app.ShowToolPopupForTest(&notify.ToolNotification{
@@ -396,13 +396,13 @@ func TestFullScreen_PopupPreservesMode(t *testing.T) {
 	})
 	assert.True(t, app.HasPopupForTest())
 	// Mode should be preserved
-	assert.Equal(t, gui.ModeNormal, app.InputModeForTest())
+	assert.Equal(t, gui.StateFullNormal, app.StateForTest())
 
 	// Dismiss popup
 	app.DismissPopupForTest(gui.ChoiceAccept)
 	assert.False(t, app.HasPopupForTest())
 	// Mode should still be normal
-	assert.Equal(t, gui.ModeNormal, app.InputModeForTest())
+	assert.Equal(t, gui.StateFullNormal, app.StateForTest())
 }
 
 func TestFullScreen_PopupPreservesInsertMode(t *testing.T) {
@@ -418,14 +418,14 @@ func TestFullScreen_PopupPreservesInsertMode(t *testing.T) {
 	app.EnterFullScreenForTest("s1")
 
 	// Insert mode (default)
-	assert.Equal(t, gui.ModeInsert, app.InputModeForTest())
+	assert.Equal(t, gui.StateFullInsert, app.StateForTest())
 
 	// Show and dismiss popup
 	app.ShowToolPopupForTest(&notify.ToolNotification{ToolName: "Bash", Window: "@0"})
 	app.DismissPopupForTest(gui.ChoiceReject)
 
 	// Should still be insert mode
-	assert.Equal(t, gui.ModeInsert, app.InputModeForTest())
+	assert.Equal(t, gui.StateFullInsert, app.StateForTest())
 	assert.True(t, app.IsFullScreenForTest())
 }
 
@@ -440,12 +440,12 @@ func TestFullScreen_CtrlD_ExitsFromNormalMode(t *testing.T) {
 	}
 	app.SetSessions(mock)
 	app.EnterFullScreenForTest("s1")
-	app.SetInputModeForTest(gui.ModeNormal)
+	app.SetStateForTest(gui.StateFullNormal)
 
 	// Ctrl+D should exit full-screen from normal mode
 	app.ExitFullScreenForTest()
 	assert.False(t, app.IsFullScreenForTest())
-	assert.Equal(t, gui.ModeInsert, app.InputModeForTest())
+	assert.Equal(t, gui.StateMain, app.StateForTest())
 }
 
 func TestFullScreen_InsertMode_DoesNotForwardInPopup(t *testing.T) {
@@ -470,7 +470,7 @@ func TestFullScreen_InsertMode_DoesNotForwardInPopup(t *testing.T) {
 }
 
 func TestPopup_BlocksSessionKeys(t *testing.T) {
-	t.Parallel()
+
 	app, err := gui.NewAppHeadless(gui.ModeMain, 80, 24)
 	require.NoError(t, err)
 	// gocui is owned by App — do not close separately
