@@ -33,8 +33,8 @@ func (m *mockSessionProvider) Create(_, _ string) error { return nil }
 func (m *mockSessionProvider) Delete(_ string) error    { return nil }
 func (m *mockSessionProvider) Rename(_, _ string) error { return nil }
 func (m *mockSessionProvider) PurgeOrphans() (int, error) { return 0, nil }
-func (m *mockSessionProvider) CapturePreview(_ string, _, _ int) (string, error) {
-	return "preview content", nil
+func (m *mockSessionProvider) CapturePreview(_ string, _, _ int) (gui.PreviewResult, error) {
+	return gui.PreviewResult{Content: "preview content"}, nil
 }
 
 func (m *mockSessionProvider) PendingNotifications() []*notify.ToolNotification {

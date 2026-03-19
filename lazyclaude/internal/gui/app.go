@@ -33,7 +33,7 @@ type SessionProvider interface {
 	Delete(id string) error
 	Rename(id, newName string) error
 	PurgeOrphans() (int, error)
-	CapturePreview(id string, width, height int) (string, error)
+	CapturePreview(id string, width, height int) (PreviewResult, error)
 	PendingNotifications() []*notify.ToolNotification
 	SendChoice(window string, choice Choice) error
 }
@@ -49,6 +49,13 @@ type SessionItem struct {
 	TmuxWindow string
 }
 
+// PreviewResult holds captured pane content and cursor position.
+type PreviewResult struct {
+	Content string
+	CursorX int
+	CursorY int
+}
+
 // App is the root TUI application (lazygit Gui equivalent).
 type App struct {
 	gui              *gocui.Gui
@@ -60,6 +67,8 @@ type App struct {
 	previewMu        sync.Mutex
 	previewCache     string    // cached preview content
 	previewCursor    int       // cursor position when cache was taken
+	paneCursorX      int       // tmux pane cursor X
+	paneCursorY      int       // tmux pane cursor Y
 	previewBusy      bool      // async capture in progress
 	previewTime      time.Time // last fetch timestamp
 	lastWidth        int

@@ -161,10 +161,10 @@ func (a *sessionAdapter) Sessions() []gui.SessionItem {
 	return items
 }
 
-func (a *sessionAdapter) CapturePreview(id string, width, height int) (string, error) {
+func (a *sessionAdapter) CapturePreview(id string, width, height int) (gui.PreviewResult, error) {
 	sess := a.mgr.Store().FindByID(id)
 	if sess == nil {
-		return "", nil
+		return gui.PreviewResult{}, nil
 	}
 	target := sess.TmuxWindow
 	if target == "" {
@@ -172,25 +172,30 @@ func (a *sessionAdapter) CapturePreview(id string, width, height int) (string, e
 	}
 	ctx := context.Background()
 
-	// Resize pane only when target or dimensions changed (skip 100ms sleep otherwise)
+	// Resize pane only when target or dimensions changed
 	if width > 0 && height > 0 && (id != a.lastResizeID || width != a.lastResizeW || height != a.lastResizeH) {
 		if err := a.tmux.ResizeWindow(ctx, target, width, height); err != nil {
-			return "", err
+			return gui.PreviewResult{}, err
 		}
 		a.lastResizeID = id
 		a.lastResizeW = width
 		a.lastResizeH = height
-		time.Sleep(20 * time.Millisecond) // brief wait for re-render after resize
+		time.Sleep(20 * time.Millisecond)
 	}
 
 	// Capture with ANSI colors
 	content, err := a.tmux.CapturePaneANSI(ctx, target)
-
 	if err != nil || width <= 0 {
-		return content, err
+		return gui.PreviewResult{Content: content}, err
 	}
 
-	// Safety truncate: clip lines that didn't fit after resize
+	// Get cursor position from tmux pane
+	var curX, curY int
+	if posStr, err := a.tmux.ShowMessage(ctx, target, "#{cursor_x},#{cursor_y}"); err == nil {
+		fmt.Sscanf(posStr, "%d,%d", &curX, &curY)
+	}
+
+	// Safety truncate
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
 		if ansi.StringWidth(line) > width {
@@ -200,7 +205,12 @@ func (a *sessionAdapter) CapturePreview(id string, width, height int) (string, e
 	if height > 0 && len(lines) > height {
 		lines = lines[:height]
 	}
-	return strings.Join(lines, "\n"), nil
+
+	return gui.PreviewResult{
+		Content: strings.Join(lines, "\n"),
+		CursorX: curX,
+		CursorY: curY,
+	}, nil
 }
 
 func (a *sessionAdapter) Create(path, host string) error {

@@ -51,6 +51,7 @@ func (a *App) layout(g *gocui.Gui) error {
 
 func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 	g.DeleteView("fullscreen-bar") // clean up after full-screen mode
+	g.Cursor = false
 
 	splitX := maxX / 3
 	if splitX < 20 {
@@ -137,11 +138,10 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 		return err
 	}
 	v.Wrap = false
-	// Always Editable — Editor handles both insert mode (forward to Claude Code)
-	// and normal mode (q exits, i returns to insert, other keys are no-op).
 	v.Editable = true
 	v.Editor = &inputEditor{app: a}
 	v.Clear()
+	g.Cursor = true
 
 	// Render preview content (same pipeline as split-panel mode)
 	var items []SessionItem
@@ -254,13 +254,13 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 		id := item.ID
 		cursorSnapshot := a.cursor
 		go func() {
-			content, err := a.sessions.CapturePreview(id, previewW, previewH)
+			result, err := a.sessions.CapturePreview(id, previewW, previewH)
 			a.previewMu.Lock()
-			// Always update cursor to prevent needFetch loop when content is empty
-			// (Claude Code startup returns len=0 temporarily)
 			a.previewCursor = cursorSnapshot
-			if err == nil && strings.TrimSpace(content) != "" {
-				a.previewCache = content
+			if err == nil && strings.TrimSpace(result.Content) != "" {
+				a.previewCache = result.Content
+				a.paneCursorX = result.CursorX
+				a.paneCursorY = result.CursorY
 			}
 			a.previewBusy = false
 			a.previewTime = time.Now()
@@ -271,6 +271,9 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 
 	if cache != "" && cachedCursor == a.cursor {
 		fmt.Fprint(v, cache)
+		if a.fullScreen {
+			v.SetCursor(a.paneCursorX, a.paneCursorY)
+		}
 		return
 	}
 
