@@ -2,7 +2,10 @@ package session_test
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/KEMSHlM/lazyclaude/internal/core/config"
@@ -64,14 +67,40 @@ func TestManager_Create_SecondSession(t *testing.T) {
 	assert.Len(t, all, 2)
 }
 
+// setupMCPInfo writes port file and lock file so Manager.Create can build SSH commands.
+func setupMCPInfo(t *testing.T, paths config.Paths, port int, token string) {
+	t.Helper()
+	// Write port file
+	require.NoError(t, os.MkdirAll(filepath.Dir(paths.PortFile()), 0o755))
+	require.NoError(t, os.WriteFile(paths.PortFile(), []byte(strconv.Itoa(port)), 0o600))
+	// Write lock file
+	require.NoError(t, os.MkdirAll(paths.IDEDir, 0o755))
+	lockData, err := json.Marshal(map[string]string{"authToken": token})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(paths.LockFile(port), lockData, 0o600))
+}
+
 func TestManager_Create_RemoteSession(t *testing.T) {
 	t.Parallel()
-	mgr, _ := newTestManager(t)
+	tmp := t.TempDir()
+	paths := config.TestPaths(tmp)
+	setupMCPInfo(t, paths, 12345, "test-token")
+
+	store := session.NewStore(filepath.Join(paths.DataDir, "state.json"))
+	mock := tmux.NewMockClient()
+	mgr := session.NewManager(store, mock, paths, nil)
 
 	sess, err := mgr.Create(context.Background(), "/home/user/work", "srv1")
 	require.NoError(t, err)
 	assert.Equal(t, "srv1:work", sess.Name)
 	assert.Equal(t, "srv1", sess.Host)
+
+	// Verify SSH command was passed to tmux
+	lastCmd := mock.LastNewSessionOpts.Command
+	assert.Contains(t, lastCmd, "ssh")
+	assert.Contains(t, lastCmd, "srv1")
+	assert.Contains(t, lastCmd, "-R")
+	assert.Contains(t, lastCmd, "claude")
 }
 
 func TestManager_Delete(t *testing.T) {

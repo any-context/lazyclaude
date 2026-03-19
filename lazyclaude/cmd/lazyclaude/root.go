@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 	"github.com/KEMSHlM/lazyclaude/internal/gui"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
+	"github.com/KEMSHlM/lazyclaude/internal/server"
 	"github.com/KEMSHlM/lazyclaude/internal/session"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
@@ -115,23 +115,20 @@ func newRootCmd() *cobra.Command {
 }
 
 // ensureMCPServer starts the MCP server if not already running.
+// Uses health check (TCP dial) to detect stale port files.
 func ensureMCPServer() {
-	// Check if server is running by reading port file
 	paths := config.DefaultPaths()
-	portFile := paths.PortFile()
-	if _, err := os.Stat(portFile); err == nil {
-		return // port file exists, server likely running
-	}
-
-	// Start server in background
-	cmd := exec.Command(os.Args[0], "server", "--port", "0")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: start MCP server: %v\n", err)
+	result, err := server.EnsureServer(server.EnsureOpts{
+		Binary:   os.Args[0],
+		PortFile: paths.PortFile(),
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 		return
 	}
-	cmd.Process.Release() // detach
+	if result.Started {
+		fmt.Fprintf(os.Stderr, "MCP server started\n")
+	}
 }
 
 // sessionAdapter bridges session.Manager to gui.SessionProvider.

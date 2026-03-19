@@ -1,0 +1,36 @@
+services:
+  remote:
+    build:
+      context: .
+      dockerfile: Dockerfile.ssh-test
+      target: remote
+    networks:
+      - testnet
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep sshd"]
+      interval: 1s
+      timeout: 3s
+      retries: 10
+
+  local:
+    build:
+      context: .
+      dockerfile: Dockerfile.ssh-test
+      target: local
+    depends_on:
+      remote:
+        condition: service_healthy
+    environment:
+      - REMOTE_HOST=remote
+      - TERM=xterm-256color
+    networks:
+      - testnet
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        ssh-keyscan -H remote >> /root/.ssh/known_hosts 2>/dev/null
+        go test -v -timeout 120s ./tests/integration/ -run TestE2E_SSH
+
+networks:
+  testnet:
+    driver: bridge

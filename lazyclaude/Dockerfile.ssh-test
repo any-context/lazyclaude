@@ -1,0 +1,51 @@
+##############################################
+# Multi-target Dockerfile for SSH E2E testing
+# Build: docker compose -f docker-compose.ssh.yml build
+##############################################
+
+# --- Stage: generate ephemeral SSH keypair ---
+FROM alpine:latest AS keygen
+RUN apk add --no-cache openssh-keygen
+RUN ssh-keygen -t ed25519 -f /tmp/test_key -N "" -q
+
+# --- Stage: shared base ---
+FROM golang:latest AS base
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tmux openssh-server openssh-client curl nodejs expect \
+    && rm -rf /var/lib/apt/lists/*
+ENV TERM=xterm-256color
+
+# --- Stage: build binaries (shared by both targets) ---
+FROM base AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o /usr/local/bin/lazyclaude ./cmd/lazyclaude
+RUN go build -o /usr/local/bin/mock-claude-client ./cmd/mock-claude-client
+
+# --- Target: remote (sshd server + mock client) ---
+FROM base AS remote
+RUN ssh-keygen -A && mkdir -p /run/sshd /root/.ssh
+COPY --from=keygen /tmp/test_key.pub /root/.ssh/authorized_keys
+RUN chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys
+RUN sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && \
+    echo 'GatewayPorts yes' >> /etc/ssh/sshd_config
+# Install mock-claude-client so remote tests can simulate Claude connection
+COPY --from=builder /usr/local/bin/mock-claude-client /usr/local/bin/mock-claude-client
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D"]
+
+# --- Target: local (test runner) ---
+FROM base AS local
+RUN mkdir -p /root/.ssh
+COPY --from=keygen /tmp/test_key /root/.ssh/id_ed25519
+RUN chmod 700 /root/.ssh && chmod 600 /root/.ssh/id_ed25519
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o /usr/local/bin/lazyclaude ./cmd/lazyclaude
+CMD ["go", "test", "-v", "-timeout", "120s", "./tests/integration/", "-run", "TestE2E_SSH"]

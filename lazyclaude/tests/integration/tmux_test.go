@@ -22,6 +22,7 @@ func ensureBinary(t *testing.T) string {
 	buildOnce.Do(func() {
 		root := filepath.Join("..", "..")
 		binaryPath = filepath.Join(root, "bin", "lazyclaude-test")
+		os.MkdirAll(filepath.Dir(binaryPath), 0o755)
 		cmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/lazyclaude")
 		cmd.Dir = root
 		cmd.Stdout = os.Stdout

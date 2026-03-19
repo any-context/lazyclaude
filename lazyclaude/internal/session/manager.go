@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -157,7 +158,23 @@ func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, e
 		return nil, fmt.Errorf("check session: %w", err)
 	}
 
-	claudeCmd := m.buildClaudeCommand(sess)
+	var claudeCmd string
+	if host != "" {
+		mcpPort, token, mcpErr := m.readMCPInfo()
+		if mcpErr != nil {
+			return nil, fmt.Errorf("read MCP server info for SSH session: %w", mcpErr)
+		}
+		claudeCmd = buildSSHCommand(sess, mcpPort, token)
+
+		// Write pending window file so the MCP server can associate
+		// the remote ide_connected PID with this tmux window.
+		pendingFile := filepath.Join(m.paths.RuntimeDir, "lazyclaude-pending-window")
+		if writeErr := os.WriteFile(pendingFile, []byte(sess.WindowName()), 0o600); writeErr != nil {
+			m.log.Warn("create.pending-window.write", "err", writeErr)
+		}
+	} else {
+		claudeCmd = m.buildClaudeCommand(sess)
+	}
 	windowName := sess.WindowName()
 	absPath, err := filepath.Abs(sess.Path)
 	if err != nil {
@@ -257,6 +274,31 @@ func (m *Manager) PurgeOrphans() (int, error) {
 // Sessions returns all sessions (read-only copy).
 func (m *Manager) Sessions() []Session {
 	return m.store.All()
+}
+
+// readMCPInfo reads the MCP server port and auth token from disk.
+// The port file contains the port number; the lock file contains the auth token.
+func (m *Manager) readMCPInfo() (int, string, error) {
+	portData, err := os.ReadFile(m.paths.PortFile())
+	if err != nil {
+		return 0, "", fmt.Errorf("read port file %s: %w", m.paths.PortFile(), err)
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(string(portData)))
+	if err != nil {
+		return 0, "", fmt.Errorf("parse port from %s: %w", m.paths.PortFile(), err)
+	}
+
+	lockData, err := os.ReadFile(m.paths.LockFile(port))
+	if err != nil {
+		return 0, "", fmt.Errorf("read lock file %s: %w", m.paths.LockFile(port), err)
+	}
+	var lock struct {
+		AuthToken string `json:"authToken"`
+	}
+	if err := json.Unmarshal(lockData, &lock); err != nil {
+		return 0, "", fmt.Errorf("parse lock file: %w", err)
+	}
+	return port, lock.AuthToken, nil
 }
 
 func (m *Manager) buildClaudeCommand(sess Session) string {

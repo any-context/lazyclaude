@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
 )
+
+const pendingWindowFile = "lazyclaude-pending-window"
 
 // Handler processes MCP protocol messages.
 type Handler struct {
@@ -98,9 +102,22 @@ func (h *Handler) handleIDEConnected(ctx context.Context, connID string, req *Re
 
 	window, err := h.resolveWindow(ctx, params.PID)
 	if err != nil {
-		h.log.Printf("ide_connected: resolve window for pid %d: %v", params.PID, err)
-		return
+		h.log.Printf("ide_connected: local resolve failed for pid %d: %v", params.PID, err)
 	}
+
+	// Fallback for remote SSH sessions: read pending window file.
+	// Written by session.Manager.Create() when creating SSH sessions.
+	if window == "" && h.runtimeDir != "" {
+		pending := filepath.Join(h.runtimeDir, pendingWindowFile)
+		if data, readErr := os.ReadFile(pending); readErr == nil {
+			window = strings.TrimSpace(string(data))
+			if rmErr := os.Remove(pending); rmErr != nil {
+				h.log.Printf("ide_connected: remove pending file: %v", rmErr)
+			}
+			h.log.Printf("ide_connected: using pending remote window %q for pid %d", window, params.PID)
+		}
+	}
+
 	if window == "" {
 		h.log.Printf("ide_connected: no window found for pid %d", params.PID)
 		return

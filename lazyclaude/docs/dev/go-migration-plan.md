@@ -178,10 +178,10 @@ lazyclaude/
 | **P1** | コア層 (tmux + config) | **完了** | Client interface, ExecClient, ControlClient, MockClient, pidwalk |
 | **P2** | MCP サーバー | **完了** | WebSocket, JSON-RPC, handler, state, lock |
 | **P3** | TUI フレームワーク | **完了** | App, layout, keybindings, state machine, KeyRegistry |
-| **P4** | メイン画面 | **ほぼ完了** | セッション一覧, プレビュー, full-screen, cursor sync |
+| **P4** | メイン画面 | **完了** | セッション一覧, プレビュー, full-screen, cursor sync, MCP 自動起動 |
 | **P5** | Diff / Tool Popup | **完了** | diff.go, tool.go, popup stack, cascade, dismiss |
 | **P5+** | Popup 拡張 | **完了** | 通知キュー, popup stack, suspend/reopen, Y accept-all |
-| **P6** | SSH + 高度な機能 | **未着手** | |
+| **P6** | SSH + 高度な機能 | **一部完了** | SSH コマンド構築 + reverse tunnel + Docker テスト基盤 |
 | **P7** | lazyclaude.tmux 拡張 | **未着手** | setup.go は placeholder |
 | **P8** | 配布・CI/CD | **未着手** | goreleaser, GitHub Actions なし |
 
@@ -200,7 +200,7 @@ lazyclaude/
 | P4.7 | Full-screen モード (INSERT/NORMAL) | **完了** |
 | P4.8 | Cursor sync (tmux pane cursor → gocui) | **完了** |
 | P4.9 | IME 入力の順序保証 (serial key queue) | **完了** |
-| P4.10 | MCP サーバー自動起動 | **未着手** |
+| P4.10 | MCP サーバー自動起動 | **完了** |
 | P4.11 | Control mode (event-driven refresh) | **完了** |
 
 ### 追加実装 (計画外)
@@ -213,20 +213,40 @@ lazyclaude/
 | Accept-all (Y) | PopupController.DismissAll |
 | Mouse scroll in full-screen | fullScreenScrollY + SetOrigin |
 | Steady block cursor (no blink) | ANSI `\033[2 q` |
+| EnsureServer (health check) | server.EnsureServer + TCP alive check |
+| Config env var overrides | LAZYCLAUDE_DATA_DIR, RUNTIME_DIR, IDE_DIR |
+| Server E2E tests | tests/integration/server_test.go (5 tests) |
 
 ---
 
-## Phase 6: SSH + 高度な機能 (未着手)
+## Phase 6: SSH + 高度な機能
 
-| # | タスク | 成果物 |
-|---|--------|--------|
-| P6.1 | SSH reverse tunnel 構築 | `internal/session/ssh.go` |
-| P6.2 | リモート lock ファイル管理 | `internal/server/lock.go` 拡張 |
-| P6.3 | 設定ファイル (~/.config/lazyclaude/config.toml) | `internal/core/config/` 拡張 |
-| P6.4 | ヘルプ popup (?) | 未定 |
-| P6.5 | Keybinding ユーザーカスタマイズ | `keymap.Registry.LoadOverrides()` |
+| # | タスク | 状態 | 成果物 |
+|---|--------|------|--------|
+| P6.1 | SSH reverse tunnel 構築 | **完了** | `internal/session/ssh.go` |
+| P6.2 | リモート lock ファイル管理 | **完了** | ssh.go 内 buildRemoteCommand (自動作成 + trap 削除) |
+| P6.3 | Docker SSH テスト基盤 | **完了** | `Dockerfile.ssh-test`, `docker-compose.ssh.yml`, `tests/integration/ssh_test.go` |
+| P6.4 | 設定ファイル (~/.config/lazyclaude/config.toml) | **未着手** | `internal/core/config/` 拡張 |
+| P6.5 | ヘルプ popup (?) | **未着手** | 未定 |
+| P6.6 | Keybinding ユーザーカスタマイズ | **未着手** | `keymap.Registry.LoadOverrides()` |
 
-**P6.5 の基盤**: KeyRegistry は `AllActions()` でバインド一覧を返せるので、
+### SSH 実装の詳細
+
+```
+lazyclaude (local)                          remote host
+┌─────────────────────┐                    ┌──────────────────────┐
+│ MCP Server :PORT    │◄── SSH -R PORT ────│ Claude Code          │
+│                     │    reverse tunnel   │ reads ~/.claude/ide/ │
+│ GUI polls notify    │                    │ connects to :PORT    │
+└─────────────────────┘                    └──────────────────────┘
+```
+
+- `buildSSHCommand()`: SSH + PTY + reverse tunnel + keepalive
+- `buildRemoteCommand()`: lock file 作成 → claude 起動 → trap で lock 削除
+- `splitHostPort()`: `user@host:port` を分離 (IPv6 対応)
+- `Manager.readMCPInfo()`: port file + lock file から MCP 接続情報を取得
+
+**P6.6 の基盤**: KeyRegistry は `AllActions()` でバインド一覧を返せるので、
 TOML/JSON からオーバーライドを読み込む拡張は容易。
 
 ---
@@ -264,33 +284,37 @@ TOML/JSON からオーバーライドを読み込む拡張は容易。
 | L3: CLI | サブコマンド出力 | termtest (PTY emulation) | Docker |
 | L4: Integration | tmux popup + MCP + choice | tmux scripting (send-keys + capture-pane) | Docker |
 | L5: E2E scripts | 全体動作 (popup stack, IME, latency) | bash (tmux + capture-pane) | Docker |
+| L6: Server E2E | MCP サーバーバイナリ起動 + WS + notify | Go binary + WebSocket client | Host + Docker |
+| L7: SSH E2E | SSH reverse tunnel + MCP 通信 | docker-compose 2 コンテナ | Docker only |
 
-### テストカバレッジ (2026-03-20)
+### テストカバレッジ (2026-03-20 v2)
 
 | パッケージ | カバレッジ |
 |-----------|-----------|
-| gui/presentation | 91.6% |
+| core/config | 93.8% |
 | gui/keymap | 91.7% |
+| gui/presentation | 91.6% |
 | gui/choice | 90.9% |
-| core/config | 88.9% |
-| server | 85.8% |
+| server | 85.2% |
+| session | 80.0% |
 | notify | 78.8% |
-| session | 77.7% |
 | gui (main) | 43.8% |
 | core/tmux | 35.5% |
 
 ---
 
-## コードメトリクス (2026-03-20)
+## コードメトリクス (2026-03-20 v2)
 
 | 指標 | 値 |
 |------|-----|
-| Go ファイル数 | 73 |
-| 総 LOC | ~10,700 |
+| Go ファイル数 | 79 |
+| 総 LOC | ~11,500 |
 | gui/ ファイル数 (直下) | 10 ソース + 8 テスト |
 | gui/ サブパッケージ | choice, keymap, presentation |
-| ユニットテスト数 | 230+ |
-| E2E テスト数 | 12 (Go) + 9 (bash) |
+| ユニットテスト数 | 250+ |
+| Server E2E テスト数 | 5 (Go binary lifecycle) |
+| SSH E2E テスト数 | 5 (Docker Compose, REMOTE_HOST) |
+| TUI E2E テスト数 | 12 (Go) + 9 (bash) |
 
 ---
 
@@ -300,7 +324,7 @@ TOML/JSON からオーバーライドを読み込む拡張は容易。
 |--------|------|------|------|
 | gocui が tmux display-popup で動作しない | P5 | **解決** | display-popup は不使用、gocui overlay で実装 |
 | Claude Code WebSocket 互換性 | P2 | **解決** | MCP サーバー動作確認済み |
-| SSH reverse tunnel タイミング | P6 | 未対応 | 既存 Shell ロジックを参考に実装予定 |
+| SSH reverse tunnel タイミング | P6 | **解決** | buildSSHCommand + Docker 2 コンテナ E2E テスト |
 | goroutine リーク | P2 | **対策済み** | context.Context + done channel パターン |
 | メイン TUI ↔ full-screen 切り替え | P4 | **解決** | AppState state machine + transition() |
 | IME 入力の順序破壊 | P4 | **解決** | serial key forwarding queue (buffered channel) |

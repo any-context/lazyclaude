@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/KEMSHlM/lazyclaude/internal/core/config"
@@ -65,10 +66,34 @@ func TestPaths_LockFile(t *testing.T) {
 	assert.Equal(t, "/tmp/test/ide/7860.lock", p.LockFile(7860))
 }
 
+func TestDefaultPaths_EnvOverride_DataDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("LAZYCLAUDE_DATA_DIR", filepath.Join(tmp, "custom-data"))
+
+	p := config.DefaultPaths()
+	assert.Equal(t, filepath.Join(tmp, "custom-data"), p.DataDir)
+}
+
+func TestDefaultPaths_EnvOverride_RuntimeDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("LAZYCLAUDE_RUNTIME_DIR", filepath.Join(tmp, "custom-runtime"))
+
+	p := config.DefaultPaths()
+	assert.Equal(t, filepath.Join(tmp, "custom-runtime"), p.RuntimeDir)
+}
+
+func TestDefaultPaths_EnvOverride_IDEDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("LAZYCLAUDE_IDE_DIR", filepath.Join(tmp, "custom-ide"))
+
+	p := config.DefaultPaths()
+	assert.Equal(t, filepath.Join(tmp, "custom-ide"), p.IDEDir)
+}
+
 func isUnder(path, parent string) bool {
 	rel, err := filepath.Rel(parent, path)
 	if err != nil {
 		return false
 	}
-	return rel != ".." && rel[:2] != ".."
+	return !strings.HasPrefix(rel, "..")
 }

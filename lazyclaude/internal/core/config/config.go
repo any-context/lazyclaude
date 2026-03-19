@@ -15,17 +15,32 @@ type Paths struct {
 }
 
 // DefaultPaths returns production paths.
+// Environment variables override defaults:
+//   - LAZYCLAUDE_DATA_DIR    → DataDir
+//   - LAZYCLAUDE_RUNTIME_DIR → RuntimeDir
+//   - LAZYCLAUDE_IDE_DIR     → IDEDir
+//
 // Panics if home directory cannot be determined.
 func DefaultPaths() Paths {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		panic(fmt.Sprintf("cannot determine home directory: %v", err))
 	}
-	return Paths{
+	p := Paths{
 		IDEDir:     filepath.Join(home, ".claude", "ide"),
 		DataDir:    filepath.Join(home, ".local", "share", "lazyclaude"),
 		RuntimeDir: os.TempDir(),
 	}
+	if v := os.Getenv("LAZYCLAUDE_DATA_DIR"); v != "" {
+		p.DataDir = v
+	}
+	if v := os.Getenv("LAZYCLAUDE_RUNTIME_DIR"); v != "" {
+		p.RuntimeDir = v
+	}
+	if v := os.Getenv("LAZYCLAUDE_IDE_DIR"); v != "" {
+		p.IDEDir = v
+	}
+	return p
 }
 
 // TestPaths returns isolated paths under a temporary directory.
