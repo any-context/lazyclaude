@@ -1,4 +1,4 @@
-package gui
+package keymap
 
 import "github.com/jesseduffield/gocui"
 
@@ -11,29 +11,28 @@ type ActionDef struct {
 	States      []AppState   // which states this action is active in
 }
 
-// KeyRegistry is the single source of truth for all key bindings.
+// Registry is the single source of truth for all key bindings.
 // It supports lookup by key event + state, and enumeration for help screens.
-type KeyRegistry struct {
-	defs  []ActionDef         // ordered list (registration order)
-	index map[KeyAction]int   // maps action to index in defs (stable across appends)
+type Registry struct {
+	defs  []ActionDef       // ordered list (registration order)
+	index map[KeyAction]int // maps action to index in defs (stable across appends)
 }
 
-// NewKeyRegistry creates an empty registry.
-func NewKeyRegistry() *KeyRegistry {
-	return &KeyRegistry{
+// NewRegistry creates an empty registry.
+func NewRegistry() *Registry {
+	return &Registry{
 		index: make(map[KeyAction]int),
 	}
 }
 
 // Register adds an action definition to the registry.
-func (r *KeyRegistry) Register(def ActionDef) {
+func (r *Registry) Register(def ActionDef) {
 	r.defs = append(r.defs, def)
 	r.index[def.Action] = len(r.defs) - 1
 }
 
 // Match finds an action matching the key event in the given state.
-// ch is the rune (non-zero for printable keys), key is the gocui.Key (for special keys).
-func (r *KeyRegistry) Match(ch rune, key gocui.Key, mod gocui.Modifier, state AppState) (ActionDef, bool) {
+func (r *Registry) Match(ch rune, key gocui.Key, mod gocui.Modifier, state AppState) (ActionDef, bool) {
 	for _, def := range r.defs {
 		if !stateMatch(def.States, state) {
 			continue
@@ -48,14 +47,14 @@ func (r *KeyRegistry) Match(ch rune, key gocui.Key, mod gocui.Modifier, state Ap
 }
 
 // AllActions returns all registered actions in registration order.
-func (r *KeyRegistry) AllActions() []ActionDef {
+func (r *Registry) AllActions() []ActionDef {
 	result := make([]ActionDef, len(r.defs))
 	copy(result, r.defs)
 	return result
 }
 
 // BindingsFor returns the key bindings for a specific action.
-func (r *KeyRegistry) BindingsFor(action KeyAction) []KeyBinding {
+func (r *Registry) BindingsFor(action KeyAction) []KeyBinding {
 	idx, ok := r.index[action]
 	if !ok {
 		return nil
@@ -67,7 +66,7 @@ func (r *KeyRegistry) BindingsFor(action KeyAction) []KeyBinding {
 }
 
 // FirstRune returns the first rune binding for an action, or 0 if none.
-func (r *KeyRegistry) FirstRune(action KeyAction) rune {
+func (r *Registry) FirstRune(action KeyAction) rune {
 	idx, ok := r.index[action]
 	if !ok {
 		return 0
@@ -81,7 +80,7 @@ func (r *KeyRegistry) FirstRune(action KeyAction) rune {
 }
 
 // FirstKey returns the first gocui.Key binding for an action, or 0 if none.
-func (r *KeyRegistry) FirstKey(action KeyAction) gocui.Key {
+func (r *Registry) FirstKey(action KeyAction) gocui.Key {
 	idx, ok := r.index[action]
 	if !ok {
 		return 0
@@ -103,14 +102,14 @@ func stateMatch(states []AppState, target AppState) bool {
 	return false
 }
 
-// allAppStates returns all valid AppState values.
-func allAppStates() []AppState {
+// AllAppStates returns all valid AppState values.
+func AllAppStates() []AppState {
 	return []AppState{StateMain, StateFullInsert, StateFullNormal}
 }
 
-// DefaultKeyRegistry returns the default lazyclaude key registry.
-func DefaultKeyRegistry() *KeyRegistry {
-	r := NewKeyRegistry()
+// Default returns the default lazyclaude key registry.
+func Default() *Registry {
+	r := NewRegistry()
 
 	r.Register(ActionDef{
 		Action:   ActionQuit,
@@ -146,13 +145,13 @@ func DefaultKeyRegistry() *KeyRegistry {
 		Action:   ActionCursorUp,
 		Name:     "Cursor Up",
 		Bindings: []KeyBinding{{Rune: 'k'}, {Key: gocui.KeyArrowUp}},
-		States:   allAppStates(),
+		States:   AllAppStates(),
 	})
 	r.Register(ActionDef{
 		Action:   ActionCursorDown,
 		Name:     "Cursor Down",
 		Bindings: []KeyBinding{{Rune: 'j'}, {Key: gocui.KeyArrowDown}},
-		States:   allAppStates(),
+		States:   AllAppStates(),
 	})
 	r.Register(ActionDef{
 		Action:   ActionNewSession,
@@ -170,25 +169,25 @@ func DefaultKeyRegistry() *KeyRegistry {
 		Action:   ActionPopupAccept,
 		Name:     "Accept",
 		Bindings: []KeyBinding{{Rune: 'y'}, {Rune: '1'}},
-		States:   allAppStates(),
+		States:   AllAppStates(),
 	})
 	r.Register(ActionDef{
 		Action:   ActionPopupAllow,
 		Name:     "Allow Always",
 		Bindings: []KeyBinding{{Rune: 'a'}, {Rune: '2'}},
-		States:   allAppStates(),
+		States:   AllAppStates(),
 	})
 	r.Register(ActionDef{
 		Action:   ActionPopupReject,
 		Name:     "Reject",
 		Bindings: []KeyBinding{{Rune: '3'}},
-		States:   allAppStates(),
+		States:   AllAppStates(),
 	})
 	r.Register(ActionDef{
 		Action:   ActionPopupCancel,
 		Name:     "Cancel / Suspend",
 		Bindings: []KeyBinding{{Key: gocui.KeyEsc}},
-		States:   allAppStates(),
+		States:   AllAppStates(),
 	})
 
 	return r
