@@ -34,10 +34,14 @@ func newServerCmd() *cobra.Command {
 			}
 
 			paths := config.DefaultPaths()
+			binaryPath := os.Args[0]
+			if b := os.Getenv("LAZYCLAUDE_POPUP_BINARY"); b != "" {
+				binaryPath = b
+			}
 			cfg := server.Config{
 				Port:       port,
 				Token:      token,
-				BinaryPath: os.Args[0],
+				BinaryPath: binaryPath,
 				IDEDir:     paths.IDEDir,
 				PortFile:   paths.PortFile(),
 				RuntimeDir: paths.RuntimeDir,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
@@ -32,15 +33,21 @@ func (p *PopupOrchestrator) SpawnToolPopup(ctx context.Context, window, toolName
 	go func() {
 		w, h := EstimatePopupSize(toolName, toolInput, 200, 50) // TODO: get real term size
 		cmd := fmt.Sprintf("%s tool --window %s --send-keys", p.binary, window)
+		env := map[string]string{
+			"TOOL_NAME":  toolName,
+			"TOOL_INPUT": toolInput,
+			"TOOL_CWD":   toolCWD,
+		}
+		// Pass tmux socket so popup's --send-keys uses the correct server
+		if s := os.Getenv("LAZYCLAUDE_TMUX_SOCKET"); s != "" {
+			env["LAZYCLAUDE_TMUX_SOCKET"] = s
+		}
 		opts := tmux.PopupOpts{
+			Target: window,
 			Width:  w,
 			Height: h,
 			Cmd:    cmd,
-			Env: map[string]string{
-				"TOOL_NAME":  toolName,
-				"TOOL_INPUT": toolInput,
-				"TOOL_CWD":   toolCWD,
-			},
+			Env:    env,
 		}
 		if err := p.tmux.DisplayPopup(ctx, opts); err != nil {
 			p.log.Printf("popup: spawn tool: %v", err)
