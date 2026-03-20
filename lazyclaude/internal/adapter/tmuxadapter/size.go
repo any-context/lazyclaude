@@ -1,4 +1,4 @@
-package popup
+package tmuxadapter
 
 // EstimatePopupSize returns width and height percentages for a popup
 // based on tool name and input length.

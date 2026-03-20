@@ -15,7 +15,7 @@ import (
 	"github.com/KEMSHlM/lazyclaude/internal/core/model"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
-	"github.com/KEMSHlM/lazyclaude/internal/popup"
+	"github.com/KEMSHlM/lazyclaude/internal/adapter/tmuxadapter"
 )
 
 const pendingWindowFile = "lazyclaude-pending-window"
@@ -24,7 +24,7 @@ const pendingWindowFile = "lazyclaude-pending-window"
 type Handler struct {
 	state      *State
 	tmux       tmux.Client
-	popupOrch  *popup.PopupOrchestrator
+	popupOrch  *tmuxadapter.PopupOrchestrator
 	log        *log.Logger
 	runtimeDir string // for writing notification files
 }
@@ -44,7 +44,7 @@ func (h *Handler) SetRuntimeDir(dir string) {
 }
 
 // SetPopup sets the popup orchestrator for display-popup spawning.
-func (h *Handler) SetPopup(p *popup.PopupOrchestrator) {
+func (h *Handler) SetPopup(p *tmuxadapter.PopupOrchestrator) {
 	h.popupOrch = p
 }
 

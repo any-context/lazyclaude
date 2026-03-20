@@ -20,7 +20,6 @@ import (
 	"github.com/KEMSHlM/lazyclaude/internal/core/model"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
-	"github.com/KEMSHlM/lazyclaude/internal/popup"
 	"nhooyr.io/websocket"
 )
 
@@ -40,7 +39,7 @@ type Server struct {
 	state        *State
 	handler      *Handler
 	lock         *LockManager
-	popupOrch    *popup.PopupOrchestrator
+	popupOrch    *tmuxadapter.PopupOrchestrator
 	tmux         tmux.Client
 	log          *log.Logger
 	notifyBroker *event.Broker[model.Event]
@@ -59,7 +58,7 @@ func New(cfg Config, tmuxClient tmux.Client, logger *log.Logger) *Server {
 	handler.SetRuntimeDir(cfg.RuntimeDir)
 	lockMgr := NewLockManager(cfg.IDEDir)
 
-	popupOrch := popup.NewPopupOrchestrator(cfg.BinaryPath, tmuxClient, logger)
+	popupOrch := tmuxadapter.NewPopupOrchestrator(cfg.BinaryPath, tmuxClient, logger)
 	handler.SetPopup(popupOrch)
 
 	s := &Server{

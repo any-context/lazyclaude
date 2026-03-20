@@ -1,4 +1,4 @@
-package popup
+package tmuxadapter
 
 import (
 	"context"

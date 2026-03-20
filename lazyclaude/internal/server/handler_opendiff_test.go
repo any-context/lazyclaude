@@ -11,7 +11,7 @@ import (
 	"github.com/KEMSHlM/lazyclaude/internal/core/choice"
 	"github.com/KEMSHlM/lazyclaude/internal/core/config"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
-	"github.com/KEMSHlM/lazyclaude/internal/popup"
+	"github.com/KEMSHlM/lazyclaude/internal/adapter/tmuxadapter"
 	"github.com/KEMSHlM/lazyclaude/internal/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,7 +34,7 @@ func TestHandler_OpenDiff_WithPopup_StoresDiffChoice(t *testing.T) {
 
 	// Create popup orchestrator with mock tmux client.
 	// MockClient.DisplayPopup returns immediately (simulates popup close).
-	orch := popup.NewPopupOrchestrator("lazyclaude", mock, logger)
+	orch := tmuxadapter.NewPopupOrchestrator("lazyclaude", mock, logger)
 	handler.SetPopup(orch)
 
 	// Pre-write the choice file that `lazyclaude diff` would write on exit.
@@ -79,7 +79,7 @@ func TestHandler_OpenDiff_WithPopup_RejectChoice(t *testing.T) {
 	tmpDir := t.TempDir()
 	handler.SetRuntimeDir(tmpDir)
 
-	orch := popup.NewPopupOrchestrator("lazyclaude", mock, logger)
+	orch := tmuxadapter.NewPopupOrchestrator("lazyclaude", mock, logger)
 	handler.SetPopup(orch)
 
 	paths := config.Paths{RuntimeDir: tmpDir}
@@ -115,7 +115,7 @@ func TestHandler_OpenDiff_WithPopup_CancelNotStored(t *testing.T) {
 	tmpDir := t.TempDir()
 	handler.SetRuntimeDir(tmpDir)
 
-	orch := popup.NewPopupOrchestrator("lazyclaude", mock, logger)
+	orch := tmuxadapter.NewPopupOrchestrator("lazyclaude", mock, logger)
 	handler.SetPopup(orch)
 
 	// Write Cancel choice (user pressed Esc)
