@@ -1,10 +1,11 @@
-package choice
+package tmuxadapter
 
 import (
 	"context"
 	"fmt"
 	"strings"
 
+	"github.com/KEMSHlM/lazyclaude/internal/core/choice"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 )
 
@@ -12,10 +13,10 @@ const sessionPrefix = "lazyclaude"
 
 // choiceToKey maps a Choice to the key Claude Code's permission dialog expects.
 // Single key press selects immediately (no Enter needed).
-var choiceToKey = map[Choice]string{
-	Accept: "1",
-	Allow:  "2",
-	Reject: "3",
+var choiceToKey = map[choice.Choice]string{
+	choice.Accept: "1",
+	choice.Allow:  "2",
+	choice.Reject: "3",
 }
 
 // SendToPane sends the user's choice as a key to Claude Code's permission dialog
@@ -25,8 +26,8 @@ var choiceToKey = map[Choice]string{
 // If the choice is Cancel, no key is sent (safe no-op).
 // The window parameter is a bare window ID (e.g., "@3") or a full target
 // (e.g., "lazyclaude:@3"). If no session prefix is present, "lazyclaude:" is prepended.
-func SendToPane(ctx context.Context, client tmux.Client, window string, c Choice) error {
-	if c == Cancel {
+func SendToPane(ctx context.Context, client tmux.Client, window string, c choice.Choice) error {
+	if c == choice.Cancel {
 		return nil
 	}
 

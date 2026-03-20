@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/KEMSHlM/lazyclaude/internal/adapter/tmuxadapter"
 	"github.com/KEMSHlM/lazyclaude/internal/core/choice"
 	"github.com/KEMSHlM/lazyclaude/internal/core/config"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
@@ -48,7 +49,7 @@ func runDiffPopup(window, oldFile, newFile string, sendKeys bool) error {
 			target = "lazyclaude:" + window
 		}
 		if content, capErr := client.CapturePaneANSI(context.Background(), target); capErr == nil {
-			maxOption = choice.DetectMaxOption(content)
+			maxOption = tmuxadapter.DetectMaxOption(content)
 		}
 	}
 
@@ -234,7 +235,7 @@ func runDiffPopup(window, oldFile, newFile string, sendKeys bool) error {
 		} else {
 			client = tmux.NewExecClient()
 		}
-		if err := choice.SendToPane(context.Background(), client, window, choiceVal); err != nil {
+		if err := tmuxadapter.SendToPane(context.Background(), client, window, choiceVal); err != nil {
 			fmt.Fprintf(os.Stderr, "send-keys: %v\n", err)
 		}
 	}

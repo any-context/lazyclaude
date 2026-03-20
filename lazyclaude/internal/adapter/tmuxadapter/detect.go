@@ -1,4 +1,4 @@
-package choice
+package tmuxadapter
 
 import (
 	"regexp"

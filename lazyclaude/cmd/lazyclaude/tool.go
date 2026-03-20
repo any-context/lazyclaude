@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/KEMSHlM/lazyclaude/internal/adapter/tmuxadapter"
 	"github.com/KEMSHlM/lazyclaude/internal/core/choice"
 	"github.com/KEMSHlM/lazyclaude/internal/core/config"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
@@ -56,7 +57,7 @@ func runToolPopup(window, toolName, toolInput, toolCWD string, sendKeys bool) er
 			target = "lazyclaude:" + window
 		}
 		if content, err := client.CapturePaneANSI(context.Background(), target); err == nil {
-			maxOption = choice.DetectMaxOption(content)
+			maxOption = tmuxadapter.DetectMaxOption(content)
 		}
 	}
 
@@ -156,7 +157,7 @@ func runToolPopup(window, toolName, toolInput, toolCWD string, sendKeys bool) er
 		} else {
 			client = tmux.NewExecClient()
 		}
-		if err := choice.SendToPane(context.Background(), client, window, choiceVal); err != nil {
+		if err := tmuxadapter.SendToPane(context.Background(), client, window, choiceVal); err != nil {
 			fmt.Fprintf(os.Stderr, "send-keys: %v\n", err)
 		}
 	}

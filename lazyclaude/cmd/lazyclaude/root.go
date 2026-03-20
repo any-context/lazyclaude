@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KEMSHlM/lazyclaude/internal/adapter/tmuxadapter"
 	"github.com/KEMSHlM/lazyclaude/internal/core/config"
 	"github.com/KEMSHlM/lazyclaude/internal/core/event"
 	"github.com/KEMSHlM/lazyclaude/internal/core/lifecycle"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
-	"github.com/KEMSHlM/lazyclaude/internal/core/choice"
 	"github.com/KEMSHlM/lazyclaude/internal/gui"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
 	"github.com/KEMSHlM/lazyclaude/internal/server"
@@ -322,7 +322,7 @@ func (a *sessionAdapter) PendingNotifications() []*notify.ToolNotification {
 }
 
 func (a *sessionAdapter) SendChoice(window string, c gui.Choice) error {
-	return choice.SendToPane(context.Background(), a.tmux, window, c)
+	return tmuxadapter.SendToPane(context.Background(), a.tmux, window, c)
 }
 
 // controlManager handles control mode connection lifecycle.

@@ -1,9 +1,9 @@
-package choice_test
+package tmuxadapter_test
 
 import (
 	"testing"
 
-	"github.com/KEMSHlM/lazyclaude/internal/core/choice"
+	"github.com/KEMSHlM/lazyclaude/internal/adapter/tmuxadapter"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -24,7 +24,7 @@ var benchPaneContent = ` Bash command
 
 func BenchmarkDetectMaxOption(b *testing.B) {
 	for b.Loop() {
-		choice.DetectMaxOption(benchPaneContent)
+		tmuxadapter.DetectMaxOption(benchPaneContent)
 	}
 }
 
@@ -36,7 +36,7 @@ func BenchmarkDetectMaxOption_LargePane(b *testing.B) {
 	}
 	lines += benchPaneContent
 	for b.Loop() {
-		choice.DetectMaxOption(lines)
+		tmuxadapter.DetectMaxOption(lines)
 	}
 }
 
@@ -167,7 +167,7 @@ Current dialog:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := choice.DetectMaxOption(tt.input)
+			result := tmuxadapter.DetectMaxOption(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

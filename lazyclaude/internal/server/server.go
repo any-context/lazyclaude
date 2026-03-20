@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KEMSHlM/lazyclaude/internal/core/choice"
+	"github.com/KEMSHlM/lazyclaude/internal/adapter/tmuxadapter"
 	"github.com/KEMSHlM/lazyclaude/internal/core/event"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
@@ -369,7 +369,7 @@ func (s *Server) dispatchToolNotification(window, toolName, input, cwd string) {
 	// Use bare window ID (e.g., "@1") — tmux resolves it across sessions.
 	maxOpt := 3
 	if content, capErr := s.tmux.CapturePaneANSI(context.Background(), window); capErr == nil {
-		maxOpt = choice.DetectMaxOption(content)
+		maxOpt = tmuxadapter.DetectMaxOption(content)
 	}
 
 	// Write notification file for TUI overlay fallback (SSH remote compat).
