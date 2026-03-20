@@ -160,7 +160,7 @@ func TestPopup_ActiveEntry(t *testing.T) {
 
 	entry := app.activeEntry()
 	require.NotNil(t, entry)
-	assert.Equal(t, 0, entry.scrollY)
-	entry.scrollY = 5
-	assert.Equal(t, 5, app.activeEntry().scrollY)
+	assert.Equal(t, 0, entry.popup.ScrollY())
+	entry.popup.SetScrollY(5)
+	assert.Equal(t, 5, app.activeEntry().popup.ScrollY())
 }

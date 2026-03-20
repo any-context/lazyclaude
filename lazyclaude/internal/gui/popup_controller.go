@@ -1,7 +1,6 @@
 package gui
 
 import (
-	"github.com/KEMSHlM/lazyclaude/internal/gui/presentation"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
 )
 
@@ -18,11 +17,8 @@ type PopupController struct {
 
 // popupEntry represents a single popup in the stack.
 type popupEntry struct {
-	notification *notify.ToolNotification
-	scrollY      int
-	diffCache    []string
-	diffKinds    []presentation.DiffLineKind
-	suspended    bool
+	popup     Popup
+	suspended bool
 }
 
 // NewPopupController creates a popup controller with an optional choice sender.
@@ -32,7 +28,13 @@ func NewPopupController(sendFn ChoiceSender) *PopupController {
 
 // Push adds a notification to the popup stack and focuses it.
 func (pc *PopupController) Push(n *notify.ToolNotification) {
-	pc.stack = append(pc.stack, popupEntry{notification: n})
+	pc.stack = append(pc.stack, popupEntry{popup: newPopupFromNotification(n)})
+	pc.focusIdx = len(pc.stack) - 1
+}
+
+// PushPopup adds a Popup directly to the stack and focuses it.
+func (pc *PopupController) PushPopup(p Popup) {
+	pc.stack = append(pc.stack, popupEntry{popup: p})
 	pc.focusIdx = len(pc.stack) - 1
 }
 
@@ -58,12 +60,13 @@ func (pc *PopupController) HasVisible() bool {
 }
 
 // ActiveNotification returns the focused popup's notification, or nil.
+// This is a backward-compatibility helper for code that still uses ToolNotification.
 func (pc *PopupController) ActiveNotification() *notify.ToolNotification {
 	e := pc.ActiveEntry()
 	if e == nil {
 		return nil
 	}
-	return e.notification
+	return notificationFromPopup(e.popup)
 }
 
 // ActiveEntry returns a pointer to the focused popup entry, or nil.
@@ -78,12 +81,21 @@ func (pc *PopupController) ActiveEntry() *popupEntry {
 	return e
 }
 
+// ActivePopup returns the focused Popup, or nil.
+func (pc *PopupController) ActivePopup() Popup {
+	e := pc.ActiveEntry()
+	if e == nil {
+		return nil
+	}
+	return e.popup
+}
+
 // DismissActive removes the focused popup and sends the choice.
 func (pc *PopupController) DismissActive(choice Choice) {
 	if len(pc.stack) == 0 || pc.focusIdx < 0 || pc.focusIdx >= len(pc.stack) {
 		return
 	}
-	window := pc.stack[pc.focusIdx].notification.Window
+	window := pc.stack[pc.focusIdx].popup.Window()
 	pc.stack = append(pc.stack[:pc.focusIdx], pc.stack[pc.focusIdx+1:]...)
 	if pc.focusIdx >= len(pc.stack) {
 		pc.focusIdx = len(pc.stack) - 1
@@ -104,7 +116,7 @@ func (pc *PopupController) DismissAll(choice Choice) {
 	pc.focusIdx = 0
 	if pc.sendFn != nil {
 		for _, e := range entries {
-			pc.sendFn(e.notification.Window, choice)
+			pc.sendFn(e.popup.Window(), choice)
 		}
 	}
 }
@@ -175,4 +187,17 @@ func (pc *PopupController) VisibleIndexOf(stackIdx int) int {
 		}
 	}
 	return idx
+}
+
+// notificationFromPopup extracts the ToolNotification from a Popup,
+// returning nil if the Popup type does not wrap a ToolNotification.
+func notificationFromPopup(p Popup) *notify.ToolNotification {
+	switch v := p.(type) {
+	case *ToolPopup:
+		return v.Notification()
+	case *DiffPopup:
+		return v.Notification()
+	default:
+		return nil
+	}
 }

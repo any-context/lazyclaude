@@ -124,8 +124,8 @@ func TestPopupController_ActiveEntry_Scroll(t *testing.T) {
 
 	entry := pc.ActiveEntry()
 	require.NotNil(t, entry)
-	entry.scrollY = 5
-	assert.Equal(t, 5, pc.ActiveEntry().scrollY)
+	entry.popup.SetScrollY(5)
+	assert.Equal(t, 5, pc.ActiveEntry().popup.ScrollY())
 }
 
 type sentChoicePair struct {

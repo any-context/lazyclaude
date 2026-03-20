@@ -22,11 +22,11 @@ func (a *App) showToolPopup(n *notify.ToolNotification) {
 
 // dismissPopup sends the choice to the focused popup and removes it from the stack.
 func (a *App) dismissPopup(choice Choice) {
-	active := a.popups.ActiveNotification()
+	active := a.popups.ActivePopup()
 	if active == nil {
 		return
 	}
-	window := active.Window
+	window := active.Window()
 	a.popups.DismissActive(choice)
 
 	if a.sessions != nil {
@@ -49,7 +49,7 @@ func (a *App) dismissAllPopups(choice Choice) {
 	if a.sessions != nil {
 		go func() {
 			for _, e := range entries {
-				_ = a.sessions.SendChoice(e.notification.Window, choice)
+				_ = a.sessions.SendChoice(e.popup.Window(), choice)
 			}
 		}()
 	}
@@ -102,10 +102,10 @@ func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
 		}
 		v.Clear()
 
-		if e.notification.IsDiff() {
-			a.renderDiffPopup(v, e)
+		if e.popup.IsDiff() {
+			a.renderDiffPopup(v, e.popup)
 		} else {
-			a.renderToolPopup(v, e.notification)
+			a.renderToolPopup(v, e.popup)
 		}
 
 		if i == a.popups.FocusIndex() {
@@ -140,9 +140,13 @@ func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
 		g.SetViewOnTop(popupActionsViewName)
 
 		visible := a.popups.VisibleCount()
-		n := focusedEntry.notification
+		p := focusedEntry.popup
 
-		maxOpt := n.MaxOption
+		// Determine number of options from notification if available.
+		maxOpt := 0
+		if n := notificationFromPopup(p); n != nil {
+			maxOpt = n.MaxOption
+		}
 		if maxOpt == 0 {
 			maxOpt = 3 // default
 		}
@@ -150,7 +154,7 @@ func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
 		if maxOpt >= 3 {
 			base = " y/a/n"
 		}
-		if n.IsDiff() {
+		if p.IsDiff() {
 			base += " j/k:scroll"
 		}
 		base += " Esc:hide"
@@ -179,23 +183,22 @@ func (a *App) cleanupPopupViews(g *gocui.Gui) {
 	}
 }
 
-func (a *App) renderToolPopup(v *gocui.View, n *notify.ToolNotification) {
-	v.Title = fmt.Sprintf(" %s ", n.ToolName)
-	td := presentation.ParseToolInput(n.ToolName, n.Input, n.CWD)
-	for _, line := range presentation.FormatToolLines(td) {
+func (a *App) renderToolPopup(v *gocui.View, p Popup) {
+	v.Title = p.Title()
+	for _, line := range p.ContentLines() {
 		fmt.Fprintln(v, line)
 	}
 }
 
-func (a *App) renderDiffPopup(v *gocui.View, entry *popupEntry) {
-	n := entry.notification
-	v.Title = fmt.Sprintf(" Diff: %s ", filepath.Base(n.OldFilePath))
+func (a *App) renderDiffPopup(v *gocui.View, p Popup) {
+	v.Title = p.Title()
 
-	diffLines, diffKinds := getDiffLinesForEntry(entry)
+	diffLines := p.ContentLines()
+	diffKinds := p.ContentKinds()
 	_, viewH := v.Size()
 	visibleLines := viewH - 1
 
-	start := entry.scrollY
+	start := p.ScrollY()
 	end := start + visibleLines
 	if end > len(diffLines) {
 		end = len(diffLines)
@@ -220,27 +223,6 @@ func (a *App) renderDiffPopup(v *gocui.View, entry *popupEntry) {
 			fmt.Fprintln(v, line)
 		}
 	}
-}
-
-func getDiffLinesForEntry(entry *popupEntry) ([]string, []presentation.DiffLineKind) {
-	if entry.diffCache != nil {
-		return entry.diffCache, entry.diffKinds
-	}
-
-	n := entry.notification
-	diffOutput := generateDiffFromContents(n.OldFilePath, n.NewContents)
-	parsed := presentation.ParseUnifiedDiff(diffOutput)
-
-	lines := make([]string, len(parsed))
-	kinds := make([]presentation.DiffLineKind, len(parsed))
-	for i, dl := range parsed {
-		lines[i] = presentation.FormatDiffLine(dl, 4)
-		kinds[i] = dl.Kind
-	}
-
-	entry.diffCache = lines
-	entry.diffKinds = kinds
-	return lines, kinds
 }
 
 func generateDiffFromContents(oldFilePath, newContents string) string {

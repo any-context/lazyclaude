@@ -72,13 +72,13 @@ func (a *App) setupGlobalKeybindings() error {
 						a.popupFocusPrev()
 					}
 				} else {
-					entry := a.activeEntry()
-					if entry != nil && entry.notification.IsDiff() {
-						if isDown && entry.diffCache != nil && entry.scrollY < len(entry.diffCache)-1 {
-							entry.scrollY++
+					p := a.popups.ActivePopup()
+					if p != nil && p.IsDiff() {
+						if isDown {
+							p.SetScrollY(p.ScrollY() + 1)
 						}
-						if !isDown && entry.scrollY > 0 {
-							entry.scrollY--
+						if !isDown && p.ScrollY() > 0 {
+							p.SetScrollY(p.ScrollY() - 1)
 						}
 					}
 				}
