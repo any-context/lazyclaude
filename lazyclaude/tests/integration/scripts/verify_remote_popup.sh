@@ -12,14 +12,15 @@
 #   REMOTE_HOST              - SSH target (e.g., "remote" in Docker Compose)
 #   CLAUDE_CODE_OAUTH_TOKEN  - Claude Code auth token (from .env)
 #
-# Usage: verify_remote_popup.sh [binary]
+# Usage: verify_remote_popup.sh [binary] [--mode ssh]
 
-set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/test_lib.sh"
 
-BINARY="${1:-lazyclaude}"
+init_test "Remote Claude Popup E2E" "${1:-lazyclaude}" "${@:2}"
+
 REMOTE="${REMOTE_HOST:-}"
 OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}"
-UI_SOCKET="remote-popup-e2e"
 
 if [ -z "$REMOTE" ]; then
     echo "SKIP: REMOTE_HOST not set" >&2
@@ -30,66 +31,49 @@ if [ -z "$OAUTH_TOKEN" ]; then
     exit 1
 fi
 
-cleanup() {
-    tmux -L "$UI_SOCKET" kill-server 2>/dev/null || true
-    tmux -L lazyclaude kill-server 2>/dev/null || true
-    rm -f /tmp/lazyclaude-mcp.port
-    rm -f "$HOME/.local/share/lazyclaude/state.json"
-    rm -f /tmp/lazyclaude-pending-window
-    # Kill background SSH
+# Override cleanup to also handle SSH
+cleanup_test() {
     [ -n "${SSH_PID:-}" ] && kill "$SSH_PID" 2>/dev/null || true
-    # Clean remote state
     ssh -o BatchMode=yes "$REMOTE" "rm -f ~/.claude/ide/*.lock; tmux kill-server 2>/dev/null" 2>/dev/null || true
-}
-trap cleanup EXIT
-
-cleanup
-sleep 0.5
-
-capture() {
-    tmux -L "$UI_SOCKET" capture-pane -p -t test 2>/dev/null
+    cleanup_test_silent
+    rm -f "$_PREV_FRAME_FILE" "$_CURR_FRAME_FILE" 2>/dev/null || true
 }
 
-wait_for() {
-    local pattern="$1" timeout="${2:-10}" i=0
-    while [ $i -lt $((timeout * 10)) ]; do
-        if capture | grep -qE "$pattern"; then return 0; fi
-        sleep 0.1
-        i=$((i + 1))
-    done
-    return 1
+# Helper: capture remote Claude Code pane via SSH
+capture_remote() {
+    ssh -o BatchMode=yes -o ConnectTimeout=3 "$REMOTE" \
+        "tmux capture-pane -p -t claude-e2e 2>/dev/null" 2>/dev/null || echo "(remote capture failed)"
 }
 
-PASS=0
-FAIL=0
-
-check() {
-    local name="$1" result="$2"
-    if [ "$result" -eq 0 ]; then
-        echo "  PASS: $name" >&2
-        PASS=$((PASS + 1))
-    else
-        echo "  FAIL: $name" >&2
-        echo "  --- capture ---" >&2
-        capture >&2
-        echo "  --- end ---" >&2
-        FAIL=$((FAIL + 1))
-    fi
+# Helper: display remote pane as a frame
+frame_remote() {
+    local step_name="$1"
+    FRAME_NUM=$((FRAME_NUM + 1))
+    _draw_frame "[REMOTE] $step_name" "$(capture_remote)"
 }
 
-echo "=== Remote Claude popup E2E ===" >&2
-echo "  binary: $BINARY" >&2
-echo "  remote: $REMOTE" >&2
-echo "" >&2
+# --- 0. Verify SSH connectivity (shown as terminal screen) ---
+tmux -L "$TEST_SOCKET" new-session -d -s test -x "$TEST_WIDTH" -y "$TEST_HEIGHT"
+send_keys "ssh -o BatchMode=yes -o ConnectTimeout=5 $REMOTE" Enter
+sleep 3
+frame "SSH to $REMOTE"
+R=0; capture | grep -qE "root@|#|\\\$|Last login" || R=1
+check "SSH connection to $REMOTE" $R
+send_keys "hostname && uname -a" Enter
+sleep 1
+frame "remote shell"
+send_keys "exit" Enter
+sleep 1
 
 # --- 1. Start lazyclaude TUI ---
-echo "--- Step 1: Start TUI ---" >&2
-tmux -L "$UI_SOCKET" new-session -d -s test -x 120 -y 40 "$BINARY; sleep 999"
-wait_for "no sessions" 10 || { echo "FAIL: TUI did not start" >&2; exit 1; }
-check "TUI started" 0
+send_keys "$BINARY; sleep 999" Enter
+if ! wait_for "no sessions" 5; then
+    frame "TUI startup failed"
+    exit 1
+fi
+frame "TUI started"
 
 # --- 2. Wait for MCP server ---
-echo "--- Step 2: Wait for MCP server ---" >&2
 PORT_FILE="/tmp/lazyclaude-mcp.port"
 for i in $(seq 1 100); do
     [ -f "$PORT_FILE" ] && break
@@ -97,94 +81,76 @@ for i in $(seq 1 100); do
 done
 [ -f "$PORT_FILE" ] || { echo "FAIL: MCP port file not found" >&2; exit 1; }
 MCP_PORT=$(cat "$PORT_FILE")
-echo "  MCP port: $MCP_PORT" >&2
+frame "MCP server ready (port $MCP_PORT)"
 
 # --- 3. Read auth token ---
-echo "--- Step 3: Read auth token ---" >&2
 LOCK_FILE="$HOME/.claude/ide/${MCP_PORT}.lock"
-for i in $(seq 1 50); do
-    [ -f "$LOCK_FILE" ] && break
-    sleep 0.1
-done
+for i in $(seq 1 50); do [ -f "$LOCK_FILE" ] && break; sleep 0.1; done
 [ -f "$LOCK_FILE" ] || { echo "FAIL: lock file not found" >&2; exit 1; }
-AUTH_TOKEN=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$LOCK_FILE','utf8')).authToken)")
-echo "  auth token: ${AUTH_TOKEN:0:8}..." >&2
-check "MCP server ready" 0
+AUTH_TOKEN=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$LOCK_FILE','utf8')).authToken)") || true
+R=0; [ -n "$AUTH_TOKEN" ] || R=1
+check "auth token read from lock file" $R
+[ $R -eq 0 ] || { frame "auth token read failed"; exit 1; }
 
 # --- 4. Pending window for remote ---
-echo "--- Step 4: Prepare remote connection ---" >&2
 echo "remote-claude" > /tmp/lazyclaude-pending-window
 LOCK_JSON=$(node -e "console.log(JSON.stringify({pid:0,authToken:'$AUTH_TOKEN',transport:'ws'}))")
 
 # --- 5. SSH: setup remote + start Claude interactively ---
-echo "--- Step 5: Start Claude interactively on remote ---" >&2
 ssh -o BatchMode=yes -o ConnectTimeout=5 \
     -R "${MCP_PORT}:127.0.0.1:${MCP_PORT}" \
     "$REMOTE" bash <<REMOTE_SCRIPT &
 set -e
 
-# Write lock file
 mkdir -p ~/.claude/ide
 printf '%s' '$LOCK_JSON' > ~/.claude/ide/${MCP_PORT}.lock
 
-# Skip Claude onboarding, clear cached sessions so nothing is auto-approved
 rm -rf ~/.claude/projects/ ~/.claude/statsig/ ~/.claude/todos/ 2>/dev/null || true
 mkdir -p /tmp/e2e-test
 cat > ~/.claude.json <<'CJSON'
 {"hasCompletedOnboarding":true,"numStartups":10,"projects":{"/tmp/e2e-test":{"hasTrustDialogAccepted":true,"allowedTools":[]}}}
 CJSON
 
-# Start Claude interactively inside a tmux session on the remote.
-# Use a fresh working dir (no session history) so permission dialog appears.
 tmux new-session -d -s claude-e2e -x 80 -y 24 -c /tmp/e2e-test
-
-# Launch Claude inside the tmux session
 tmux send-keys -t claude-e2e \
     "CLAUDE_CODE_OAUTH_TOKEN='$OAUTH_TOKEN' CLAUDE_CODE_AUTO_CONNECT_IDE=true claude" Enter
 
-# Wait for Claude to initialize
 sleep 10
 
-# Send a prompt with a Bash command (2-option dialog: Yes/No, no "allow always")
-tmux send-keys -t claude-e2e 'Run this exact bash command: for i in $(seq 1 10); do echo "line $i"; done && ls /tmp && ps aux | head -5 && echo "done"' Enter
-
-# Debug: show what Claude is doing
-sleep 15
-echo "=== REMOTE CLAUDE PANE ===" >&2
-tmux capture-pane -p -t claude-e2e >&2
-echo "=== END REMOTE PANE ===" >&2
-
-# Check if lock file exists
-ls -la ~/.claude/ide/ >&2 2>/dev/null || echo "no lock files" >&2
+tmux send-keys -t claude-e2e 'Run this exact bash command: for i in \$(seq 1 10); do echo "line \$i"; done && ls /tmp && ps aux | head -5 && echo "done"' Enter
 
 # Keep SSH alive for the tunnel
-sleep 45
+sleep 60
 REMOTE_SCRIPT
 SSH_PID=$!
-echo "  SSH PID: $SSH_PID" >&2
 
-# --- 6. Wait for popup ---
-echo "--- Step 6: Wait for popup (up to 60s) ---" >&2
+frame "SSH tunnel started (PID: $SSH_PID)"
+
+# --- 6. Wait for Claude to initialize on remote ---
+sleep 12
+frame_remote "Claude Code initializing"
+
+# --- 7. Wait for prompt to be sent + permission dialog ---
+sleep 18
+frame_remote "Claude Code permission dialog"
+
+# --- 8. Wait for popup on local TUI ---
 R=0
-wait_for "Bash|Write|Read|Edit|command|echo" 60 || R=1
+wait_for "Bash|Write|Read|Edit|command|echo" 30 || R=1
+frame "local TUI after notification"
 check "popup appeared with tool name" $R
 
 if [ $R -eq 0 ]; then
-    echo "" >&2
-    echo "--- popup content ---" >&2
-    capture >&2
-    echo "--- end ---" >&2
+    # Show remote and local side-by-side (sequentially)
+    frame_remote "remote at popup time"
+    frame "local popup content"
 
-    # --- 7. Verify action bar adapts to dialog option count ---
-    # Claude may show 2 or 3 options depending on the command.
-    # Check that the popup action bar is present and matches.
+    # --- 9. Verify action bar adapts to dialog option count ---
     C=$(capture)
     if echo "$C" | grep -q "allow always"; then
-        # 3-option: should show y/a/n
         R=0; echo "$C" | grep -q "y/a/n" || R=1
         check "3-option dialog: action bar shows y/a/n" $R
     else
-        # 2-option: should show y/n (NOT y/a/n)
         R=0; echo "$C" | grep -q "y/a/n" && R=1
         check "2-option dialog: action bar does NOT show y/a/n" $R
         R=0; echo "$C" | grep -qE "y.*n|yes.*no" || R=1
@@ -192,6 +158,4 @@ if [ $R -eq 0 ]; then
     fi
 fi
 
-echo "" >&2
-echo "Results: $PASS passed, $FAIL failed" >&2
-[ "$FAIL" -eq 0 ]
+finish_test

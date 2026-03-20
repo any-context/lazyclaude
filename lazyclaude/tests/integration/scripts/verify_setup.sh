@@ -4,37 +4,10 @@
 # PASS: all checks pass
 # FAIL: any check fails
 
-set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/test_lib.sh"
 
-BINARY="${1:-lazyclaude}"
-SOCKET="setup-test"
-
-cleanup() {
-    tmux -L "$SOCKET" kill-server 2>/dev/null || true
-    rm -f /tmp/lazyclaude-mcp.port
-    rm -f "$HOME/.local/share/lazyclaude/state.json"
-    rm -f "$HOME/.claude/settings.json.bak"
-}
-trap cleanup EXIT
-
-cleanup
-sleep 0.3
-
-PASS=0
-FAIL=0
-
-check() {
-    local name="$1" result="$2"
-    if [ "$result" -eq 0 ]; then
-        echo "  PASS: $name" >&2
-        PASS=$((PASS + 1))
-    else
-        echo "  FAIL: $name" >&2
-        FAIL=$((FAIL + 1))
-    fi
-}
-
-echo "=== lazyclaude setup test ===" >&2
+init_test "Setup Command Test" "${1:-lazyclaude}" "${@:2}"
 
 # Backup existing settings
 [ -f "$HOME/.claude/settings.json" ] && cp "$HOME/.claude/settings.json" "$HOME/.claude/settings.json.bak"
@@ -43,10 +16,17 @@ echo "=== lazyclaude setup test ===" >&2
 rm -f "$HOME/.claude/settings.json"
 
 # Need a tmux session for setup to work
-tmux -L "$SOCKET" new-session -d -s test -x 80 -y 24
+tmux -L "$TEST_SOCKET" new-session -d -s test -x "$TEST_WIDTH" -y "$TEST_HEIGHT"
+
+frame "before setup (clean state)"
 
 # Run setup
-LAZYCLAUDE_TMUX_SOCKET="$SOCKET" "$BINARY" setup 2>&1
+LAZYCLAUDE_TMUX_SOCKET="$TEST_SOCKET" "$BINARY" setup 2>&1
+
+# Show setup output in a frame
+send_keys "echo '--- setup complete ---'" Enter
+sleep 0.5
+frame "after setup"
 
 # 1. MCP server port file should exist (server starts async, wait)
 for i in $(seq 1 30); do [ -f /tmp/lazyclaude-mcp.port ] && break; sleep 0.1; done
@@ -55,7 +35,9 @@ check "MCP port file exists" $R
 
 if [ $R -eq 0 ]; then
     PORT=$(cat /tmp/lazyclaude-mcp.port)
-    echo "  MCP port: $PORT" >&2
+    send_keys "echo 'MCP port: $PORT'" Enter
+    sleep 0.3
+    frame "MCP port file"
 fi
 
 # 2. Claude settings.json should have hooks
@@ -63,6 +45,11 @@ R=0; [ -f "$HOME/.claude/settings.json" ] || R=1
 check "settings.json exists" $R
 
 if [ $R -eq 0 ]; then
+    # Display settings.json content in the pane for visual verification
+    send_keys "cat ~/.claude/settings.json | head -30" Enter
+    sleep 0.5
+    frame "settings.json content"
+
     R=0; grep -q "/notify" "$HOME/.claude/settings.json" || R=1
     check "settings.json contains /notify hook" $R
 
@@ -74,12 +61,14 @@ if [ $R -eq 0 ]; then
 fi
 
 # 3. Running setup again should be idempotent (no error)
-R=0; LAZYCLAUDE_TMUX_SOCKET="$SOCKET" "$BINARY" setup 2>&1 || R=1
+R=0; LAZYCLAUDE_TMUX_SOCKET="$TEST_SOCKET" "$BINARY" setup 2>&1 || R=1
 check "setup idempotent (no error on re-run)" $R
+
+send_keys "echo '--- idempotent re-run complete ---'" Enter
+sleep 0.3
+frame "after idempotent re-run"
 
 # Restore backup
 [ -f "$HOME/.claude/settings.json.bak" ] && mv "$HOME/.claude/settings.json.bak" "$HOME/.claude/settings.json"
 
-echo "" >&2
-echo "Results: $PASS passed, $FAIL failed" >&2
-[ "$FAIL" -eq 0 ]
+finish_test

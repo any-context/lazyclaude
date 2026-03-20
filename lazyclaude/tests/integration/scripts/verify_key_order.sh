@@ -6,50 +6,39 @@
 # PASS: characters appear in order in capture-pane
 # FAIL: characters are reordered
 
-set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/test_lib.sh"
 
-BINARY="${1:-lazyclaude}"
-UI_SOCKET="keyorder-test"
+init_test "Key Order Test" "${1:-lazyclaude}" "${@:2}"
 
-cleanup() {
-    tmux -L "$UI_SOCKET" kill-server 2>/dev/null || true
-    tmux -L lazyclaude kill-server 2>/dev/null || true
-    rm -f /tmp/lazyclaude-mcp.port
-    rm -f "$HOME/.local/share/lazyclaude/state.json"
-}
-trap cleanup EXIT
-
-cleanup
-sleep 0.5
-
-echo "Key order test: $BINARY" >&2
-
-tmux -L "$UI_SOCKET" new-session -d -s test -x 60 -y 25 "$BINARY"
+start_session "$BINARY"
 sleep 3
+frame "TUI started"
 
 # Create session
-tmux -L "$UI_SOCKET" send-keys -t test "n"
+send_keys "n"
 sleep 2
+frame "session created"
 
 # Enter full-screen
-tmux -L "$UI_SOCKET" send-keys -t test "Enter"
+send_keys "Enter"
 sleep 3
+frame "full-screen entered"
 
 # Wait for Claude Code prompt
 sleep 5
+frame "waiting for Claude Code prompt"
 
 # Send Japanese characters rapidly (the actual bug scenario)
-tmux -L "$UI_SOCKET" send-keys -t test "あ" "い" "う" "え" "お"
+send_keys "あ" "い" "う" "え" "お"
 sleep 2
+frame "after sending あいうえお"
 
-OUTPUT=$(tmux -L "$UI_SOCKET" capture-pane -p -t test 2>/dev/null)
-echo "$OUTPUT" >&2
-echo "" >&2
-
+OUTPUT=$(capture)
 if echo "$OUTPUT" | grep -q "あいうえお"; then
-    echo "  PASS: key order preserved (あいうえお found)" >&2
-    exit 0
+    check "key order preserved (あいうえお found)" 0
 else
-    echo "  FAIL: あいうえお not found in output" >&2
-    exit 1
+    check "key order preserved (あいうえお found)" 1
 fi
+
+finish_test

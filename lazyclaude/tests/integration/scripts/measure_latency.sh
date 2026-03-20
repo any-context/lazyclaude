@@ -8,36 +8,13 @@
 # PASS: both launches have similar latency (< 2x difference)
 # FAIL: 1st launch is significantly slower
 
-set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/test_lib.sh"
 
-BINARY="${1:-lazyclaude}"
+init_test "Latency Measurement" "${1:-lazyclaude}" "${@:2}"
+
 SAMPLES=5
 MAX_WAIT_MS=3000
-UI_SOCKET="perf-ui"
-
-cleanup() {
-    tmux -L "$UI_SOCKET" kill-server 2>/dev/null || true
-    tmux -L lazyclaude kill-server 2>/dev/null || true
-    rm -f /tmp/lazyclaude-mcp.port
-    rm -f "$HOME/.local/share/lazyclaude/state.json"
-}
-trap cleanup EXIT
-
-capture() {
-    tmux -L "$UI_SOCKET" capture-pane -p -t perf 2>/dev/null
-}
-
-wait_for() {
-    local pattern="$1" timeout="${2:-15}" i=0
-    while [ $i -lt $((timeout * 10)) ]; do
-        if capture | grep -q "$pattern"; then return 0; fi
-        sleep 0.1
-        i=$((i + 1))
-    done
-    echo "TIMEOUT waiting for '$pattern'" >&2
-    capture >&2
-    return 1
-}
 
 now_ms() {
     python3 -c 'import time; print(int(time.time()*1000))'
@@ -49,7 +26,7 @@ measure_key() {
     local start elapsed
 
     start=$(now_ms)
-    tmux -L "$UI_SOCKET" send-keys -t perf "$char"
+    send_keys "$char"
 
     while true; do
         elapsed=$(( $(now_ms) - start ))
@@ -67,26 +44,29 @@ measure_key() {
 
 run_measurement() {
     local label="$1"
-    echo "=== $label launch ===" >&2
+    echo "" >&2
+    echo "--- $label launch ---" >&2
 
     # Start lazyclaude in outer tmux
-    tmux -L "$UI_SOCKET" new-session -d -s perf -x 60 -y 25 "$BINARY"
+    start_session "$BINARY"
     sleep 2
 
     if capture | grep -q "> "; then
         echo "  Existing session found" >&2
     else
         echo "  Creating session..." >&2
-        tmux -L "$UI_SOCKET" send-keys -t perf "n"
+        send_keys "n"
         sleep 1
     fi
 
     wait_for ">" 15 || { echo "FAIL: no session" >&2; return 1; }
+    frame "$label: session list"
 
     # Enter full-screen
-    tmux -L "$UI_SOCKET" send-keys -t perf "Enter"
+    send_keys "Enter"
     sleep 2
     wait_for "INSERT" 10 || { echo "FAIL: no full-screen" >&2; return 1; }
+    frame "$label: full-screen entered"
 
     # Wait for Claude Code prompt (the > or input area)
     echo "  Waiting for Claude Code ready..." >&2
@@ -108,34 +88,28 @@ run_measurement() {
     local avg=$((total / SAMPLES))
     echo "  Measurements: ${measurements[*]}" >&2
     echo "  Average: ${avg}ms" >&2
-    echo "  --- render ---" >&2
-    capture >&2
-    echo "" >&2
+    frame "$label: measurement complete (avg ${avg}ms)"
 
     # Send Escape to cancel any partial input, then exit
-    tmux -L "$UI_SOCKET" send-keys -t perf "Escape"
+    send_keys "Escape"
     sleep 0.3
-    tmux -L "$UI_SOCKET" send-keys -t perf "C-\\"
+    send_keys "C-\\"
     sleep 0.3
-    tmux -L "$UI_SOCKET" send-keys -t perf "q"
+    send_keys "q"
     sleep 0.5
-    tmux -L "$UI_SOCKET" send-keys -t perf "q"
+    send_keys "q"
     sleep 1
-    tmux -L "$UI_SOCKET" kill-server 2>/dev/null || true
+    tmux -L "$TEST_SOCKET" kill-server 2>/dev/null || true
     sleep 1
 
     echo "$avg"
 }
 
-echo "Latency measurement: $BINARY" >&2
-echo "" >&2
-
 # 1st launch: kill lazyclaude tmux to ensure clean state
-cleanup
+cleanup_test_silent
 sleep 1
 
 avg1=$(run_measurement "1st")
-echo "" >&2
 
 # 2nd launch: lazyclaude tmux session still alive
 avg2=$(run_measurement "2nd")
@@ -154,9 +128,9 @@ ratio=$((avg1 * 100 / avg2))
 echo "  Ratio: ${ratio}%" >&2
 
 if [ "$ratio" -le 200 ]; then
-    echo "  PASS" >&2
-    exit 0
+    check "latency ratio <= 200% (${ratio}%)" 0
 else
-    echo "  FAIL: 1st launch ${ratio}% slower" >&2
-    exit 1
+    check "latency ratio <= 200% (${ratio}%)" 1
 fi
+
+finish_test

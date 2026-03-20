@@ -9,7 +9,8 @@
 #
 # This script MUST run inside a tmux session.
 
-set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/test_lib.sh"
 
 BINARY="${1:-lazyclaude}"
 SOCKET="${LAZYCLAUDE_TMUX_SOCKET:-}"
@@ -19,28 +20,23 @@ if [ -z "$SOCKET" ]; then
     exit 1
 fi
 
-TMPDIR=$(mktemp -d /tmp/lazyclaude-popup-e2e-XXXX)
-cleanup() {
-    tmux -L "$SOCKET" kill-window -t lazyclaude:replay 2>/dev/null || true
-    rm -rf "$TMPDIR"
-}
-trap cleanup EXIT
+# Override test socket to use the provided one
+TEST_SOCKET="$SOCKET"
 
+_TEST_NAME="tmux display-popup VISUAL E2E"
 PASS=0
 FAIL=0
+FRAME_NUM=0
+_PREV_FRAME_FILE=$(mktemp /tmp/frame-prev-XXXX)
+_CURR_FRAME_FILE=$(mktemp /tmp/frame-curr-XXXX)
 
-check() {
-    local name="$1" result="$2"
-    if [ "$result" -eq 0 ]; then
-        echo "  PASS: $name" >&2
-        PASS=$((PASS + 1))
-    else
-        echo "  FAIL: $name" >&2
-        FAIL=$((FAIL + 1))
-    fi
+TMPDIR=$(mktemp -d /tmp/lazyclaude-popup-e2e-XXXX)
+cleanup_popup() {
+    tmux -L "$SOCKET" kill-window -t lazyclaude:replay 2>/dev/null || true
+    rm -rf "$TMPDIR"
+    rm -f "$_PREV_FRAME_FILE" "$_CURR_FRAME_FILE" 2>/dev/null || true
 }
-
-echo "=== tmux display-popup VISUAL E2E ===" >&2
+trap cleanup_popup EXIT
 
 CURRENT_SESSION=$(tmux -L "$SOCKET" display-message -p '#{session_name}')
 tmux -L "$SOCKET" rename-session -t "$CURRENT_SESSION" lazyclaude 2>/dev/null || true
@@ -48,44 +44,33 @@ tmux -L "$SOCKET" rename-session -t "$CURRENT_SESSION" lazyclaude 2>/dev/null ||
 SCRIPT_LOG="$TMPDIR/popup.log"
 
 # --- 1. Run lazyclaude tool inside display-popup with script recording ---
-# `timeout 3` auto-closes after 3s (simulates user not pressing anything).
-# `script -q` records the PTY output including gocui rendering.
-echo "--- Step 1: Run display-popup with lazyclaude tool ---" >&2
-
 POPUP_CMD="LAZYCLAUDE_TMUX_SOCKET=$SOCKET TOOL_NAME=Bash TOOL_INPUT='{\"command\":\"for i in \$(seq 1 10); do echo line_\$i; done && ls /tmp\"}' TOOL_CWD=/tmp timeout 3 script -q -c '$BINARY tool --window @0' $SCRIPT_LOG"
 
 tmux -L "$SOCKET" display-popup -w 80 -h 24 -E "$POPUP_CMD" 2>/dev/null || true
+
+FRAME_NUM=$((FRAME_NUM + 1))
+_draw_frame "display-popup executed" "script log: $SCRIPT_LOG"
 
 R=0; [ -f "$SCRIPT_LOG" ] || R=1
 check "script log recorded" $R
 
 if [ ! -f "$SCRIPT_LOG" ]; then
-    echo "  No script log — display-popup may have failed" >&2
-    echo "Results: $PASS passed, $FAIL failed" >&2
+    finish_test
     exit 1
 fi
 
 # --- 2. Replay into tmux pane for visual capture ---
-echo "--- Step 2: Replay + capture ---" >&2
 tmux -L "$SOCKET" new-window -t lazyclaude -n replay
-# Feed raw PTY output into the pane — tmux interprets the ANSI sequences
 tmux -L "$SOCKET" send-keys -t lazyclaude:replay "cat '$SCRIPT_LOG'" Enter
 sleep 1
 
 # -S - captures full scrollback history (title bar may be above visible area)
 POPUP_CONTENT=$(tmux -L "$SOCKET" capture-pane -t lazyclaude:replay -p -S -)
 
-echo "" >&2
-echo "--- display-popup content ---" >&2
-echo "$POPUP_CONTENT" >&2
-echo "--- end ---" >&2
+FRAME_NUM=$((FRAME_NUM + 1))
+_draw_frame "display-popup content (replayed)" "$POPUP_CONTENT"
 
 # --- 3. Verify popup rendered correctly ---
-echo "" >&2
-echo "--- Step 3: Verify popup content ---" >&2
-
-# Title bar "┌─ Bash ─" may be above visible area in replay.
-# Check scrollback for it; if not found, the other checks still prove gocui rendered.
 R=0; echo "$POPUP_CONTENT" | grep -qE "Bash|Command:" || R=1
 check "popup shows tool context (Bash or Command:)" $R
 
@@ -105,6 +90,4 @@ check "popup shows Esc: cancel" $R
 R=0; echo "$POPUP_CONTENT" | grep -qE "┌|─|└|│" || R=1
 check "popup shows gocui border" $R
 
-echo "" >&2
-echo "Results: $PASS passed, $FAIL failed" >&2
-[ "$FAIL" -eq 0 ]
+finish_test
