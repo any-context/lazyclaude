@@ -56,19 +56,24 @@ func (p *PopupOrchestrator) SpawnToolPopup(ctx context.Context, window, toolName
 }
 
 // SpawnDiffPopup spawns a diff viewer popup via tmux display-popup.
-func (p *PopupOrchestrator) SpawnDiffPopup(ctx context.Context, window, oldPath, newContentsFile, toolCWD string) {
-	go func() {
-		cmd := fmt.Sprintf("%s diff --window %s --send-keys --old %s --new %s",
-			p.binary, window, oldPath, newContentsFile)
-		opts := tmux.PopupOpts{
-			Width:  80,
-			Height: 80,
-			Cmd:    cmd,
-		}
-		if err := p.tmux.DisplayPopup(ctx, opts); err != nil {
-			p.log.Printf("popup: spawn diff: %v", err)
-		}
-	}()
+// Blocks until the popup closes so the caller can read the choice file.
+func (p *PopupOrchestrator) SpawnDiffPopup(ctx context.Context, window, oldPath, newContentsFile string) {
+	cmd := fmt.Sprintf("%s diff --window %s --send-keys --old %s --new %s",
+		p.binary, window, oldPath, newContentsFile)
+	env := map[string]string{}
+	if s := os.Getenv("LAZYCLAUDE_TMUX_SOCKET"); s != "" {
+		env["LAZYCLAUDE_TMUX_SOCKET"] = s
+	}
+	opts := tmux.PopupOpts{
+		Target: window,
+		Width:  80,
+		Height: 80,
+		Cmd:    cmd,
+		Env:    env,
+	}
+	if err := p.tmux.DisplayPopup(ctx, opts); err != nil {
+		p.log.Printf("popup: spawn diff: %v", err)
+	}
 }
 
 // EstimatePopupSize returns width and height percentages for a popup

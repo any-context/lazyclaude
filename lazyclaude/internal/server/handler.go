@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KEMSHlM/lazyclaude/internal/core/config"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
+	"github.com/KEMSHlM/lazyclaude/internal/gui/choice"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
 )
 
@@ -20,6 +22,7 @@ const pendingWindowFile = "lazyclaude-pending-window"
 type Handler struct {
 	state      *State
 	tmux       tmux.Client
+	popup      *PopupOrchestrator
 	log        *log.Logger
 	runtimeDir string // for writing notification files
 }
@@ -36,6 +39,11 @@ func NewHandler(state *State, tmuxClient tmux.Client, logger *log.Logger) *Handl
 // SetRuntimeDir sets the runtime directory for notification files.
 func (h *Handler) SetRuntimeDir(dir string) {
 	h.runtimeDir = dir
+}
+
+// SetPopup sets the popup orchestrator for display-popup spawning.
+func (h *Handler) SetPopup(p *PopupOrchestrator) {
+	h.popup = p
 }
 
 // HandleMessage processes a single JSON-RPC request and returns an optional response.
@@ -182,19 +190,53 @@ func (h *Handler) handleOpenDiff(ctx context.Context, connID string, req *Reques
 
 	h.log.Printf("openDiff: window=%s file=%s", cs.Window, params.OldFilePath)
 
-	// Write notification file for TUI popup / display-popup
-	if h.runtimeDir != "" {
-		n := notify.ToolNotification{
-			ToolName:    "Diff",
-			OldFilePath: params.OldFilePath,
-			NewContents: params.NewContents,
-			Window:      cs.Window,
-			Timestamp:   time.Now(),
+	// Write new_contents to temp file for diff subcommand
+	tmpFile, err := os.CreateTemp("", "lazyclaude-diff-new-*")
+	if err != nil {
+		h.log.Printf("openDiff: create temp file: %v", err)
+		resp := NewErrorResponse(req.ID, -32603, "failed to create temp file")
+		return &resp
+	}
+	tmpPath := tmpFile.Name()
+	if _, err := tmpFile.WriteString(params.NewContents); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		h.log.Printf("openDiff: write temp file: %v", err)
+		resp := NewErrorResponse(req.ID, -32603, "failed to write temp file")
+		return &resp
+	}
+	tmpFile.Close()
+
+	// Spawn diff popup via display-popup (blocks until user closes).
+	// After popup closes, read choice file and store in pendingDiffChoices.
+	if h.popup != nil {
+		h.popup.SpawnDiffPopup(ctx, cs.Window, params.OldFilePath, tmpPath)
+
+		// Read choice file written by `lazyclaude diff`
+		paths := config.DefaultPaths()
+		if c, readErr := choice.ReadFile(paths, cs.Window); readErr == nil && c != choice.Cancel {
+			key := fmt.Sprintf("%d", c)
+			h.state.SetDiffChoice(cs.Window, key)
+			h.log.Printf("openDiff: stored diff choice %q for window %s", key, cs.Window)
 		}
-		if err := notify.Enqueue(h.runtimeDir, n); err != nil {
-			h.log.Printf("openDiff: write notification: %v", err)
+	} else {
+		// Fallback: write notification file for TUI overlay
+		if h.runtimeDir != "" {
+			n := notify.ToolNotification{
+				ToolName:    "Diff",
+				OldFilePath: params.OldFilePath,
+				NewContents: params.NewContents,
+				Window:      cs.Window,
+				Timestamp:   time.Now(),
+			}
+			if enqErr := notify.Enqueue(h.runtimeDir, n); enqErr != nil {
+				h.log.Printf("openDiff: write notification: %v", enqErr)
+			}
 		}
 	}
+
+	// Clean up temp file (best-effort, lazyclaude diff already read it)
+	os.Remove(tmpPath)
 
 	resp := NewResponse(req.ID, map[string]string{
 		"window":   cs.Window,

@@ -56,6 +56,7 @@ func New(cfg Config, tmuxClient tmux.Client, logger *log.Logger) *Server {
 	lockMgr := NewLockManager(cfg.IDEDir)
 
 	popup := NewPopupOrchestrator(cfg.BinaryPath, tmuxClient, logger)
+	handler.SetPopup(popup)
 
 	s := &Server{
 		config:  cfg,
