@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KEMSHlM/lazyclaude/internal/core/choice"
 	"github.com/KEMSHlM/lazyclaude/internal/core/event"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
-	"github.com/KEMSHlM/lazyclaude/internal/gui/choice"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
 	"nhooyr.io/websocket"
 )
