@@ -104,7 +104,7 @@ func stateMatch(states []AppState, target AppState) bool {
 
 // AllAppStates returns all valid AppState values.
 func AllAppStates() []AppState {
-	return []AppState{StateMain, StateFullInsert, StateFullNormal}
+	return []AppState{StateMain, StateFullScreen}
 }
 
 // Default returns the default lazyclaude key registry.
@@ -126,20 +126,8 @@ func Default() *Registry {
 	r.Register(ActionDef{
 		Action:   ActionExitFull,
 		Name:     "Exit Full Screen",
-		Bindings: []KeyBinding{{Key: gocui.KeyCtrlD}},
-		States:   []AppState{StateFullInsert, StateFullNormal},
-	})
-	r.Register(ActionDef{
-		Action:   ActionNormalMode,
-		Name:     "Normal Mode",
-		Bindings: []KeyBinding{{Key: gocui.KeyCtrlBackslash}},
-		States:   []AppState{StateFullInsert},
-	})
-	r.Register(ActionDef{
-		Action:   ActionInsertMode,
-		Name:     "Insert Mode",
-		Bindings: []KeyBinding{{Rune: 'i'}},
-		States:   []AppState{StateFullNormal},
+		Bindings: []KeyBinding{{Key: gocui.KeyCtrlD}, {Key: gocui.KeyCtrlBackslash}},
+		States:   []AppState{StateFullScreen},
 	})
 	r.Register(ActionDef{
 		Action:   ActionCursorUp,

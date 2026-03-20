@@ -11,7 +11,7 @@ import (
 // Input priority per event:
 //  1. Popup handlers (if popup showing)
 //  2. Lazyclaude keymap actions (if key matches current context)
-//  3. Forward to Claude Code (if full-screen + insert mode)
+//  3. Forward to Claude Code (if full-screen mode)
 func (a *App) setupGlobalKeybindings() error {
 	km := a.keyRegistry
 
@@ -49,7 +49,7 @@ func (a *App) setupGlobalKeybindings() error {
 			a.suspendAllPopups()
 			return nil
 		}
-		if a.state == StateFullInsert {
+		if a.state.IsFullScreen() {
 			a.forwardSpecialKey("Escape")
 			return nil
 		}
@@ -255,7 +255,7 @@ func (a *App) setupGlobalKeybindings() error {
 	}
 
 	// Ctrl+D: exit full-screen mode
-	if err := a.gui.SetKeybinding("", km.FirstKey(ActionExitFull), gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+	if err := a.gui.SetKeybinding("", gocui.KeyCtrlD, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		if a.state.IsFullScreen() {
 			a.exitFullScreen()
 		}
@@ -264,10 +264,10 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// Ctrl+\: switch to normal mode (insert -> normal)
-	if err := a.gui.SetKeybinding("", km.FirstKey(ActionNormalMode), gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		if a.state == StateFullInsert && !a.hasPopup() {
-			a.transition(StateFullNormal)
+	// Ctrl+\: exit full-screen mode (no popup when popup is showing)
+	if err := a.gui.SetKeybinding("", gocui.KeyCtrlBackslash, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		if a.state.IsFullScreen() && !a.hasPopup() {
+			a.exitFullScreen()
 		}
 		return nil
 	}); err != nil {

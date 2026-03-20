@@ -11,8 +11,7 @@ type KeyRegistry = keymap.Registry
 
 const (
 	StateMain       = keymap.StateMain
-	StateFullInsert = keymap.StateFullInsert
-	StateFullNormal = keymap.StateFullNormal
+	StateFullScreen = keymap.StateFullScreen
 
 	ActionQuit          = keymap.ActionQuit
 	ActionEnterFull     = keymap.ActionEnterFull

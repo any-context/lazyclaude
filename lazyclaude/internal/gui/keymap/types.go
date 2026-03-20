@@ -8,13 +8,12 @@ type AppState int
 
 const (
 	StateMain       AppState = iota // session list + preview
-	StateFullInsert                 // full-screen, keys forwarded to Claude Code
-	StateFullNormal                 // full-screen, vim-like navigation
+	StateFullScreen                 // full-screen, all keys forwarded to Claude Code
 )
 
-// IsFullScreen returns true if the state is any full-screen mode.
+// IsFullScreen returns true if the state is full-screen mode.
 func (s AppState) IsFullScreen() bool {
-	return s == StateFullInsert || s == StateFullNormal
+	return s == StateFullScreen
 }
 
 // KeyAction identifies a logical action in the keymap.
@@ -24,8 +23,8 @@ const (
 	ActionQuit          KeyAction = "quit"
 	ActionEnterFull     KeyAction = "enter_fullscreen"
 	ActionExitFull      KeyAction = "exit_fullscreen"
-	ActionNormalMode    KeyAction = "normal_mode"
-	ActionInsertMode    KeyAction = "insert_mode"
+	ActionNormalMode    KeyAction = "normal_mode"  // retained for registry lookup (returns empty)
+	ActionInsertMode    KeyAction = "insert_mode"  // retained for registry lookup (returns empty)
 	ActionCursorUp      KeyAction = "cursor_up"
 	ActionCursorDown    KeyAction = "cursor_down"
 	ActionNewSession    KeyAction = "new_session"

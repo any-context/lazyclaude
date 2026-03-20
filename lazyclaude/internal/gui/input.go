@@ -65,8 +65,8 @@ func RuneToTmuxKey(ch rune) string {
 
 // --- gocui Editor for full-screen key forwarding ---
 
-// inputEditor implements gocui.Editor to forward unhandled keys
-// to the Claude Code pane in full-screen insert mode.
+// inputEditor implements gocui.Editor to forward all keys
+// to the Claude Code pane in full-screen mode.
 type inputEditor struct {
 	app *App
 }
@@ -125,21 +125,10 @@ var specialKeyMap = map[gocui.Key]string{
 }
 
 // Edit is called by gocui for every keypress when the view is Editable.
+// In full-screen mode all keys are forwarded directly to the Claude Code pane.
 func (e *inputEditor) Edit(v *gocui.View, key gocui.Key, ch rune, mod gocui.Modifier) bool {
 	if !e.app.state.IsFullScreen() || e.app.hasPopup() {
 		return false
-	}
-
-	if e.app.state == StateFullNormal {
-		switch ch {
-		case 'q':
-			e.app.exitFullScreen()
-			return true
-		case 'i':
-			e.app.transition(StateFullInsert)
-			return true
-		}
-		return true
 	}
 
 	return e.forwardAny(key, ch, mod)

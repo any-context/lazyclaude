@@ -283,23 +283,10 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 	}
 	v2.Frame = false
 	v2.Clear()
-	if a.state == StateFullInsert {
-		fmt.Fprintf(v2, " %s %s %s %s",
-			presentation.ModeInsert(),
-			presentation.FgDimGray+presentation.IconSep+presentation.Reset,
-			items[targetIdx].Name,
-			presentation.Dim+"Ctrl+\\:normal"+presentation.Reset)
-	} else {
-		fmt.Fprintf(v2, " %s %s %s %s",
-			presentation.ModeNormal(),
-			presentation.FgDimGray+presentation.IconSep+presentation.Reset,
-			items[targetIdx].Name,
-			presentation.Dim+
-				presentation.StyledKey("i", "insert")+"  "+
-				presentation.StyledKey("q", "exit")+"  "+
-				presentation.StyledKey("j/k", "scroll")+
-				presentation.Reset)
-	}
+	fmt.Fprintf(v2, " %s %s %s",
+		items[targetIdx].Name,
+		presentation.FgDimGray+presentation.IconSep+presentation.Reset,
+		presentation.Dim+"Ctrl+\\:exit"+presentation.Reset)
 
 	if _, err := g.SetCurrentView("main"); err != nil && !isUnknownView(err) {
 		return err

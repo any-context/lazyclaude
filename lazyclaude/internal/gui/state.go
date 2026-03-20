@@ -12,7 +12,7 @@ func (a *App) transition(to AppState) {
 
 	// Exit actions
 	switch from {
-	case StateFullInsert, StateFullNormal:
+	case StateFullScreen:
 		if !to.IsFullScreen() {
 			a.fullScreenTarget = ""
 			a.previewCache = ""
@@ -21,7 +21,7 @@ func (a *App) transition(to AppState) {
 
 	// Enter actions
 	switch to {
-	case StateFullInsert:
+	case StateFullScreen:
 		if !from.IsFullScreen() {
 			a.fullScreenScrollY = 0
 			a.previewMu.Lock()
@@ -36,7 +36,7 @@ func (a *App) transition(to AppState) {
 
 func (a *App) enterFullScreen(sessionID string) {
 	a.fullScreenTarget = sessionID
-	a.transition(StateFullInsert)
+	a.transition(StateFullScreen)
 	if a.sessions != nil {
 		for i, item := range a.sessions.Sessions() {
 			if item.ID == sessionID {
@@ -53,7 +53,7 @@ func (a *App) exitFullScreen() {
 
 // resolveForwardTarget returns the tmux target for key forwarding.
 func (a *App) resolveForwardTarget() string {
-	if a.state != StateFullInsert || a.inputForwarder == nil || a.hasPopup() || a.sessions == nil {
+	if !a.state.IsFullScreen() || a.inputForwarder == nil || a.hasPopup() || a.sessions == nil {
 		return ""
 	}
 	items := a.sessions.Sessions()

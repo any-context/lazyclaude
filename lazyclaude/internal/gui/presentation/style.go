@@ -57,12 +57,3 @@ func StyledLabel(color, text string) string {
 	return color + text + Reset
 }
 
-// ModeInsert renders the INSERT mode indicator.
-func ModeInsert() string {
-	return Bold + BgGreen + FgWhite + " INSERT " + Reset
-}
-
-// ModeNormal renders the NORMAL mode indicator.
-func ModeNormal() string {
-	return Bold + BgBlue + FgWhite + " NORMAL " + Reset
-}

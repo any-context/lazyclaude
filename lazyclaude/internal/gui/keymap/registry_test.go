@@ -50,7 +50,7 @@ func TestRegistry_Match_WrongState_NoMatch(t *testing.T) {
 		States:   []keymap.AppState{keymap.StateMain},
 	})
 
-	_, ok := r.Match('q', 0, gocui.ModNone, keymap.StateFullInsert)
+	_, ok := r.Match('q', 0, gocui.ModNone, keymap.StateFullScreen)
 	assert.False(t, ok)
 }
 
@@ -80,10 +80,10 @@ func TestRegistry_Match_MultipleStates(t *testing.T) {
 		Action:   keymap.ActionExitFull,
 		Name:     "Exit",
 		Bindings: []keymap.KeyBinding{{Key: gocui.KeyCtrlD}},
-		States:   []keymap.AppState{keymap.StateFullInsert, keymap.StateFullNormal},
+		States:   []keymap.AppState{keymap.StateFullScreen},
 	})
 
-	_, ok := r.Match(0, gocui.KeyCtrlD, gocui.ModNone, keymap.StateFullInsert)
+	_, ok := r.Match(0, gocui.KeyCtrlD, gocui.ModNone, keymap.StateFullScreen)
 	assert.True(t, ok)
 	_, ok = r.Match(0, gocui.KeyCtrlD, gocui.ModNone, keymap.StateMain)
 	assert.False(t, ok)
@@ -148,5 +148,37 @@ func TestDefault_HasAllActions(t *testing.T) {
 	t.Parallel()
 	r := keymap.Default()
 	defs := r.AllActions()
-	assert.GreaterOrEqual(t, len(defs), 13, "default registry should have all actions")
+	// ActionNormalMode and ActionInsertMode removed; count reduced by 2
+	assert.GreaterOrEqual(t, len(defs), 11, "default registry should have all actions")
+}
+
+func TestDefault_NoNormalModeAction(t *testing.T) {
+	t.Parallel()
+	r := keymap.Default()
+	bindings := r.BindingsFor(keymap.ActionNormalMode)
+	assert.Empty(t, bindings, "ActionNormalMode should not be in default registry")
+}
+
+func TestDefault_NoInsertModeAction(t *testing.T) {
+	t.Parallel()
+	r := keymap.Default()
+	bindings := r.BindingsFor(keymap.ActionInsertMode)
+	assert.Empty(t, bindings, "ActionInsertMode should not be in default registry")
+}
+
+func TestDefault_CtrlBackslash_ExitsFullScreen(t *testing.T) {
+	t.Parallel()
+	r := keymap.Default()
+	// Ctrl+\ should now be bound to ActionExitFull (not ActionNormalMode)
+	def, ok := r.Match(0, gocui.KeyCtrlBackslash, gocui.ModNone, keymap.StateFullScreen)
+	require.True(t, ok, "Ctrl+\\ should match in full-screen state")
+	assert.Equal(t, keymap.ActionExitFull, def.Action)
+}
+
+func TestRegistry_Match_WrongState_FullScreen(t *testing.T) {
+	t.Parallel()
+	r := keymap.Default()
+	// Ctrl+\ should NOT match in StateMain (only in StateFullScreen)
+	_, ok := r.Match(0, gocui.KeyCtrlBackslash, gocui.ModNone, keymap.StateMain)
+	assert.False(t, ok)
 }

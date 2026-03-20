@@ -74,7 +74,7 @@ type App struct {
 	lastWidth        int
 	lastHeight       int
 	popups           *PopupController              // popup stack management
-	state            AppState                     // current UI state (Main, FullInsert, FullNormal)
+	state            AppState                     // current UI state (Main, FullScreen)
 	fullScreenTarget string                        // session ID for full-screen view
 	inputForwarder   InputForwarder                // forwards keys to tmux pane in full-screen
 	keyRegistry        *KeyRegistry                   // single source of truth for key bindings
