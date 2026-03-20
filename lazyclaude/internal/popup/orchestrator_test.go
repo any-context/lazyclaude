@@ -1,4 +1,4 @@
-package server
+package popup
 
 import (
 	"context"
@@ -16,10 +16,10 @@ import (
 // mockPopupClient records DisplayPopup calls and blocks until released.
 type mockPopupClient struct {
 	tmux.Client
-	mu       sync.Mutex
-	calls    []tmux.PopupOpts
-	gates    chan struct{} // send to release a blocked DisplayPopup
-	doneCh   chan string   // receives window after DisplayPopup returns
+	mu     sync.Mutex
+	calls  []tmux.PopupOpts
+	gates  chan struct{} // send to release a blocked DisplayPopup
+	doneCh chan string   // receives window after DisplayPopup returns
 }
 
 func newMockPopupClient() *mockPopupClient {

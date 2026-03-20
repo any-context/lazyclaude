@@ -15,6 +15,7 @@ import (
 	"github.com/KEMSHlM/lazyclaude/internal/core/model"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
+	"github.com/KEMSHlM/lazyclaude/internal/popup"
 )
 
 const pendingWindowFile = "lazyclaude-pending-window"
@@ -23,7 +24,7 @@ const pendingWindowFile = "lazyclaude-pending-window"
 type Handler struct {
 	state      *State
 	tmux       tmux.Client
-	popup      *PopupOrchestrator
+	popupOrch  *popup.PopupOrchestrator
 	log        *log.Logger
 	runtimeDir string // for writing notification files
 }
@@ -43,8 +44,8 @@ func (h *Handler) SetRuntimeDir(dir string) {
 }
 
 // SetPopup sets the popup orchestrator for display-popup spawning.
-func (h *Handler) SetPopup(p *PopupOrchestrator) {
-	h.popup = p
+func (h *Handler) SetPopup(p *popup.PopupOrchestrator) {
+	h.popupOrch = p
 }
 
 // HandleMessage processes a single JSON-RPC request and returns an optional response.
@@ -210,8 +211,8 @@ func (h *Handler) handleOpenDiff(ctx context.Context, connID string, req *Reques
 
 	// Spawn diff popup via display-popup (blocks until user closes).
 	// After popup closes, read choice file and store in pendingDiffChoices.
-	if h.popup != nil {
-		h.popup.SpawnDiffPopup(ctx, cs.Window, params.OldFilePath, tmpPath)
+	if h.popupOrch != nil {
+		h.popupOrch.SpawnDiffPopup(ctx, cs.Window, params.OldFilePath, tmpPath)
 
 		// Read choice file written by `lazyclaude diff`
 		paths := config.Paths{RuntimeDir: h.runtimeDir}

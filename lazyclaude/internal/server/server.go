@@ -20,6 +20,7 @@ import (
 	"github.com/KEMSHlM/lazyclaude/internal/core/model"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
+	"github.com/KEMSHlM/lazyclaude/internal/popup"
 	"nhooyr.io/websocket"
 )
 
@@ -39,7 +40,7 @@ type Server struct {
 	state        *State
 	handler      *Handler
 	lock         *LockManager
-	popup        *PopupOrchestrator
+	popupOrch    *popup.PopupOrchestrator
 	tmux         tmux.Client
 	log          *log.Logger
 	notifyBroker *event.Broker[model.Event]
@@ -58,15 +59,15 @@ func New(cfg Config, tmuxClient tmux.Client, logger *log.Logger) *Server {
 	handler.SetRuntimeDir(cfg.RuntimeDir)
 	lockMgr := NewLockManager(cfg.IDEDir)
 
-	popup := NewPopupOrchestrator(cfg.BinaryPath, tmuxClient, logger)
-	handler.SetPopup(popup)
+	popupOrch := popup.NewPopupOrchestrator(cfg.BinaryPath, tmuxClient, logger)
+	handler.SetPopup(popupOrch)
 
 	s := &Server{
 		config:       cfg,
 		state:        state,
 		handler:      handler,
 		lock:         lockMgr,
-		popup:        popup,
+		popupOrch:    popupOrch,
 		tmux:         tmuxClient,
 		log:          logger,
 		notifyBroker: event.NewBroker[model.Event](),
@@ -391,7 +392,7 @@ func (s *Server) dispatchToolNotification(window, toolName, input, cwd string) {
 	s.notifyBroker.Publish(model.Event{Notification: &n})
 
 	// Spawn tmux display-popup (non-blocking)
-	s.popup.SpawnToolPopup(context.Background(), window, toolName, input, cwd)
+	s.popupOrch.SpawnToolPopup(context.Background(), window, toolName, input, cwd)
 }
 
 func (s *Server) writePortFile(port int) error {
