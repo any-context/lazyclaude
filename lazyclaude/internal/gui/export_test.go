@@ -91,3 +91,25 @@ func (a *App) PollNotificationForTest() {
 		}
 	}
 }
+
+// DrainBrokerForTest drains any pending events from the notify broker subscription
+// and calls showToolPopup for each one. Simulates what the ticker goroutine does
+// when the broker channel has events, without needing to run the event loop.
+func (a *App) DrainBrokerForTest() {
+	if a.notifyBrokerSub == nil {
+		return
+	}
+	for {
+		select {
+		case ev, ok := <-a.notifyBrokerSub.Ch():
+			if !ok {
+				return
+			}
+			if ev.Notification != nil {
+				a.showToolPopup(ev.Notification)
+			}
+		default:
+			return
+		}
+	}
+}

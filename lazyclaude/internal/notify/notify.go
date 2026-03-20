@@ -12,6 +12,12 @@ import (
 	"time"
 )
 
+// Event is published on the event broker when a tool permission request arrives.
+// It supplements the file-based queue for fast local in-process delivery.
+type Event struct {
+	Notification *ToolNotification
+}
+
 // ToolNotification represents a pending tool permission request from Claude Code.
 type ToolNotification struct {
 	ToolName    string    `json:"tool_name"`

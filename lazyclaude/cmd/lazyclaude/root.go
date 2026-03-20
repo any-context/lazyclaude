@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/KEMSHlM/lazyclaude/internal/core/config"
+	"github.com/KEMSHlM/lazyclaude/internal/core/event"
 	"github.com/KEMSHlM/lazyclaude/internal/core/lifecycle"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 	"github.com/KEMSHlM/lazyclaude/internal/gui"
@@ -77,8 +79,22 @@ func newRootCmd() *cobra.Command {
 			// Skip Claude onboarding dialogs (JSON file I/O only, no subprocess)
 			mgr.EnsureClaudeConfigured(".")
 
-			// Ensure MCP server is running
-			ensureMCPServer()
+			// Start the MCP server: prefer in-process so the broker can be wired
+			// directly to the GUI for immediate popup delivery (no 100ms poll delay).
+			// Falls back to a subprocess if the server is already running as a daemon.
+			var notifyBroker *event.Broker[notify.Event]
+			inProcessSrv := tryStartInProcessServer(paths, tmuxClient, logger)
+			if inProcessSrv != nil {
+				notifyBroker = inProcessSrv.NotifyBroker()
+				lc.Register("mcp-server", func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					inProcessSrv.Stop(ctx) //nolint:errcheck
+				})
+			} else {
+				// Server already running as a subprocess daemon.
+				ensureMCPServer()
+			}
 
 			// Start background GC to remove dead/orphan sessions
 			gc := session.NewGC(mgr, 2*time.Second)
@@ -92,6 +108,9 @@ func newRootCmd() *cobra.Command {
 				return fmt.Errorf("init TUI: %w", err)
 			}
 			app.SetSessions(adapter)
+
+			// Wire the notify broker (nil-safe: falls back to file polling only).
+			app.SetNotifyBroker(notifyBroker)
 
 			// Key forwarding via subprocess
 			app.SetInputForwarder(gui.NewTmuxInputForwarder(tmuxClient))
@@ -121,6 +140,57 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newSetupCmd())
 
 	return cmd
+}
+
+// tryStartInProcessServer attempts to start the MCP server inside the current
+// process so the notify broker can be wired directly to the GUI for immediate
+// event delivery. Returns the server if started successfully, or nil when an
+// external server is already alive (the caller should fall back to ensureMCPServer).
+func tryStartInProcessServer(paths config.Paths, tmuxClient tmux.Client, logger *slog.Logger) *server.Server {
+	// If an external server is already alive, do not start a second one.
+	result, err := server.EnsureServer(server.EnsureOpts{
+		Binary:   os.Args[0],
+		PortFile: paths.PortFile(),
+	})
+	if err == nil && !result.Started {
+		// External server is alive; leave it running and skip in-process.
+		return nil
+	}
+
+	token, err := generateToken()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: generate server token: %v\n", err)
+		return nil
+	}
+
+	binaryPath := os.Args[0]
+	if b := os.Getenv("LAZYCLAUDE_POPUP_BINARY"); b != "" {
+		binaryPath = b
+	}
+
+	var srvLogger *log.Logger
+	if logger != nil {
+		// Adapt slog to stdlib log for the server (which uses log.Logger).
+		srvLogger = log.New(os.Stderr, "lazyclaude-srv: ", log.LstdFlags)
+	} else {
+		srvLogger = log.New(os.Stderr, "lazyclaude-srv: ", log.LstdFlags)
+	}
+
+	cfg := server.Config{
+		Port:       0, // random port
+		Token:      token,
+		BinaryPath: binaryPath,
+		IDEDir:     paths.IDEDir,
+		PortFile:   paths.PortFile(),
+		RuntimeDir: paths.RuntimeDir,
+	}
+
+	srv := server.New(cfg, tmuxClient, srvLogger)
+	if _, err := srv.Start(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: start in-process MCP server: %v\n", err)
+		return nil
+	}
+	return srv
 }
 
 // ensureMCPServer starts the MCP server if not already running.

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/KEMSHlM/lazyclaude/internal/core/config"
+	"github.com/KEMSHlM/lazyclaude/internal/core/event"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
 	"github.com/jesseduffield/gocui"
 )
@@ -82,6 +83,8 @@ type App struct {
 	onTick             func()                       // called every ticker cycle (control mode health check)
 	keyQueue           chan keyCmd                   // serial key forwarding queue (preserves order)
 	popupMode          config.PopupMode             // how popups are displayed (auto/tmux/overlay)
+	notifyBroker       *event.Broker[notify.Event]  // optional in-process broker (nil = file-only)
+	notifyBrokerSub    *event.Subscription[notify.Event] // active subscription (nil if no broker)
 }
 
 // SetPopupMode sets the popup display mode.
@@ -160,12 +163,27 @@ func (a *App) Run() error {
 
 	// Refresh loop: event-driven via outputNotify (from control mode),
 	// with a fallback ticker for notification polling and non-control scenarios.
+	//
+	// When a notify broker is configured, broker events are handled in this
+	// select in addition to the 100ms ticker polling — giving immediate popup
+	// delivery for local in-process communication.
 	go func() {
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
+
+		// brokerCh is nil when no broker is set; a nil channel blocks forever
+		// in select, so the case is effectively disabled.
+		var brokerCh <-chan notify.Event
+		if a.notifyBrokerSub != nil {
+			brokerCh = a.notifyBrokerSub.Ch()
+		}
+
 		for {
 			select {
 			case <-done:
+				if a.notifyBrokerSub != nil {
+					a.notifyBrokerSub.Cancel()
+				}
 				return
 			case <-a.outputNotify:
 				a.previewMu.Lock()
@@ -175,6 +193,18 @@ func (a *App) Run() error {
 				}
 				a.previewMu.Unlock()
 				a.gui.Update(func(g *gocui.Gui) error { return nil })
+			case ev, ok := <-brokerCh:
+				if !ok {
+					// Broker was closed; disable this case by setting channel to nil.
+					brokerCh = nil
+					continue
+				}
+				if ev.Notification != nil {
+					a.gui.Update(func(g *gocui.Gui) error {
+						a.showToolPopup(ev.Notification)
+						return nil
+					})
+				}
 			case <-ticker.C:
 				if a.onTick != nil {
 					a.onTick()
@@ -222,6 +252,19 @@ func (a *App) SetInputForwarder(fwd InputForwarder) {
 // SetOnTick sets a callback invoked every ticker cycle (for control mode health checks).
 func (a *App) SetOnTick(fn func()) {
 	a.onTick = fn
+}
+
+// SetNotifyBroker attaches an event broker to the App so that server-side
+// notifications are delivered immediately without waiting for the 100ms ticker.
+// Passing nil is a no-op: the app falls back to file-based polling only.
+// Must be called before Run().
+func (a *App) SetNotifyBroker(broker *event.Broker[notify.Event]) {
+	if broker == nil {
+		return
+	}
+	// Buffer of 8 to absorb bursts without dropping events under normal load.
+	a.notifyBroker = broker
+	a.notifyBrokerSub = broker.Subscribe(8)
 }
 
 // keyCmd is a queued key forwarding command.

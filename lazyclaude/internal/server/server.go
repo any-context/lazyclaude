@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KEMSHlM/lazyclaude/internal/core/event"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 	"github.com/KEMSHlM/lazyclaude/internal/gui/choice"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
@@ -33,13 +34,14 @@ type Config struct {
 
 // Server is the MCP WebSocket + HTTP server.
 type Server struct {
-	config  Config
-	state   *State
-	handler *Handler
-	lock    *LockManager
-	popup   *PopupOrchestrator
-	tmux    tmux.Client
-	log     *log.Logger
+	config       Config
+	state        *State
+	handler      *Handler
+	lock         *LockManager
+	popup        *PopupOrchestrator
+	tmux         tmux.Client
+	log          *log.Logger
+	notifyBroker *event.Broker[notify.Event]
 
 	listener net.Listener
 	httpSrv  *http.Server
@@ -59,13 +61,14 @@ func New(cfg Config, tmuxClient tmux.Client, logger *log.Logger) *Server {
 	handler.SetPopup(popup)
 
 	s := &Server{
-		config:  cfg,
-		state:   state,
-		handler: handler,
-		lock:    lockMgr,
-		popup:   popup,
-		tmux:    tmuxClient,
-		log:     logger,
+		config:       cfg,
+		state:        state,
+		handler:      handler,
+		lock:         lockMgr,
+		popup:        popup,
+		tmux:         tmuxClient,
+		log:          logger,
+		notifyBroker: event.NewBroker[notify.Event](),
 	}
 
 	mux := http.NewServeMux()
@@ -124,6 +127,9 @@ func (s *Server) Stop(ctx context.Context) error {
 		s.log.Printf("warning: remove lock: %v", err)
 	}
 
+	// Close the notify broker to release any waiting subscribers.
+	s.notifyBroker.Close()
+
 	return s.httpSrv.Shutdown(ctx)
 }
 
@@ -140,6 +146,14 @@ func (s *Server) State() *State {
 // RuntimeDir returns the runtime directory path.
 func (s *Server) RuntimeDir() string {
 	return s.config.RuntimeDir
+}
+
+// NotifyBroker returns the event broker that publishes notify.Event when a
+// tool permission request arrives via /notify. The broker is created with the
+// server and lives for the server's lifetime; call broker.Close() (or Stop()
+// the server) to release subscribers.
+func (s *Server) NotifyBroker() *event.Broker[notify.Event] {
+	return s.notifyBroker
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -330,7 +344,7 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 				maxOpt = choice.DetectMaxOption(content)
 			}
 
-			// Write notification file for TUI overlay fallback
+			// Write notification file for TUI overlay fallback (SSH remote compat).
 			n := notify.ToolNotification{
 				ToolName:  toolName,
 				Input:     input,
@@ -342,6 +356,10 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 			if err := notify.Enqueue(s.config.RuntimeDir, n); err != nil {
 				s.log.Printf("notify: write notification: %v", err)
 			}
+
+			// Publish to in-process broker for fast local GUI notification.
+			// Non-blocking: if no subscriber is ready, the event is dropped.
+			s.notifyBroker.Publish(notify.Event{Notification: &n})
 
 			// Spawn tmux display-popup (non-blocking)
 			s.popup.SpawnToolPopup(context.Background(), window, toolName, input, cwd)
