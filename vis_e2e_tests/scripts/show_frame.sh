@@ -1,5 +1,7 @@
 #!/bin/bash
 # VHS .txt のフレーム表示 + diff。
+# stdout: プレーンテキスト (ログ用)
+# stderr: 画面クリア (TTY 用)
 #
 # 必要な変数:
 #   TAPE_NAME — テープ名
@@ -20,31 +22,26 @@ show_frame() {
 
     FRAME_N=$((FRAME_N + 1))
 
-    printf '\033[2J\033[H'
-    printf '\033[1;36m[Frame %d] %s\033[0m\n' "$FRAME_N" "$TAPE_NAME"
-    printf '\033[90m'
+    # 画面クリアは stderr (TTY) のみ
+    printf '\033[2J\033[H' >&2
+
+    # フレーム内容は stdout (プレーンテキスト)
+    printf '[Frame %d] %s\n' "$FRAME_N" "$TAPE_NAME"
     printf '%0.s─' $(seq 1 80)
-    printf '\033[0m\n'
+    printf '\n'
 
     cat "$CURR_FRAME"
 
-    printf '\033[90m'
     printf '%0.s─' $(seq 1 80)
-    printf '\033[0m\n'
+    printf '\n'
 
     if [ -s "$PREV_FRAME" ]; then
         local d
         d=$(diff "$PREV_FRAME" "$CURR_FRAME" 2>/dev/null || true)
         if [ -n "$d" ]; then
-            printf '\033[90m--- diff (Frame %d -> %d) ---\033[0m\n' "$((FRAME_N - 1))" "$FRAME_N"
-            echo "$d" | while IFS= read -r dline; do
-                case "$dline" in
-                    \<*) printf '\033[31m%s\033[0m\n' "$dline" ;;
-                    \>*) printf '\033[32m%s\033[0m\n' "$dline" ;;
-                    *)   printf '\033[90m%s\033[0m\n' "$dline" ;;
-                esac
-            done
-            printf '\033[90m--- end diff ---\033[0m\n'
+            echo "--- diff (Frame $((FRAME_N - 1)) -> $FRAME_N) ---"
+            echo "$d"
+            echo "--- end diff ---"
         fi
     fi
     cp "$CURR_FRAME" "$PREV_FRAME"

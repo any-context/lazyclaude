@@ -37,15 +37,17 @@ RUN sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && \
     sed -i 's/#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && \
     echo 'GatewayPorts yes' >> /etc/ssh/sshd_config
 COPY vis_e2e_tests/claude-settings.json /root/.claude/settings.json
+RUN echo '{"hasCompletedOnboarding":true,"numStartups":10,"projects":{"/":{"hasTrustDialogAccepted":true,"allowedTools":[]}}}' > /root/.claude.json
 EXPOSE 22
 CMD ["/usr/sbin/sshd", "-D"]
 
 # --- Target: vhs (VHS has its own base due to chromium/ttyd/ffmpeg deps) ---
 FROM ghcr.io/charmbracelet/vhs:latest AS vhs
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tmux golang-go git nodejs curl openssh-client \
-    && rm -rf /var/lib/apt/lists/*
-ENV TERM=xterm-256color
+    tmux golang-go git nodejs curl openssh-client locales \
+    && rm -rf /var/lib/apt/lists/* \
+    && sed -i '/en_US.UTF-8/s/^# //' /etc/locale.gen && locale-gen
+ENV TERM=xterm-256color LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 RUN mkdir -p /root/.ssh
 COPY --from=keygen /tmp/test_key /root/.ssh/id_ed25519
 RUN chmod 700 /root/.ssh && chmod 600 /root/.ssh/id_ed25519

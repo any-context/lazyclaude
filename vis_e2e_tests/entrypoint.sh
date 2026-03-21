@@ -25,7 +25,7 @@ esac
 
 # --- フレーム監視 (バックグラウンド) ---
 LOG="${OUTDIR}/${TAPE_NAME}.log"
-source "$SCRIPT_DIR/scripts/watch_frames.sh" | tee >(sed 's/\x1b\[[0-9;]*m//g' > "$LOG") &
+source "$SCRIPT_DIR/scripts/watch_frames.sh" | tee >(sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' > "$LOG") &
 WATCHER_PID=$!
 
 # --- VHS 実行 ---
