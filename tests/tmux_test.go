@@ -1,52 +1,12 @@
-package integration_test
+package tests_test
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
-
-var (
-	binaryPath string
-	buildOnce  sync.Once
-	buildErr   error
-)
-
-func ensureBinary(t *testing.T) string {
-	t.Helper()
-	buildOnce.Do(func() {
-		root := filepath.Join("..", "..")
-		binaryPath = filepath.Join(root, "bin", "lazyclaude-test")
-		os.MkdirAll(filepath.Dir(binaryPath), 0o755)
-		cmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/lazyclaude")
-		cmd.Dir = root
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		buildErr = cmd.Run()
-	})
-	if buildErr != nil {
-		t.Fatalf("build: %v", buildErr)
-	}
-	abs, err := filepath.Abs(binaryPath)
-	if err != nil {
-		t.Fatalf("abs: %v", err)
-	}
-	return abs
-}
-
-func testdataPath(t *testing.T, name string) string {
-	t.Helper()
-	abs, err := filepath.Abs(filepath.Join("..", "testdata", name))
-	if err != nil {
-		t.Fatalf("testdata: %v", err)
-	}
-	return abs
-}
 
 // tmuxHelper manages an isolated tmux server for testing.
 type tmuxHelper struct {

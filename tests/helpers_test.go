@@ -1,4 +1,4 @@
-package cli_test
+package tests_test
 
 import (
 	"fmt"
@@ -22,7 +22,7 @@ func ensureBinary(t *testing.T) string {
 	buildOnce.Do(func() {
 		// Resolve project root from test working directory
 		wd, _ := os.Getwd()
-		root := filepath.Join(wd, "..", "..")
+		root := filepath.Join(wd, "..")
 		binaryPath = filepath.Join(root, "bin", "lazyclaude-test")
 
 		cmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/lazyclaude")
@@ -43,7 +43,7 @@ func ensureBinary(t *testing.T) string {
 // testdataPath returns the absolute path to a testdata file.
 func testdataPath(t *testing.T, name string) string {
 	t.Helper()
-	abs, err := filepath.Abs(filepath.Join("..", "testdata", name))
+	abs, err := filepath.Abs(filepath.Join("testdata", name))
 	if err != nil {
 		t.Fatalf("testdata path: %v", err)
 	}
