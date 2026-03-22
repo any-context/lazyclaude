@@ -55,5 +55,11 @@ kill "$WATCHER_PID" 2>/dev/null || true
 pkill -f "tail -f $TXT" 2>/dev/null || true
 wait "$WATCHER_PID" 2>/dev/null || true
 
+# --- リモート hook ログ回収 (SSH テスト用) ---
+if [ -n "${REMOTE_HOST:-}" ]; then
+    ssh -o ConnectTimeout=3 "$REMOTE_HOST" "cat /tmp/lazyclaude-hook.log 2>/dev/null" \
+        > "$OUTDIR/remote-hook.log" 2>/dev/null || true
+fi
+
 cleanup_frames
 exit "$VHS_RC"
