@@ -10,32 +10,25 @@
 #   make test-vhs TAPE=ssh_launch
 ##############################################
 
-# --- Stage: ephemeral SSH keypair ---
-FROM alpine:latest AS keygen
-RUN apk add --no-cache openssh-keygen
-RUN ssh-keygen -t ed25519 -f /tmp/test_key -N "" -q
-
 # --- Stage: shared base ---
 FROM golang:latest AS base
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux openssh-server openssh-client curl nodejs expect git \
     && rm -rf /var/lib/apt/lists/*
-ARG CLAUDE_VERSION=2.1.79
-RUN ARCH=$(uname -m) && \
-    case "$ARCH" in aarch64|arm64) PLATFORM="linux-arm64" ;; *) PLATFORM="linux-x64" ;; esac && \
-    curl -fsSL "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/${CLAUDE_VERSION}/${PLATFORM}/claude" \
-    -o /usr/local/bin/claude && chmod +x /usr/local/bin/claude
-ENV TERM=xterm-256color
+RUN curl -fsSL https://claude.ai/install.sh | bash
+RUN ssh-keygen -t ed25519 -f /root/.ssh/test_key -N "" -q
+ENV TERM=xterm-256color PATH="/root/.local/bin:${PATH}"
 
 # --- Target: remote (sshd for SSH E2E) ---
 FROM base AS remote
 RUN ssh-keygen -A && mkdir -p /run/sshd /root/.ssh
-COPY --from=keygen /tmp/test_key.pub /root/.ssh/authorized_keys
+COPY --from=base /root/.ssh/test_key.pub /root/.ssh/authorized_keys
 RUN chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys
 RUN sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && \
     sed -i 's/#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
     sed -i 's/#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && \
     echo 'GatewayPorts yes' >> /etc/ssh/sshd_config
+RUN echo 'export PATH="/root/.local/bin:$PATH"' >> /root/.bashrc
 COPY vis_e2e_tests/claude-settings.json /root/.claude/settings.json
 RUN echo '{"hasCompletedOnboarding":true,"numStartups":10,"projects":{"/":{"hasTrustDialogAccepted":true,"allowedTools":[]}}}' > /root/.claude.json
 EXPOSE 22
@@ -49,17 +42,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && sed -i '/en_US.UTF-8/s/^# //' /etc/locale.gen && locale-gen
 ENV TERM=xterm-256color LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 RUN mkdir -p /root/.ssh
-COPY --from=keygen /tmp/test_key /root/.ssh/id_ed25519
+COPY --from=base /root/.ssh/test_key /root/.ssh/id_ed25519
 RUN chmod 700 /root/.ssh && chmod 600 /root/.ssh/id_ed25519
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-COPY --from=base /usr/local/bin/claude /usr/local/bin/claude
+RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/root/.local/bin:${PATH}"
 RUN go build -o bin/lazyclaude ./cmd/lazyclaude && \
     ln -sf /app/bin/lazyclaude /usr/local/bin/lazyclaude && \
     mkdir -p /app/outputs && \
     mv /bin/bash /bin/bash-real && \
-    printf '#!/bin/bash-real\nif [ -n "$VHS_AUTO_TMUX" ] && [ -z "$VHS_IN_TMUX" ]; then\n  export VHS_IN_TMUX=1\n  exec tmux attach -t main\nfi\nexec /bin/bash-real "$@"\n' > /bin/bash && \
+    printf '#!/bin/bash-real\nif [ -z "$VHS_IN_TMUX" ]; then\n  export VHS_IN_TMUX=1\n  /app/bin/lazyclaude setup 2>/dev/null\n  tmux new-session -d -s main\n  bash-real /app/lazyclaude.tmux 2>/dev/null\n  exec tmux attach -t main\nfi\nexec /bin/bash-real "$@"\n' > /bin/bash && \
     chmod +x /bin/bash
 ENTRYPOINT ["/app/vis_e2e_tests/entrypoint.sh"]

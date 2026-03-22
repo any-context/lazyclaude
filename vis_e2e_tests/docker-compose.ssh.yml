@@ -32,7 +32,7 @@ services:
     volumes:
       - ../vis_e2e_tests/outputs:/app/outputs
     tty: true
-    entrypoint: ["/bin/bash", "-c"]
+    entrypoint: ["/bin/bash-real", "-c"]
     command:
       - |
         ssh-keyscan -H remote >> /root/.ssh/known_hosts 2>/dev/null
