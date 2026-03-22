@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -252,12 +253,29 @@ func TestManager_Persistence(t *testing.T) {
 	assert.Equal(t, "app", all[0].Name)
 }
 
+// initGitRepo creates a git repo with an initial commit in the given directory.
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "test"},
+		{"git", "commit", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "cmd %v: %s", args, out)
+	}
+}
+
 func TestManager_CreateWorktree_Basic(t *testing.T) {
 	t.Parallel()
 	mgr, mock := newTestManager(t)
 	ctx := context.Background()
 
 	projectRoot := t.TempDir()
+	initGitRepo(t, projectRoot)
 	sess, err := mgr.CreateWorktree(ctx, "fix-popup", "Fix the bug", projectRoot)
 	require.NoError(t, err)
 	require.NotNil(t, sess)
@@ -301,12 +319,24 @@ func TestManager_CreateWorktree_InvalidName(t *testing.T) {
 	}
 }
 
+func TestManager_CreateWorktree_NotAGitRepo(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+	ctx := context.Background()
+
+	projectRoot := t.TempDir() // no git init
+	_, err := mgr.CreateWorktree(ctx, "test", "prompt", projectRoot)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not a git repository")
+}
+
 func TestManager_CreateWorktree_EmptyPrompt(t *testing.T) {
 	t.Parallel()
 	mgr, mock := newTestManager(t)
 	ctx := context.Background()
 
 	projectRoot := t.TempDir()
+	initGitRepo(t, projectRoot)
 	sess, err := mgr.CreateWorktree(ctx, "no-prompt", "", projectRoot)
 	require.NoError(t, err)
 	require.NotNil(t, sess)
@@ -323,10 +353,11 @@ func TestManager_CreateWorktree_ExistingDir(t *testing.T) {
 	ctx := context.Background()
 
 	projectRoot := t.TempDir()
+	initGitRepo(t, projectRoot)
 	wtDir := filepath.Join(projectRoot, ".claude", "worktrees", "reuse-me")
 	require.NoError(t, os.MkdirAll(wtDir, 0o755))
 
-	// Should succeed even if directory already exists
+	// Should succeed even if directory already exists (reuse)
 	sess, err := mgr.CreateWorktree(ctx, "reuse-me", "Reuse this", projectRoot)
 	require.NoError(t, err)
 	assert.Equal(t, "reuse-me", sess.Name)
@@ -338,6 +369,7 @@ func TestManager_CreateWorktree_LauncherScriptContents(t *testing.T) {
 	ctx := context.Background()
 
 	projectRoot := t.TempDir()
+	initGitRepo(t, projectRoot)
 	_, err := mgr.CreateWorktree(ctx, "test-script", "Fix the bug", projectRoot)
 	require.NoError(t, err)
 
@@ -360,6 +392,7 @@ func TestManager_CreateWorktree_DuplicateName(t *testing.T) {
 	ctx := context.Background()
 
 	projectRoot := t.TempDir()
+	initGitRepo(t, projectRoot)
 	_, err := mgr.CreateWorktree(ctx, "dup-name", "first", projectRoot)
 	require.NoError(t, err)
 
@@ -384,6 +417,7 @@ func TestManager_CreateWorktree_AddsWindowToExistingSession(t *testing.T) {
 	}
 
 	projectRoot := t.TempDir()
+	initGitRepo(t, projectRoot)
 	sess, err := mgr.CreateWorktree(ctx, "second-wt", "task 2", projectRoot)
 	require.NoError(t, err)
 	assert.Equal(t, "second-wt", sess.Name)

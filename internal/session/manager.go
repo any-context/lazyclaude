@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -250,8 +251,8 @@ func (m *Manager) CreateWorktree(ctx context.Context, name, userPrompt, projectR
 	}
 
 	wtPath := WorktreePath(projectRoot, name)
-	if err := os.MkdirAll(wtPath, 0o755); err != nil {
-		return nil, fmt.Errorf("create worktree dir: %w", err)
+	if err := createGitWorktree(ctx, projectRoot, wtPath, name); err != nil {
+		return nil, fmt.Errorf("git worktree: %w", err)
 	}
 
 	// Isolation instructions go in --append-system-prompt (system level).
@@ -336,6 +337,43 @@ func (m *Manager) CreateWorktree(ctx context.Context, name, userPrompt, projectR
 	}
 
 	return &sess, nil
+}
+
+// createGitWorktree creates a git worktree at wtPath with a new branch.
+// Returns an error if projectRoot is not a git repository.
+// If the branch already exists, it checks out the existing branch.
+// If the worktree path already exists (reuse), this is a no-op.
+func createGitWorktree(ctx context.Context, projectRoot, wtPath, branch string) error {
+	// Verify projectRoot is a git repository.
+	check := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
+	check.Dir = projectRoot
+	if err := check.Run(); err != nil {
+		return fmt.Errorf("not a git repository: %s", projectRoot)
+	}
+
+	// If the worktree directory already exists, assume reuse.
+	if _, err := os.Stat(wtPath); err == nil {
+		return nil
+	}
+
+	// Ensure parent directory exists.
+	if err := os.MkdirAll(filepath.Dir(wtPath), 0o755); err != nil {
+		return fmt.Errorf("create parent dir: %w", err)
+	}
+
+	// Try creating worktree with a new branch first.
+	cmd := exec.CommandContext(ctx, "git", "worktree", "add", "-b", branch, wtPath)
+	cmd.Dir = projectRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		// Branch may already exist — try without -b.
+		cmd2 := exec.CommandContext(ctx, "git", "worktree", "add", wtPath, branch)
+		cmd2.Dir = projectRoot
+		if out2, err2 := cmd2.CombinedOutput(); err2 != nil {
+			return fmt.Errorf("%s\n%s", strings.TrimSpace(string(out)), strings.TrimSpace(string(out2)))
+		}
+		_ = out
+	}
+	return nil
 }
 
 // writeWorktreeLauncher writes a shell script that launches claude with
