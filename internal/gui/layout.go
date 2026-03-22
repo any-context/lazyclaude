@@ -442,17 +442,6 @@ func (a *App) closeRenameInput(g *gocui.Gui) {
 	}
 }
 
-// worktreeEditor is a custom editor that delegates to SimpleEditor but
-// excludes Ctrl+D (confirm) and Tab (field switch) so that view-specific
-// keybindings can handle them instead of the editor consuming them.
-func worktreeEditor(v *gocui.View, key gocui.Key, ch rune, mod gocui.Modifier) bool {
-	switch key {
-	case gocui.KeyCtrlD, gocui.KeyTab:
-		return false // let view-specific keybinding handle it
-	}
-	return gocui.SimpleEditor(v, key, ch, mod)
-}
-
 // showWorktreeDialog creates the worktree input views (branch name + prompt).
 // Returns true if all views were created successfully and dialog is active.
 func (a *App) showWorktreeDialog(g *gocui.Gui) bool {
@@ -475,7 +464,7 @@ func (a *App) showWorktreeDialog(g *gocui.Gui) bool {
 	}
 	v.Title = " Branch "
 	v.Editable = true
-	v.Editor = gocui.EditorFunc(worktreeEditor)
+	v.Editor = gocui.DefaultEditor
 	setRoundedFrame(v)
 
 	// Prompt input (6 lines)
@@ -492,7 +481,7 @@ func (a *App) showWorktreeDialog(g *gocui.Gui) bool {
 	}
 	v2.Title = " Prompt "
 	v2.Editable = true
-	v2.Editor = gocui.EditorFunc(worktreeEditor)
+	v2.Editor = gocui.DefaultEditor
 	v2.Wrap = true
 	setRoundedFrame(v2)
 
@@ -509,7 +498,7 @@ func (a *App) showWorktreeDialog(g *gocui.Gui) bool {
 	}
 	v3.Frame = false
 	v3.Clear()
-	fmt.Fprint(v3, " "+presentation.StyledKey("Ctrl+D", "create")+"  "+
+	fmt.Fprint(v3, " "+presentation.StyledKey("Enter", "create")+"  "+
 		presentation.StyledKey("Tab", "switch")+"  "+
 		presentation.StyledKey("Esc", "cancel"))
 

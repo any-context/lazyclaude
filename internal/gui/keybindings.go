@@ -93,7 +93,13 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// 5. Rename input (view-specific, outside dispatcher)
+	// 5-6. Dialog bindings (view-specific, outside dispatcher).
+	// Pattern: Editable views use DefaultEditor for text input.
+	// Action keys (Enter/Esc/Tab) are view-specific bindings that
+	// gocui dispatches BEFORE Editor.Edit(), so they intercept
+	// the key before the editor can consume it.
+	//
+	// 5. Rename input
 	if err := a.gui.SetKeybinding("rename-input", gocui.KeyEnter, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		newName := strings.TrimSpace(v.TextArea.GetContent())
 		if newName != "" && a.renameSessionID != "" {
@@ -169,12 +175,21 @@ func (a *App) setupGlobalKeybindings() error {
 	}
 
 	for _, viewName := range []string{"worktree-branch", "worktree-prompt"} {
-		if err := a.gui.SetKeybinding(viewName, gocui.KeyCtrlD, gocui.ModNone, worktreeConfirm); err != nil {
+		if err := a.gui.SetKeybinding(viewName, gocui.KeyEnter, gocui.ModNone, worktreeConfirm); err != nil {
 			return err
 		}
 		if err := a.gui.SetKeybinding(viewName, gocui.KeyEsc, gocui.ModNone, worktreeCancel); err != nil {
 			return err
 		}
+	}
+
+	// Ctrl+J: insert newline in prompt field (Enter is used for confirm)
+	if err := a.gui.SetKeybinding("worktree-prompt", gocui.KeyCtrlJ, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		v.TextArea.TypeCharacter("\n")
+		v.RenderTextArea()
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	// Tab: switch between branch and prompt fields

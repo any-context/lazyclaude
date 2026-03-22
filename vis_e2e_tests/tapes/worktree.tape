@@ -31,17 +31,8 @@ Sleep 500ms
 Type "Fix the notification popup bug"
 Sleep 500ms
 
-# Ctrl+D で確定 → worktree 作成
-# Note: Ctrl+D also sends EOF to tmux display-popup, closing the popup.
-# The SSH session also receives EOF and logs out. This is expected behavior.
-Ctrl+D
-Sleep 3s
-
-# Re-login to SSH and re-open popup to verify the [W] session
-Type "ssh remote" Enter
-Wait+Screen /root@/
-
-Ctrl+\
+# Enter で確定 → worktree 作成
+Enter
 Wait+Screen /\[W\]/
 Sleep 2s
 
