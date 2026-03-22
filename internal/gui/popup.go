@@ -155,8 +155,12 @@ func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
 		}
 		fmt.Fprint(v2, base)
 
-		if _, err := g.SetCurrentView(activeViewName); err != nil && !isUnknownView(err) {
-			return err
+		// Skip focus steal if an input dialog is active (rename, worktree).
+		// The popup is visible but the dialog retains focus.
+		if !a.HasActiveDialog() {
+			if _, err := g.SetCurrentView(activeViewName); err != nil && !isUnknownView(err) {
+				return err
+			}
 		}
 	}
 

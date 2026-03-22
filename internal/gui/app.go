@@ -80,6 +80,7 @@ type App struct {
 	quitRequested      bool                         // set by Quit(), checked after Dispatch
 	popupMode          config.PopupMode             // how popups are displayed (auto/tmux/overlay)
 	renameSessionID    string                     // session ID being renamed (empty = no rename in progress)
+	activeDialog       DialogKind                 // current input dialog (DialogNone = no dialog)
 }
 
 // SetPopupMode sets the popup display mode.

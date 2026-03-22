@@ -213,8 +213,8 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 		fmt.Fprint(v4, optionsText)
 	}
 
-	// Set focus to active panel's view (skip if rename input is active).
-	if a.renameSessionID == "" {
+	// Set focus to active panel's view (skip if any input dialog is active).
+	if !a.HasActiveDialog() {
 		if _, err := g.SetCurrentView(focusedName); err != nil && !isUnknownView(err) {
 			return err
 		}
@@ -421,12 +421,14 @@ func (a *App) showRenameInput(g *gocui.Gui, currentName string) bool {
 		return false
 	}
 	g.Cursor = true
+	a.activeDialog = DialogRename
 	return true
 }
 
 // closeRenameInput removes the rename input view and restores focus.
 func (a *App) closeRenameInput(g *gocui.Gui) {
 	a.renameSessionID = ""
+	a.activeDialog = DialogNone
 	g.DeleteView("rename-input")
 	g.Cursor = false
 	if _, err := g.SetCurrentView("sessions"); err != nil && !isUnknownView(err) {
