@@ -2,18 +2,6 @@ package gui
 
 import "testing"
 
-func TestDialogKind_Constants(t *testing.T) {
-	if DialogNone != 0 {
-		t.Error("DialogNone should be 0")
-	}
-	if DialogRename == DialogNone {
-		t.Error("DialogRename should differ from DialogNone")
-	}
-	if DialogWorktree == DialogNone || DialogWorktree == DialogRename {
-		t.Error("DialogWorktree should be unique")
-	}
-}
-
 func TestHasActiveDialog_None(t *testing.T) {
 	app, err := NewAppHeadless(ModeMain, 80, 24)
 	if err != nil {

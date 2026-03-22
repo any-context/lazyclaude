@@ -2,7 +2,6 @@ package session
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -49,25 +48,6 @@ func BuildWorktreePrompt(worktreePath, projectRoot, userPrompt string) string {
 		return system
 	}
 	return system + "\n\n---\n\n" + userPrompt
-}
-
-// WritePromptFile writes the prompt to a temporary file and returns the path.
-// The caller is responsible for cleanup (or relying on OS temp cleanup).
-func WritePromptFile(prompt string) (string, error) {
-	f, err := os.CreateTemp("", "lazyclaude-prompt-*.txt")
-	if err != nil {
-		return "", fmt.Errorf("create prompt file: %w", err)
-	}
-	if _, err := f.WriteString(prompt); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", fmt.Errorf("write prompt file: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(f.Name())
-		return "", fmt.Errorf("close prompt file: %w", err)
-	}
-	return f.Name(), nil
 }
 
 // WorktreePath returns the absolute path for a worktree directory.

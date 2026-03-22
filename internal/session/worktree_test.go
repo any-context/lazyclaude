@@ -76,39 +76,6 @@ func TestBuildWorktreePrompt_EmptyUserPrompt(t *testing.T) {
 	}
 }
 
-func TestWritePromptFile(t *testing.T) {
-	path, err := WritePromptFile("hello world")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(path)
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "hello world" {
-		t.Errorf("content = %q, want %q", string(data), "hello world")
-	}
-}
-
-func TestWritePromptFile_Unicode(t *testing.T) {
-	prompt := "日本語のプロンプト\n改行あり"
-	path, err := WritePromptFile(prompt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(path)
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != prompt {
-		t.Errorf("content = %q, want %q", string(data), prompt)
-	}
-}
-
 func TestWorktreePath(t *testing.T) {
 	got := WorktreePath("/home/user/project", "fix-popup")
 	want := filepath.Join("/home/user/project", ".claude", "worktrees", "fix-popup")

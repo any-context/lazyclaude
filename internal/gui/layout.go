@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/KEMSHlM/lazyclaude/internal/gui/presentation"
+	"github.com/KEMSHlM/lazyclaude/internal/session"
 	"github.com/jesseduffield/gocui"
 )
 
@@ -334,7 +335,7 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 	}
 
 	item := items[a.cursor]
-	if isWorktreePath(item.Path) {
+	if session.IsWorktreePath(item.Path) {
 		v.Title = fmt.Sprintf(" [worktree] %s ", item.Name)
 	} else {
 		v.Title = fmt.Sprintf(" %s ", item.Name)

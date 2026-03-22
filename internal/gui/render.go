@@ -10,11 +10,6 @@ import (
 	"github.com/jesseduffield/gocui"
 )
 
-// isWorktreePath returns true if the path belongs to a worktree directory.
-func isWorktreePath(path string) bool {
-	return session.IsWorktreePath(path)
-}
-
 const serverLogPath = "/tmp/lazyclaude/server.log"
 const serverLogLines = 30
 
@@ -50,7 +45,7 @@ func renderSessionList(v *gocui.View, items []SessionItem, cursor int) {
 		if item.Host != "" {
 			name = presentation.FgPurple + item.Host + presentation.Reset + ":" + name
 		}
-		if isWorktreePath(item.Path) {
+		if session.IsWorktreePath(item.Path) {
 			name = presentation.IconWorktree + " " + name
 		}
 		fmt.Fprintf(v, "%s%-20s%s\n", prefix, name, icon)

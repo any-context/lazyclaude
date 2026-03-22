@@ -276,6 +276,10 @@ func (m *Manager) CreateWorktree(ctx context.Context, name, userPrompt, projectR
 		UpdatedAt: time.Now(),
 	}
 
+	// shell.Quote wraps the temp path in single quotes ('...').
+	// Inside the outer single-quoted -lic argument, adjacent quoted tokens
+	// are concatenated by the shell: 'exec sh ''<path>''' → exec sh <path>.
+	// OS temp paths never contain single quotes, so this is safe.
 	claudeCmd := fmt.Sprintf("exec \"$SHELL\" -lic 'exec sh %s'", shell.Quote(launcher))
 	windowName := sess.WindowName()
 	m.log.Info("createWorktree.start", "name", name, "id", id[:8], "path", wtPath)
@@ -318,6 +322,9 @@ func (m *Manager) CreateWorktree(ctx context.Context, name, userPrompt, projectR
 	sess.Status = StatusRunning
 	m.store.Add(sess)
 
+	// Note: if Save fails, the tmux window is already running and the session
+	// is in memory but not persisted to disk. This matches Create()'s behavior.
+	// The next Sync() will reconcile the in-memory state with tmux.
 	if err := m.store.Save(); err != nil {
 		return nil, fmt.Errorf("save store: %w", err)
 	}
