@@ -28,9 +28,14 @@ func runSetup() error {
 	paths := config.DefaultPaths()
 
 	// 1. Restart MCP server (kill old, start new with current binary)
+	var extraEnv []string
+	if hostTmux := os.Getenv("LAZYCLAUDE_HOST_TMUX"); hostTmux != "" {
+		extraEnv = append(extraEnv, "LAZYCLAUDE_HOST_TMUX="+hostTmux)
+	}
 	result, err := server.RestartServer(server.EnsureOpts{
 		Binary:   os.Args[0],
 		PortFile: paths.PortFile(),
+		ExtraEnv: extraEnv,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: MCP server: %v\n", err)

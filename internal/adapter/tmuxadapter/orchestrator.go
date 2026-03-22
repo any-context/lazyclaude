@@ -23,9 +23,10 @@ type toolPopupReq struct {
 // For tool popups, it queues requests per window so only one popup
 // is active at a time per window.
 type PopupOrchestrator struct {
-	binary string      // path to lazyclaude binary
-	tmux   tmux.Client // for display-popup, show-message
-	log    *log.Logger
+	binary   string      // path to lazyclaude binary
+	tmux     tmux.Client // lazyclaude tmux (-L lazyclaude)
+	hostTmux tmux.Client // user's tmux (for display-popup)
+	log      *log.Logger
 
 	mu     sync.Mutex
 	active map[string]bool          // window -> popup currently open
@@ -33,13 +34,15 @@ type PopupOrchestrator struct {
 }
 
 // NewPopupOrchestrator creates a popup orchestrator.
-func NewPopupOrchestrator(binary string, tmuxClient tmux.Client, logger *log.Logger) *PopupOrchestrator {
+// hostTmux is the user's tmux client (for display-popup). Can be nil if unknown.
+func NewPopupOrchestrator(binary string, tmuxClient, hostTmux tmux.Client, logger *log.Logger) *PopupOrchestrator {
 	return &PopupOrchestrator{
-		binary: binary,
-		tmux:   tmuxClient,
-		log:    logger,
-		active: make(map[string]bool),
-		queues: make(map[string][]toolPopupReq),
+		binary:   binary,
+		tmux:     tmuxClient,
+		hostTmux: hostTmux,
+		log:      logger,
+		active:   make(map[string]bool),
+		queues:   make(map[string][]toolPopupReq),
 	}
 }
 
@@ -111,18 +114,23 @@ func (p *PopupOrchestrator) spawnToolPopupBlocking(ctx context.Context, req tool
 		env["LAZYCLAUDE_TMUX_SOCKET"] = s
 	}
 	opts := tmux.PopupOpts{
-		Target: req.window,
 		Width:  w,
 		Height: h,
 		Cmd:    cmd,
 		Env:    env,
 	}
-	// Find active client so display-popup can attach to it.
-	// Without a client, display-popup fails with "no current client".
-	if client, err := p.tmux.FindActiveClient(ctx); err == nil && client != nil {
+	// Use user's tmux for display-popup (not lazyclaude tmux).
+	popupTmux := p.tmux
+	if p.hostTmux != nil {
+		popupTmux = p.hostTmux
+		// Don't set Target — lazyclaude window IDs don't exist in user's tmux
+	} else {
+		opts.Target = req.window
+	}
+	if client, err := popupTmux.FindActiveClient(ctx); err == nil && client != nil {
 		opts.Client = client.Name
 	}
-	if err := p.tmux.DisplayPopup(ctx, opts); err != nil {
+	if err := popupTmux.DisplayPopup(ctx, opts); err != nil {
 		p.log.Printf("popup: spawn tool: %v", err)
 	}
 }
@@ -137,16 +145,21 @@ func (p *PopupOrchestrator) SpawnDiffPopup(ctx context.Context, window, oldPath,
 		env["LAZYCLAUDE_TMUX_SOCKET"] = s
 	}
 	opts := tmux.PopupOpts{
-		Target: window,
 		Width:  80,
 		Height: 80,
 		Cmd:    cmd,
 		Env:    env,
 	}
-	if client, err := p.tmux.FindActiveClient(ctx); err == nil && client != nil {
+	popupTmux := p.tmux
+	if p.hostTmux != nil {
+		popupTmux = p.hostTmux
+	} else {
+		opts.Target = window
+	}
+	if client, err := popupTmux.FindActiveClient(ctx); err == nil && client != nil {
 		opts.Client = client.Name
 	}
-	if err := p.tmux.DisplayPopup(ctx, opts); err != nil {
+	if err := popupTmux.DisplayPopup(ctx, opts); err != nil {
 		p.log.Printf("popup: spawn diff: %v", err)
 	}
 }

@@ -58,7 +58,15 @@ func New(cfg Config, tmuxClient tmux.Client, logger *log.Logger) *Server {
 	handler.SetRuntimeDir(cfg.RuntimeDir)
 	lockMgr := NewLockManager(cfg.IDEDir)
 
-	popupOrch := tmuxadapter.NewPopupOrchestrator(cfg.BinaryPath, tmuxClient, logger)
+	// Create a tmux client for the user's tmux (for display-popup).
+	// LAZYCLAUDE_HOST_TMUX contains the user's $TMUX socket path.
+	var hostTmux tmux.Client
+	if hostSocket := os.Getenv("LAZYCLAUDE_HOST_TMUX"); hostSocket != "" {
+		// $TMUX format: "/path/to/socket,pid,session"
+		parts := strings.SplitN(hostSocket, ",", 2)
+		hostTmux = tmux.NewExecClientWithSocket(parts[0])
+	}
+	popupOrch := tmuxadapter.NewPopupOrchestrator(cfg.BinaryPath, tmuxClient, hostTmux, logger)
 	handler.SetPopup(popupOrch)
 
 	s := &Server{

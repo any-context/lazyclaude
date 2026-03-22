@@ -16,8 +16,15 @@ if [ ! -x "$BINARY" ]; then
     exit 1
 fi
 
+# Detect user's tmux socket.
+# If inside lazyclaude tmux, fall back to default socket path.
+HOST_SOCKET=$(tmux display-message -p '#{socket_path}' 2>/dev/null || echo "")
+if echo "$HOST_SOCKET" | grep -q "lazyclaude"; then
+    HOST_SOCKET="/tmp/tmux-$(id -u)/default"
+fi
+
 # Run Go setup (MCP server + Claude Code hooks)
-"$BINARY" setup
+LAZYCLAUDE_HOST_TMUX="$HOST_SOCKET" "$BINARY" setup
 
 # Read tmux options
 launch_key=$(tmux show-option -gqv @claude-launch-key 2>/dev/null)

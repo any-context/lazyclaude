@@ -56,7 +56,7 @@ func (m *mockPopupClient) getCalls() []tmux.PopupOpts {
 func TestPopupQueue_SinglePopup(t *testing.T) {
 	mock := newMockPopupClient()
 	logger := log.New(os.Stderr, "test: ", 0)
-	p := NewPopupOrchestrator("lazyclaude", mock, logger)
+	p := NewPopupOrchestrator("lazyclaude", mock, nil, logger)
 
 	p.SpawnToolPopup(context.Background(), "@1", "Bash", "{}", "/tmp")
 
@@ -80,7 +80,7 @@ func TestPopupQueue_SinglePopup(t *testing.T) {
 func TestPopupQueue_SequentialForSameWindow(t *testing.T) {
 	mock := newMockPopupClient()
 	logger := log.New(os.Stderr, "test: ", 0)
-	p := NewPopupOrchestrator("lazyclaude", mock, logger)
+	p := NewPopupOrchestrator("lazyclaude", mock, nil, logger)
 
 	// Spawn 3 popups for the same window rapidly
 	p.SpawnToolPopup(context.Background(), "@1", "Tool1", "{}", "/tmp")
@@ -120,7 +120,7 @@ func TestPopupQueue_SequentialForSameWindow(t *testing.T) {
 func TestPopupQueue_DifferentWindowsConcurrent(t *testing.T) {
 	mock := newMockPopupClient()
 	logger := log.New(os.Stderr, "test: ", 0)
-	p := NewPopupOrchestrator("lazyclaude", mock, logger)
+	p := NewPopupOrchestrator("lazyclaude", mock, nil, logger)
 
 	// Spawn popups for different windows
 	p.SpawnToolPopup(context.Background(), "@1", "Tool1", "{}", "/tmp")
@@ -139,7 +139,7 @@ func TestPopupQueue_DifferentWindowsConcurrent(t *testing.T) {
 func TestPopupQueue_QueueLength(t *testing.T) {
 	mock := newMockPopupClient()
 	logger := log.New(os.Stderr, "test: ", 0)
-	p := NewPopupOrchestrator("lazyclaude", mock, logger)
+	p := NewPopupOrchestrator("lazyclaude", mock, nil, logger)
 
 	assert.Equal(t, 0, p.QueueLen("@1"))
 
