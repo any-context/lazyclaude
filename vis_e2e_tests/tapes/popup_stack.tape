@@ -2,8 +2,8 @@ Output outputs/popup_stack/popup_stack.gif
 Output outputs/popup_stack/popup_stack.txt
 
 Set Shell "bash"
-Set Width 1200
-Set Height 800
+Set Width 1800
+Set Height 1200
 Set FontSize 16
 Set WaitTimeout 60s
 

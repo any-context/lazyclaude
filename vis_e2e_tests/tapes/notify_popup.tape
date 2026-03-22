@@ -2,8 +2,8 @@ Output outputs/notify_popup/notify_popup.gif
 Output outputs/notify_popup/notify_popup.txt
 
 Set Shell "bash"
-Set Width 1200
-Set Height 800
+Set Width 1800
+Set Height 1200
 Set FontSize 16
 Set WaitTimeout 60s
 

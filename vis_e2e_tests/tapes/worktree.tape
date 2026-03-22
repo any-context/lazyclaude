@@ -2,8 +2,8 @@ Output outputs/worktree/worktree.gif
 Output outputs/worktree/worktree.txt
 
 Set Shell "bash"
-Set Width 1200
-Set Height 1100
+Set Width 1800
+Set Height 1200
 Set FontSize 16
 Set WaitTimeout 30s
 
