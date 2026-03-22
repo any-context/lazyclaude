@@ -12,35 +12,30 @@ func TestAppState_IsFullScreen(t *testing.T) {
 	assert.True(t, StateFullScreen.IsFullScreen())
 }
 
-func TestTransition_MainToFullScreen(t *testing.T) {
+func TestFullScreen_EnterExit(t *testing.T) {
 	t.Parallel()
-	app := &App{state: StateMain, preview: &PreviewCache{}}
-	app.transition(StateFullScreen)
-	assert.Equal(t, StateFullScreen, app.state)
+	fs := NewFullScreenState(&PreviewCache{})
+	fs.Enter("sess-1")
+	assert.True(t, fs.IsActive())
+	assert.Equal(t, "sess-1", fs.Target())
 }
 
-func TestTransition_FullScreenToMain_ClearsTarget(t *testing.T) {
+func TestFullScreen_ExitClearsTarget(t *testing.T) {
 	t.Parallel()
 	pc := &PreviewCache{content: "cached"}
-	app := &App{state: StateFullScreen, fullScreenTarget: "sess-1", preview: pc}
-	app.transition(StateMain)
-	assert.Equal(t, StateMain, app.state)
-	assert.Empty(t, app.fullScreenTarget, "target cleared on exit fullscreen")
-	assert.Empty(t, app.preview.Content(), "cache cleared on exit fullscreen")
+	fs := NewFullScreenState(pc)
+	fs.Enter("sess-1")
+	fs.Exit()
+	assert.False(t, fs.IsActive())
+	assert.Empty(t, fs.Target())
+	assert.Empty(t, pc.Content(), "cache cleared on exit")
 }
 
-func TestTransition_SameState_NoOp(t *testing.T) {
-	t.Parallel()
-	app := &App{state: StateFullScreen, fullScreenTarget: "sess-1", preview: &PreviewCache{}}
-	app.transition(StateFullScreen)
-	assert.Equal(t, "sess-1", app.fullScreenTarget, "no change on same state")
-}
-
-func TestTransition_MainToFullScreen_ClearsCache(t *testing.T) {
+func TestFullScreen_EnterResetsScroll(t *testing.T) {
 	t.Parallel()
 	pc := &PreviewCache{content: "old"}
-	app := &App{state: StateMain, preview: pc}
-	app.transition(StateFullScreen)
-	assert.Empty(t, app.preview.Content(), "cache cleared on enter fullscreen")
-	assert.Equal(t, 0, app.fullScreenScrollY, "scroll reset on enter fullscreen")
+	fs := NewFullScreenState(pc)
+	fs.Enter("sess-1")
+	assert.Empty(t, pc.Content(), "cache cleared on enter")
+	assert.Equal(t, 0, fs.ScrollY(), "scroll reset on enter")
 }

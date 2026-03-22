@@ -42,44 +42,37 @@ func (a *App) ExitFullScreenForTest() {
 
 // IsFullScreenForTest returns full-screen state for testing.
 func (a *App) IsFullScreenForTest() bool {
-	return a.state.IsFullScreen()
+	return a.fullscreen.IsActive()
 }
 
 // StateForTest returns the current AppState.
 func (a *App) StateForTest() AppState {
-	return a.state
+	if a.fullscreen.IsActive() {
+		return StateFullScreen
+	}
+	return StateMain
 }
 
 // SetStateForTest sets the AppState for testing.
 func (a *App) SetStateForTest(s AppState) {
-	a.transition(s)
+	if s == StateFullScreen {
+		a.fullscreen.Enter("test-session")
+	} else {
+		a.fullscreen.Exit()
+	}
 }
 
 // ForwardKeyForTest simulates forwarding a key in full-screen mode.
 // Drains the key queue synchronously so the test can assert immediately.
 func (a *App) ForwardKeyForTest(ch rune) {
 	a.forwardKey(ch)
-	a.drainKeyQueue()
+	a.fullscreen.DrainQueue()
 }
 
 // ForwardSpecialKeyForTest simulates forwarding a special key in full-screen mode.
 func (a *App) ForwardSpecialKeyForTest(tmuxKey string) {
 	a.forwardSpecialKey(tmuxKey)
-	a.drainKeyQueue()
-}
-
-// drainKeyQueue processes all pending keys synchronously (for testing).
-func (a *App) drainKeyQueue() {
-	for {
-		select {
-		case cmd := <-a.keyQueue:
-			if a.inputForwarder != nil {
-				a.inputForwarder.ForwardKey(cmd.target, cmd.key)
-			}
-		default:
-			return
-		}
-	}
+	a.fullscreen.DrainQueue()
 }
 
 // PollNotificationForTest simulates what the ticker does: check for pending

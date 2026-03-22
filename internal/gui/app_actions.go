@@ -14,7 +14,7 @@ var _ keyhandler.AppActions = (*App)(nil)
 // --- State queries ---
 
 func (a *App) HasPopup() bool    { return a.hasPopup() }
-func (a *App) IsFullScreen() bool { return a.state.IsFullScreen() }
+func (a *App) IsFullScreen() bool { return a.fullscreen.IsActive() }
 
 // --- Session cursor ---
 
@@ -203,76 +203,18 @@ func (a *App) ForwardSpecialKey(tmuxKey string) {
 
 // --- Logs ---
 
-func (a *App) LogsCursorDown() {
-	if a.logsLineCount > 0 && a.logsCursorY < a.logsLineCount-1 {
-		a.logsCursorY++
-	}
-}
-
-func (a *App) LogsCursorUp() {
-	if a.logsCursorY > 0 {
-		a.logsCursorY--
-	}
-}
-
-func (a *App) LogsCursorToEnd() {
-	if a.logsLineCount > 0 {
-		a.logsCursorY = a.logsLineCount - 1
-	}
-}
-
-func (a *App) LogsCursorToTop() {
-	a.logsCursorY = 0
-}
-
-func (a *App) LogsToggleSelect() {
-	if a.logsSelecting {
-		a.logsSelecting = false
-	} else {
-		a.logsSelecting = true
-		a.logsSelAnchor = a.logsCursorY
-	}
-}
+func (a *App) LogsCursorDown()    { a.logs.CursorDown() }
+func (a *App) LogsCursorUp()      { a.logs.CursorUp() }
+func (a *App) LogsCursorToEnd()   { a.logs.ToEnd() }
+func (a *App) LogsCursorToTop()   { a.logs.ToTop() }
+func (a *App) LogsToggleSelect()  { a.logs.ToggleSelect() }
 
 func (a *App) LogsCopySelection() {
-	a.logsCopyToClipboard()
-	a.logsSelecting = false
-}
-
-// logsCopyToClipboard copies selected lines (or current line) to clipboard.
-func (a *App) logsCopyToClipboard() {
-	lines := a.readLogLines()
-	if len(lines) == 0 {
-		return
+	text := a.logs.CopyText(a.readLogLines())
+	if text != "" {
+		copyToClipboard(text)
 	}
-
-	var start, end int
-	if a.logsSelecting {
-		start = a.logsSelAnchor
-		end = a.logsCursorY
-		if start > end {
-			start, end = end, start
-		}
-	} else {
-		start = a.logsCursorY
-		end = a.logsCursorY
-	}
-	if start < 0 {
-		start = 0
-	}
-	if end >= len(lines) {
-		end = len(lines) - 1
-	}
-
-	var text string
-	for i := start; i <= end; i++ {
-		if i > start {
-			text += "\n"
-		}
-		text += lines[i]
-	}
-
-	copyToClipboard(text)
+	a.logs.ClearSelection()
 }
 
 // --- Application ---

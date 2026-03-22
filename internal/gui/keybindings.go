@@ -74,16 +74,16 @@ func (a *App) setupGlobalKeybindings() error {
 
 	// 4. Mouse scroll (not dispatched — simple inline handlers)
 	if err := a.gui.SetKeybinding("", gocui.MouseWheelUp, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		if a.state.IsFullScreen() && a.fullScreenScrollY > 0 {
-			a.fullScreenScrollY--
+		if a.fullscreen.IsActive() && a.fullscreen.ScrollY() > 0 {
+			a.fullscreen.ScrollUp()
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
 	if err := a.gui.SetKeybinding("", gocui.MouseWheelDown, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		if a.state.IsFullScreen() {
-			a.fullScreenScrollY++
+		if a.fullscreen.IsActive() {
+			a.fullscreen.ScrollDown()
 		}
 		return nil
 	}); err != nil {

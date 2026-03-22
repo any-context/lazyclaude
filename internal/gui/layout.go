@@ -126,7 +126,7 @@ func (a *App) layout(g *gocui.Gui) error {
 
 	switch a.mode {
 	case ModeMain:
-		if a.state.IsFullScreen() {
+		if a.fullscreen.IsActive() {
 			if err := a.layoutFullScreen(g, maxX, maxY); err != nil {
 				return err
 			}
@@ -245,7 +245,7 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 	// Find the full-screen target session
 	targetIdx := -1
 	for i, item := range items {
-		if item.ID == a.fullScreenTarget {
+		if item.ID == a.fullscreen.Target() {
 			targetIdx = i
 			break
 		}
@@ -260,7 +260,7 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 	a.renderPreview(v, items, previewW, previewH)
 
 	// Scroll offset for mouse scroll
-	v.SetOrigin(0, a.fullScreenScrollY)
+	v.SetOrigin(0, a.fullscreen.ScrollY())
 
 	// Status bar
 	v2, err := g.SetView("fullscreen-bar", l.Options.X0, l.Options.Y0, l.Options.X1, l.Options.Y1, 0)
@@ -447,42 +447,28 @@ func (a *App) renderServerLog(v *gocui.View) {
 	lines := a.readLogLines()
 	if len(lines) == 0 {
 		fmt.Fprintln(v, presentation.Dim+"  MCP: no log"+presentation.Reset)
-		a.logsLineCount = 0
+		a.logs.SetLineCount(0)
 		return
 	}
-	a.logsLineCount = len(lines)
+	a.logs.SetLineCount(len(lines))
+	a.logs.ClampCursor()
 
-	// Clamp cursor
-	if a.logsCursorY >= len(lines) {
-		a.logsCursorY = len(lines) - 1
-	}
-	if a.logsCursorY < 0 {
-		a.logsCursorY = 0
-	}
-
-	// Selection range
-	selStart, selEnd := -1, -1
-	if a.logsSelecting {
-		selStart, selEnd = a.logsSelAnchor, a.logsCursorY
-		if selStart > selEnd {
-			selStart, selEnd = selEnd, selStart
-		}
-	}
-
+	selStart, selEnd := a.logs.SelectionRange()
+	cursorY := a.logs.CursorY()
+	selecting := a.logs.IsSelecting()
 	focused := a.panelManager.ActivePanel().Name() == "logs"
 	w := v.InnerWidth()
 
-	// Write all lines; gocui handles viewport via origin
 	for i, raw := range lines {
 		line := " " + raw
-		inSelection := focused && a.logsSelecting && i >= selStart && i <= selEnd
-		isCursor := focused && i == a.logsCursorY
+		inSelection := focused && selecting && i >= selStart && i <= selEnd
+		isCursor := focused && i == cursorY
 
 		if inSelection && isCursor {
 			fmt.Fprintf(v, "\x1b[48;5;33;1;37m%-*s\x1b[0m\n", w, line)
 		} else if inSelection {
 			fmt.Fprintf(v, "\x1b[48;5;24;37m%-*s\x1b[0m\n", w, line)
-		} else if isCursor && a.logsSelecting {
+		} else if isCursor && selecting {
 			fmt.Fprintf(v, "\x1b[48;5;238;1m%-*s\x1b[0m\n", w, line)
 		} else if isCursor {
 			fmt.Fprintf(v, "\x1b[48;5;240m%-*s\x1b[0m\n", w, line)
@@ -493,14 +479,14 @@ func (a *App) renderServerLog(v *gocui.View) {
 
 	// Let gocui manage scrolling: cursor position determines visible area
 	if focused {
-		v.SetCursor(0, a.logsCursorY)
+		v.SetCursor(0, cursorY)
 		// Ensure origin keeps cursor in view
 		_, oy := v.Origin()
 		h := v.InnerHeight()
-		if a.logsCursorY < oy {
-			v.SetOrigin(0, a.logsCursorY)
-		} else if a.logsCursorY >= oy+h {
-			v.SetOrigin(0, a.logsCursorY-h+1)
+		if cursorY < oy {
+			v.SetOrigin(0, cursorY)
+		} else if cursorY >= oy+h {
+			v.SetOrigin(0, cursorY-h+1)
 		}
 	}
 }

@@ -70,22 +70,15 @@ type App struct {
 	preview          *PreviewCache
 	lastWidth        int
 	lastHeight       int
-	popups           *PopupController              // popup stack management
-	state            AppState                     // current UI state (Main, FullScreen)
-	fullScreenTarget string                        // session ID for full-screen view
-	inputForwarder   InputForwarder                // forwards keys to tmux pane in full-screen
+	popups           PopupManager                  // popup stack management
+	fullscreen       *FullScreenState              // fullscreen mode state + key forwarding
 	keyRegistry        *KeyRegistry                   // single source of truth for key bindings
 	dispatcher         *keydispatch.Dispatcher       // key dispatch chain
 	panelManager       *keyhandler.PanelManager      // panel focus management
 	outputNotify       chan struct{}                 // signals pane output (from control mode)
-	fullScreenScrollY  int                          // mouse scroll offset
-	logsCursorY        int                          // logs cursor line (absolute, 0=newest)
-	logsSelecting      bool                         // logs selection mode active
-	logsSelAnchor      int                          // selection anchor line
-	logsLineCount      int                          // cached line count from last render
+	logs               *LogsState                    // logs panel cursor/selection state
 	quitRequested      bool                         // set by Quit(), checked after Dispatch
 	onTick             func()                       // called every ticker cycle (control mode health check)
-	keyQueue           chan keyCmd                   // serial key forwarding queue (preserves order)
 	popupMode          config.PopupMode             // how popups are displayed (auto/tmux/overlay)
 	notifyBroker       *event.Broker[model.Event]  // optional in-process broker (nil = file-only)
 	notifyBrokerSub    *event.Subscription[model.Event] // active subscription (nil if no broker)
@@ -114,8 +107,9 @@ func NewApp(mode AppMode) (*App, error) {
 		preview:      &PreviewCache{},
 		keyRegistry:  DefaultKeyRegistry(),
 		outputNotify: make(chan struct{}, 1),
-		keyQueue:     make(chan keyCmd, 64),
+		logs:         NewLogsState(),
 	}
+	app.fullscreen = NewFullScreenState(app.preview)
 	app.initDispatcher()
 
 	g.SetManagerFunc(app.layout)
@@ -148,8 +142,9 @@ func NewAppHeadless(mode AppMode, width, height int) (*App, error) {
 		preview:      &PreviewCache{},
 		keyRegistry:  DefaultKeyRegistry(),
 		outputNotify: make(chan struct{}, 1),
-		keyQueue:     make(chan keyCmd, 64),
+		logs:         NewLogsState(),
 	}
+	app.fullscreen = NewFullScreenState(app.preview)
 	app.initDispatcher()
 
 	g.SetManagerFunc(app.layout)
@@ -184,7 +179,7 @@ func (a *App) Run() error {
 
 	// Serial key forwarder: preserves keystroke order (critical for IME input).
 	done := make(chan struct{})
-	go a.runKeyForwarder(done)
+	go a.fullscreen.RunKeyForwarder(done)
 
 	// Refresh loop: event-driven via outputNotify (from control mode),
 	// with a fallback ticker for notification polling and non-control scenarios.
@@ -277,7 +272,7 @@ func (a *App) SetSessions(sp SessionProvider) {
 
 // SetInputForwarder sets the input forwarder for full-screen mode.
 func (a *App) SetInputForwarder(fwd InputForwarder) {
-	a.inputForwarder = fwd
+	a.fullscreen.SetForwarder(fwd)
 }
 
 // SetOnTick sets a callback invoked every ticker cycle (for control mode health checks).
@@ -304,29 +299,6 @@ type keyCmd struct {
 	key    string
 }
 
-// enqueueKey adds a key to the serial forwarding queue.
-// Non-blocking: if the queue is full, the key is dropped.
-func (a *App) enqueueKey(target, key string) {
-	select {
-	case a.keyQueue <- keyCmd{target: target, key: key}:
-	default:
-	}
-}
-
-// runKeyForwarder drains the key queue serially, preserving order.
-// Runs as a background goroutine for the lifetime of the app.
-func (a *App) runKeyForwarder(done <-chan struct{}) {
-	for {
-		select {
-		case <-done:
-			return
-		case cmd := <-a.keyQueue:
-			if a.inputForwarder != nil {
-				a.inputForwarder.ForwardKey(cmd.target, cmd.key)
-			}
-		}
-	}
-}
 
 // NotifyOutput signals that a pane has new output.
 // Called from the control mode callback. Non-blocking.

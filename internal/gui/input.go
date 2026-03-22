@@ -127,7 +127,7 @@ var specialKeyMap = map[gocui.Key]string{
 // Edit is called by gocui for every keypress when the view is Editable.
 // In full-screen mode all keys are forwarded directly to the Claude Code pane.
 func (e *inputEditor) Edit(v *gocui.View, key gocui.Key, ch rune, mod gocui.Modifier) bool {
-	if !e.app.state.IsFullScreen() || e.app.hasPopup() {
+	if !e.app.fullscreen.IsActive() || e.app.hasPopup() {
 		return false
 	}
 

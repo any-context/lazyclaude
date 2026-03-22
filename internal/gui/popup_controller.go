@@ -4,6 +4,26 @@ import (
 	"github.com/KEMSHlM/lazyclaude/internal/core/model"
 )
 
+// PopupManager abstracts popup stack operations.
+type PopupManager interface {
+	HasVisible() bool
+	Count() int
+	VisibleCount() int
+	PushPopup(p Popup)
+	DismissActive(choice Choice) string
+	DismissAll(choice Choice) []string
+	ActivePopup() Popup
+	ActiveEntry() *popupEntry
+	ActiveNotification() *model.ToolNotification
+	FocusNext()
+	FocusPrev()
+	FocusIndex() int
+	SuspendAll()
+	UnsuspendAll()
+	Stack() []popupEntry
+	VisibleIndexOf(stackIdx int) int
+}
+
 // PopupController manages the popup stack independently from App.
 type PopupController struct {
 	stack    []popupEntry
