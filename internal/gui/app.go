@@ -41,6 +41,7 @@ type SessionProvider interface {
 	PendingNotifications() []*model.ToolNotification
 	SendChoice(window string, choice Choice) error
 	AttachSession(id string) error
+	CreateWorktree(name, prompt, projectRoot string) error
 }
 
 // SessionItem is a read-only view of a session for display.

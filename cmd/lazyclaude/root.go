@@ -322,6 +322,11 @@ func (a *sessionAdapter) SendChoice(window string, c gui.Choice) error {
 	return tmuxadapter.SendToPane(context.Background(), a.tmux, window, c)
 }
 
+func (a *sessionAdapter) CreateWorktree(name, prompt, projectRoot string) error {
+	_, err := a.mgr.CreateWorktree(context.Background(), name, prompt, projectRoot)
+	return err
+}
+
 func (a *sessionAdapter) AttachSession(id string) error {
 	sess := a.mgr.Store().FindByID(id)
 	if sess == nil {

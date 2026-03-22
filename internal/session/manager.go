@@ -235,6 +235,130 @@ func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, e
 	return &sess, nil
 }
 
+// CreateWorktree creates a worktree directory and launches Claude Code with an initial prompt.
+// The worktree is placed at {projectRoot}/.claude/worktrees/{name}/.
+func (m *Manager) CreateWorktree(ctx context.Context, name, userPrompt, projectRoot string) (*Session, error) {
+	if err := ValidateWorktreeName(name); err != nil {
+		return nil, fmt.Errorf("invalid worktree name: %w", err)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	wtPath := WorktreePath(projectRoot, name)
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		return nil, fmt.Errorf("create worktree dir: %w", err)
+	}
+
+	systemPrompt := BuildWorktreePrompt(wtPath, projectRoot, userPrompt)
+
+	// Write a launcher script to avoid nested shell quoting issues.
+	// Go writes the file directly, so the prompt content is never
+	// interpreted by a shell — no injection risk regardless of content.
+	launcher, err := writeWorktreeLauncher(systemPrompt, userPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("write launcher: %w", err)
+	}
+	// Clean up the launcher on any subsequent failure.
+	cleanupLauncher := true
+	defer func() {
+		if cleanupLauncher {
+			os.Remove(launcher)
+		}
+	}()
+
+	id := uuid.New().String()
+	sess := Session{
+		ID:        id,
+		Name:      name,
+		Path:      wtPath,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	claudeCmd := fmt.Sprintf("exec \"$SHELL\" -lic 'exec sh %s'", shell.Quote(launcher))
+	windowName := sess.WindowName()
+	m.log.Info("createWorktree.start", "name", name, "id", id[:8], "path", wtPath)
+
+	exists, err := m.tmux.HasSession(ctx, tmuxSessionName)
+	if err != nil {
+		return nil, fmt.Errorf("check session: %w", err)
+	}
+
+	env := claudeEnv()
+	width, height := termSize()
+
+	if !exists {
+		err = m.tmux.NewSession(ctx, tmux.NewSessionOpts{
+			Name:         tmuxSessionName,
+			WindowName:   windowName,
+			Command:      claudeCmd,
+			StartDir:     wtPath,
+			Detached:     true,
+			Width:        width,
+			Height:       height,
+			Env:          env,
+			PostCommands: cleanSessionCommands(),
+		})
+	} else {
+		err = m.tmux.NewWindow(ctx, tmux.NewWindowOpts{
+			Session:  tmuxSessionName,
+			Name:     windowName,
+			Command:  claudeCmd,
+			StartDir: wtPath,
+			Env:      env,
+		})
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create tmux window: %w", err)
+	}
+	// tmux will execute the launcher; don't delete it.
+	cleanupLauncher = false
+
+	sess.Status = StatusRunning
+	m.store.Add(sess)
+
+	if err := m.store.Save(); err != nil {
+		return nil, fmt.Errorf("save store: %w", err)
+	}
+
+	return &sess, nil
+}
+
+// writeWorktreeLauncher writes a shell script that launches claude with
+// --append-system-prompt and an optional user prompt as positional argument.
+// Returns the script path. The script self-deletes after execution.
+func writeWorktreeLauncher(systemPrompt, userPrompt string) (string, error) {
+	f, err := os.CreateTemp("", "lazyclaude-wt-*.sh")
+	if err != nil {
+		return "", fmt.Errorf("create temp script: %w", err)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("#!/bin/sh\n")
+	// Self-delete the launcher script (already read by shell at this point).
+	sb.WriteString("rm -f \"$0\"\n")
+	sb.WriteString("exec claude")
+	sb.WriteString(" --append-system-prompt ")
+	sb.WriteString(shell.Quote(systemPrompt))
+	if strings.TrimSpace(userPrompt) != "" {
+		sb.WriteString(" ")
+		sb.WriteString(shell.Quote(userPrompt))
+	}
+	sb.WriteString("\n")
+
+	if _, err := f.WriteString(sb.String()); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", fmt.Errorf("write launcher script: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", fmt.Errorf("close launcher script: %w", err)
+	}
+	return f.Name(), nil
+}
+
 // Delete removes a session and kills its tmux window.
 func (m *Manager) Delete(ctx context.Context, id string) error {
 	m.mu.Lock()

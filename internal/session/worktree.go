@@ -7,11 +7,20 @@ import (
 	"strings"
 )
 
+// WorktreePathSegment is the relative path segment identifying worktree directories.
+// Used for both path construction and detection.
+const WorktreePathSegment = ".claude/worktrees"
+
 // worktreeSystemPrompt is the isolation instruction prepended to the user's prompt.
 const worktreeSystemPrompt = `You are working in an isolated worktree at %s.
 Your task is scoped to this directory only.
 NEVER modify files outside this worktree — %s must remain untouched.
 Be careful that any commands you run do not interfere with other worktrees.`
+
+// IsWorktreePath returns true if the path belongs to a worktree directory.
+func IsWorktreePath(path string) bool {
+	return strings.Contains(path, "/"+WorktreePathSegment+"/")
+}
 
 // ValidateWorktreeName checks if a worktree name is valid.
 // Rejects empty, whitespace-only, path traversal, and git-invalid characters.
@@ -63,5 +72,5 @@ func WritePromptFile(prompt string) (string, error) {
 
 // WorktreePath returns the absolute path for a worktree directory.
 func WorktreePath(projectRoot, name string) string {
-	return filepath.Join(projectRoot, ".claude", "worktrees", name)
+	return filepath.Join(projectRoot, WorktreePathSegment, name)
 }

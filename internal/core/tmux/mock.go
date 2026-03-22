@@ -18,6 +18,7 @@ type MockClient struct {
 
 	// Captured arguments for assertions
 	LastNewSessionOpts NewSessionOpts
+	LastNewWindowOpts  NewWindowOpts
 
 	// Error injection
 	ErrListClients     error
@@ -104,6 +105,7 @@ func (m *MockClient) NewWindow(_ context.Context, opts NewWindowOpts) error {
 	if m.ErrNewWindow != nil {
 		return m.ErrNewWindow
 	}
+	m.LastNewWindowOpts = opts
 	windows := m.Sessions[opts.Session]
 	newIdx := len(windows)
 	m.Sessions[opts.Session] = append(windows, WindowInfo{

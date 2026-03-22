@@ -2,9 +2,11 @@ package gui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/KEMSHlM/lazyclaude/internal/gui/keyhandler"
+	"github.com/KEMSHlM/lazyclaude/internal/session"
 	"github.com/jesseduffield/gocui"
 )
 
@@ -37,7 +39,7 @@ func (a *App) dispatchKey(key gocui.Key) func(*gocui.Gui, *gocui.View) error {
 // setupGlobalKeybindings registers physical keys and delegates to the Dispatcher.
 func (a *App) setupGlobalKeybindings() error {
 	// 1. Rune keys dispatched through the chain
-	runes := []rune{'j', 'k', 'n', 'd', 'r', 'R', 'D', 'q', 'p', 'y', 'a', 'Y', 'g', 'G', 'v', '1', '2', '3'}
+	runes := []rune{'j', 'k', 'n', 'd', 'r', 'R', 'D', 'q', 'p', 'y', 'a', 'Y', 'g', 'G', 'v', 'w', '1', '2', '3'}
 	for _, ch := range runes {
 		if err := a.gui.SetKeybinding("", ch, gocui.ModNone, a.dispatchRune(ch)); err != nil {
 			return err
@@ -108,6 +110,86 @@ func (a *App) setupGlobalKeybindings() error {
 	}
 	if err := a.gui.SetKeybinding("rename-input", gocui.KeyEsc, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		a.closeRenameInput(g)
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// 6. Worktree dialog bindings (view-specific, outside dispatcher)
+	worktreeConfirm := func(g *gocui.Gui, v *gocui.View) error {
+		branchView, err := g.View("worktree-branch")
+		if err != nil {
+			return nil
+		}
+		promptView, err := g.View("worktree-prompt")
+		if err != nil {
+			return nil
+		}
+		branchName := strings.TrimSpace(branchView.TextArea.GetContent())
+		userPrompt := promptView.TextArea.GetContent()
+
+		// Validate before closing the dialog so errors appear inline.
+		if err := session.ValidateWorktreeName(branchName); err != nil {
+			a.setStatus(g, fmt.Sprintf("Error: %v", err))
+			return nil
+		}
+
+		a.closeWorktreeDialog(g)
+
+		go func() {
+			if a.sessions == nil {
+				return
+			}
+			abs, err := filepath.Abs(".")
+			if err != nil {
+				a.gui.Update(func(g *gocui.Gui) error {
+					a.setStatus(g, fmt.Sprintf("Error: %v", err))
+					return nil
+				})
+				return
+			}
+			if err := a.sessions.CreateWorktree(branchName, userPrompt, abs); err != nil {
+				a.gui.Update(func(g *gocui.Gui) error {
+					a.setStatus(g, fmt.Sprintf("Error: %v", err))
+					return nil
+				})
+				return
+			}
+			a.gui.Update(func(g *gocui.Gui) error {
+				a.setStatus(g, "Worktree "+branchName+" created")
+				return nil
+			})
+		}()
+		return nil
+	}
+
+	worktreeCancel := func(g *gocui.Gui, v *gocui.View) error {
+		a.closeWorktreeDialog(g)
+		return nil
+	}
+
+	for _, viewName := range []string{"worktree-branch", "worktree-prompt"} {
+		if err := a.gui.SetKeybinding(viewName, gocui.KeyCtrlD, gocui.ModNone, worktreeConfirm); err != nil {
+			return err
+		}
+		if err := a.gui.SetKeybinding(viewName, gocui.KeyEsc, gocui.ModNone, worktreeCancel); err != nil {
+			return err
+		}
+	}
+
+	// Tab: switch between branch and prompt fields
+	if err := a.gui.SetKeybinding("worktree-branch", gocui.KeyTab, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		if _, err := g.SetCurrentView("worktree-prompt"); err != nil && !isUnknownView(err) {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := a.gui.SetKeybinding("worktree-prompt", gocui.KeyTab, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		if _, err := g.SetCurrentView("worktree-branch"); err != nil && !isUnknownView(err) {
+			return err
+		}
 		return nil
 	}); err != nil {
 		return err

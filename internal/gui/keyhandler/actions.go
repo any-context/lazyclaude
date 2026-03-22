@@ -20,6 +20,7 @@ type AppActions interface {
 	AttachSession()
 	EnterFullScreen()
 	StartRename()
+	StartWorktreeInput()
 	PurgeOrphans()
 
 	// Popup

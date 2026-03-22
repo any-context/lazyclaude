@@ -138,6 +138,18 @@ func (a *App) StartRename() {
 	})
 }
 
+func (a *App) StartWorktreeInput() {
+	if a.sessions == nil || a.HasActiveDialog() {
+		return
+	}
+	a.gui.Update(func(g *gocui.Gui) error {
+		if !a.showWorktreeDialog(g) {
+			a.setStatus(g, "Error: could not open worktree dialog")
+		}
+		return nil
+	})
+}
+
 func (a *App) PurgeOrphans() {
 	if a.sessions == nil {
 		return

@@ -44,6 +44,7 @@ const (
 	IconCheck    = "✓"
 	IconDot      = "·"
 	IconSep      = "│"
+	IconWorktree = "\x1b[38;5;214m[W]\x1b[0m" // orange [W] for worktree sessions
 )
 
 // StyledKey renders a keybinding hint: key in bold, description in dim.

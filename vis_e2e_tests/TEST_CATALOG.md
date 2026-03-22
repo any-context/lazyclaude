@@ -45,6 +45,13 @@ IME キー順序保持。
 - 期待: リモートの Claude Code のツールリクエストからポップアップが表示
 - 必須: SSH リモート、Claude Code トークン
 
+### worktree
+Worktree 入力ダイアログの操作フロー。
+- 前提: SSH リモートで TUI 起動済み
+- 操作: `w` → ブランチ名入力 → Tab → プロンプト入力 → Ctrl+D で確定
+- 期待: ダイアログ表示、Tab 切り替え、worktree 作成完了メッセージ
+- 必須: Claude Code トークン
+
 ### 2option_detect
 リアル Claude Code の 2択 permission ダイアログ検出。
 - 前提: TUI 起動済み、Claude Code セッションあり

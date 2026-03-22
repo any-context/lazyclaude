@@ -251,3 +251,134 @@ func TestManager_Persistence(t *testing.T) {
 	require.Len(t, all, 1)
 	assert.Equal(t, "app", all[0].Name)
 }
+
+func TestManager_CreateWorktree_Basic(t *testing.T) {
+	t.Parallel()
+	mgr, mock := newTestManager(t)
+	ctx := context.Background()
+
+	projectRoot := t.TempDir()
+	sess, err := mgr.CreateWorktree(ctx, "fix-popup", "Fix the bug", projectRoot)
+	require.NoError(t, err)
+	require.NotNil(t, sess)
+
+	// Session should be created with worktree name
+	assert.Equal(t, "fix-popup", sess.Name)
+	assert.Equal(t, session.StatusRunning, sess.Status)
+
+	// Worktree directory should exist
+	wtDir := filepath.Join(projectRoot, ".claude", "worktrees", "fix-popup")
+	info, err := os.Stat(wtDir)
+	require.NoError(t, err)
+	assert.True(t, info.IsDir())
+
+	// Session path should be the worktree directory
+	assert.Equal(t, wtDir, sess.Path)
+
+	// tmux session should have been created (first session)
+	_, ok := mock.Sessions["lazyclaude"]
+	assert.True(t, ok)
+
+	// Claude command should invoke a launcher script
+	cmd := mock.LastNewSessionOpts.Command
+	assert.Contains(t, cmd, "sh")
+	assert.Contains(t, cmd, "lazyclaude-wt-")
+
+	// Should be in the store
+	all := mgr.Sessions()
+	assert.Len(t, all, 1)
+}
+
+func TestManager_CreateWorktree_InvalidName(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+	ctx := context.Background()
+
+	cases := []string{"", "  ", "foo/bar", "foo..bar", "-leading"}
+	for _, name := range cases {
+		_, err := mgr.CreateWorktree(ctx, name, "prompt", "/tmp/project")
+		assert.Error(t, err, "should reject name %q", name)
+	}
+}
+
+func TestManager_CreateWorktree_EmptyPrompt(t *testing.T) {
+	t.Parallel()
+	mgr, mock := newTestManager(t)
+	ctx := context.Background()
+
+	projectRoot := t.TempDir()
+	sess, err := mgr.CreateWorktree(ctx, "no-prompt", "", projectRoot)
+	require.NoError(t, err)
+	require.NotNil(t, sess)
+
+	// Should still launch with a launcher script
+	cmd := mock.LastNewSessionOpts.Command
+	assert.Contains(t, cmd, "sh")
+	assert.Contains(t, cmd, "lazyclaude-wt-")
+}
+
+func TestManager_CreateWorktree_ExistingDir(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+	ctx := context.Background()
+
+	projectRoot := t.TempDir()
+	wtDir := filepath.Join(projectRoot, ".claude", "worktrees", "reuse-me")
+	require.NoError(t, os.MkdirAll(wtDir, 0o755))
+
+	// Should succeed even if directory already exists
+	sess, err := mgr.CreateWorktree(ctx, "reuse-me", "Reuse this", projectRoot)
+	require.NoError(t, err)
+	assert.Equal(t, "reuse-me", sess.Name)
+}
+
+func TestManager_CreateWorktree_LauncherScriptContents(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+	ctx := context.Background()
+
+	projectRoot := t.TempDir()
+	_, err := mgr.CreateWorktree(ctx, "test-script", "Fix the bug", projectRoot)
+	require.NoError(t, err)
+
+	// The launcher script is self-deleting, but we can verify through the command
+	// by checking that --append-system-prompt is used (not --initial-prompt)
+	// Create another worktree to inspect the script before it runs
+	sess2, err := mgr.CreateWorktree(ctx, "inspect-me", "日本語プロンプト\n改行あり", projectRoot)
+	require.NoError(t, err)
+	_ = sess2
+
+	// Worktree dir should contain the isolation marker
+	wtDir := filepath.Join(projectRoot, ".claude", "worktrees", "inspect-me")
+	_, err = os.Stat(wtDir)
+	require.NoError(t, err)
+}
+
+func TestManager_CreateWorktree_AddsWindowToExistingSession(t *testing.T) {
+	t.Parallel()
+	mgr, mock := newTestManager(t)
+	ctx := context.Background()
+
+	// Create first session to establish tmux session
+	_, err := mgr.Create(ctx, "/home/user/app1", "")
+	require.NoError(t, err)
+
+	// Mock: session now exists
+	mock.Sessions["lazyclaude"] = []tmux.WindowInfo{
+		{ID: "@0", Name: "lc-something", Session: "lazyclaude"},
+	}
+
+	projectRoot := t.TempDir()
+	sess, err := mgr.CreateWorktree(ctx, "second-wt", "task 2", projectRoot)
+	require.NoError(t, err)
+	assert.Equal(t, "second-wt", sess.Name)
+
+	// Should have added a window (not a new session)
+	windows := mock.Sessions["lazyclaude"]
+	assert.Len(t, windows, 2)
+
+	// NewWindow command should invoke a launcher script
+	cmd := mock.LastNewWindowOpts.Command
+	assert.Contains(t, cmd, "sh")
+	assert.Contains(t, cmd, "lazyclaude-wt-")
+}

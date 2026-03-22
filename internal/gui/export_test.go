@@ -85,6 +85,21 @@ func (a *App) PollNotificationForTest() {
 	}
 }
 
+// ActiveDialogForTest returns the current dialog kind.
+func (a *App) ActiveDialogForTest() DialogKind {
+	return a.activeDialog
+}
+
+// ShowWorktreeDialogForTest opens the worktree dialog for testing.
+func (a *App) ShowWorktreeDialogForTest() bool {
+	return a.showWorktreeDialog(a.gui)
+}
+
+// CloseWorktreeDialogForTest closes the worktree dialog for testing.
+func (a *App) CloseWorktreeDialogForTest() {
+	a.closeWorktreeDialog(a.gui)
+}
+
 // DrainBrokerForTest drains any pending events from the notify broker subscription
 // and calls showToolPopup for each one. Simulates what the ticker goroutine does
 // when the broker channel has events, without needing to run the event loop.

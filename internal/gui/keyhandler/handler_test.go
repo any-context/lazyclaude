@@ -22,6 +22,7 @@ func TestSessionsPanel_Keys(t *testing.T) {
 		{keyhandler.KeyEvent{Rune: 'a'}, "AttachSession"},
 		{keyhandler.KeyEvent{Rune: 'r'}, "EnterFullScreen"},
 		{keyhandler.KeyEvent{Rune: 'R'}, "StartRename"},
+		{keyhandler.KeyEvent{Rune: 'w'}, "StartWorktreeInput"},
 		{keyhandler.KeyEvent{Rune: 'D'}, "PurgeOrphans"},
 	}
 	for _, tt := range tests {

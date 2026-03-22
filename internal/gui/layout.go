@@ -334,7 +334,11 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 	}
 
 	item := items[a.cursor]
-	v.Title = fmt.Sprintf(" %s ", item.Name)
+	if isWorktreePath(item.Path) {
+		v.Title = fmt.Sprintf(" [worktree] %s ", item.Name)
+	} else {
+		v.Title = fmt.Sprintf(" %s ", item.Name)
+	}
 
 	if item.Status == "Orphan" {
 		fmt.Fprintln(v, "")
@@ -433,6 +437,98 @@ func (a *App) closeRenameInput(g *gocui.Gui) {
 	g.Cursor = false
 	if _, err := g.SetCurrentView("sessions"); err != nil && !isUnknownView(err) {
 		// Fallback: sessions view may not exist in some modes.
+		_ = err
+	}
+}
+
+// worktreeEditor is a custom editor that delegates to SimpleEditor but
+// excludes Ctrl+D (confirm) and Tab (field switch) so that view-specific
+// keybindings can handle them instead of the editor consuming them.
+func worktreeEditor(v *gocui.View, key gocui.Key, ch rune, mod gocui.Modifier) bool {
+	switch key {
+	case gocui.KeyCtrlD, gocui.KeyTab:
+		return false // let view-specific keybinding handle it
+	}
+	return gocui.SimpleEditor(v, key, ch, mod)
+}
+
+// showWorktreeDialog creates the worktree input views (branch name + prompt).
+// Returns true if all views were created successfully and dialog is active.
+func (a *App) showWorktreeDialog(g *gocui.Gui) bool {
+	maxX, maxY := g.Size()
+	w := 50
+	if w > maxX-4 {
+		w = maxX - 4
+	}
+	x0 := (maxX - w) / 2
+	branchY0 := maxY/2 - 6
+	if branchY0 < 1 {
+		branchY0 = 1
+	}
+	branchY1 := branchY0 + 2
+
+	// Branch name input (1 line)
+	v, err := g.SetView("worktree-branch", x0, branchY0, x0+w, branchY1, 0)
+	if err != nil && !isUnknownView(err) {
+		return false
+	}
+	v.Title = " Branch "
+	v.Editable = true
+	v.Editor = gocui.EditorFunc(worktreeEditor)
+	setRoundedFrame(v)
+
+	// Prompt input (6 lines)
+	promptY0 := branchY1 + 1
+	promptY1 := promptY0 + 7
+	if promptY1 >= maxY-2 {
+		promptY1 = maxY - 3
+	}
+
+	v2, err := g.SetView("worktree-prompt", x0, promptY0, x0+w, promptY1, 0)
+	if err != nil && !isUnknownView(err) {
+		a.closeWorktreeDialog(g)
+		return false
+	}
+	v2.Title = " Prompt "
+	v2.Editable = true
+	v2.Editor = gocui.EditorFunc(worktreeEditor)
+	v2.Wrap = true
+	setRoundedFrame(v2)
+
+	// Hint bar (frameless)
+	hintY0 := promptY1
+	hintY1 := hintY0 + 2
+	if hintY1 >= maxY {
+		hintY1 = maxY - 1
+	}
+	v3, err := g.SetView("worktree-hint", x0, hintY0, x0+w, hintY1, 0)
+	if err != nil && !isUnknownView(err) {
+		a.closeWorktreeDialog(g)
+		return false
+	}
+	v3.Frame = false
+	v3.Clear()
+	fmt.Fprint(v3, " "+presentation.StyledKey("Ctrl+D", "create")+"  "+
+		presentation.StyledKey("Tab", "switch")+"  "+
+		presentation.StyledKey("Esc", "cancel"))
+
+	if _, err := g.SetCurrentView("worktree-branch"); err != nil && !isUnknownView(err) {
+		a.closeWorktreeDialog(g)
+		return false
+	}
+	g.Cursor = true
+	a.activeDialog = DialogWorktree
+	return true
+}
+
+// closeWorktreeDialog removes all worktree dialog views and restores focus.
+func (a *App) closeWorktreeDialog(g *gocui.Gui) {
+	a.activeDialog = DialogNone
+	g.DeleteView("worktree-branch")
+	g.DeleteView("worktree-prompt")
+	g.DeleteView("worktree-hint")
+	g.Cursor = false
+	if _, err := g.SetCurrentView("sessions"); err != nil && !isUnknownView(err) {
 		_ = err
 	}
 }

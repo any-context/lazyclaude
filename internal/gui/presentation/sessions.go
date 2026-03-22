@@ -5,20 +5,27 @@ import (
 	"strings"
 )
 
+// worktreePathSegment mirrors session.WorktreePathSegment.
+// Duplicated here to avoid a circular import (presentation -> session).
+const worktreePathSegment = ".claude/worktrees"
+
 // FormatSessionLine renders a single session line for the list view.
 // Accepts primitive fields to avoid a dependency on the session package.
 // Format: "name          status_indicator flags"
-func FormatSessionLine(name, status, host string, flags []string, maxWidth int) string {
+func FormatSessionLine(name, status, host, path string, flags []string, maxWidth int) string {
 	icon := statusIndicator(status)
 	flagStr := formatFlags(flags)
 
 	// Build right-side indicators
 	right := strings.TrimSpace(icon + " " + flagStr)
 
-	// Prepend host if present
+	// Prepend host if present, add worktree indicator if path contains .claude/worktrees/
 	displayName := name
 	if host != "" {
 		displayName = host + ":" + name
+	}
+	if strings.Contains(path, "/"+worktreePathSegment+"/") {
+		displayName = IconWorktree + " " + displayName
 	}
 
 	// Calculate padding
@@ -44,7 +51,7 @@ func FormatSessionLine(name, status, host string, flags []string, maxWidth int) 
 
 // FormatSessionLines renders all sessions for the list view.
 // Each session is described by parallel slices of names, statuses, hosts, and flags.
-func FormatSessionLines(names, statuses, hosts []string, flags [][]string, maxWidth int) []string {
+func FormatSessionLines(names, statuses, hosts, paths []string, flags [][]string, maxWidth int) []string {
 	lines := make([]string, len(names))
 	for i, name := range names {
 		var f []string
@@ -59,7 +66,11 @@ func FormatSessionLines(names, statuses, hosts []string, flags [][]string, maxWi
 		if i < len(statuses) {
 			status = statuses[i]
 		}
-		lines[i] = FormatSessionLine(name, status, host, f, maxWidth)
+		var path string
+		if i < len(paths) {
+			path = paths[i]
+		}
+		lines[i] = FormatSessionLine(name, status, host, path, f, maxWidth)
 	}
 	return lines
 }
