@@ -4,6 +4,9 @@ services:
       context: ..
       dockerfile: vis_e2e_tests/Dockerfile
       target: remote
+    env_file:
+      - path: .env
+        required: false
     networks:
       - testnet
     healthcheck:

@@ -38,9 +38,19 @@ func writeRemoteScript(sess Session, mcpPort int, token string) (string, error) 
 	for _, f := range sess.Flags {
 		claudeArgs += " " + f
 	}
+	// Pass through auth tokens so Claude Code can authenticate on remote.
+	// Only CLAUDE_CODE_AUTO_CONNECT_IDE is mandatory; auth vars are optional
+	// (present when user has set them in the local environment).
+	var envPrefix strings.Builder
+	envPrefix.WriteString("CLAUDE_CODE_AUTO_CONNECT_IDE=true")
+	for _, key := range []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY"} {
+		if val := os.Getenv(key); val != "" {
+			envPrefix.WriteString(fmt.Sprintf(" %s=%s", key, val))
+		}
+	}
 	// exec $SHELL -lc runs in remote's login shell (loads .zprofile/.profile for PATH)
 	// $SHELL is expanded on remote since this script is base64-encoded and eval'd there
-	b.WriteString(fmt.Sprintf("CLAUDE_CODE_AUTO_CONNECT_IDE=true exec \"$SHELL\" -lic 'exec %s'\n", claudeArgs))
+	b.WriteString(fmt.Sprintf("%s exec \"$SHELL\" -lic 'exec %s'\n", envPrefix.String(), claudeArgs))
 
 	scriptPath := fmt.Sprintf("/tmp/lazyclaude/ssh-%s.sh", sess.ID[:8])
 	if err := os.WriteFile(scriptPath, []byte(b.String()), 0o755); err != nil {
