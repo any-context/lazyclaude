@@ -245,6 +245,10 @@ func (m *Manager) CreateWorktree(ctx context.Context, name, userPrompt, projectR
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if existing := m.store.FindByName(name); existing != nil {
+		return nil, fmt.Errorf("worktree %q already exists", name)
+	}
+
 	wtPath := WorktreePath(projectRoot, name)
 	if err := os.MkdirAll(wtPath, 0o755); err != nil {
 		return nil, fmt.Errorf("create worktree dir: %w", err)

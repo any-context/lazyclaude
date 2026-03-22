@@ -354,6 +354,21 @@ func TestManager_CreateWorktree_LauncherScriptContents(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestManager_CreateWorktree_DuplicateName(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+	ctx := context.Background()
+
+	projectRoot := t.TempDir()
+	_, err := mgr.CreateWorktree(ctx, "dup-name", "first", projectRoot)
+	require.NoError(t, err)
+
+	// Second call with same name should fail
+	_, err = mgr.CreateWorktree(ctx, "dup-name", "second", projectRoot)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "already exists")
+}
+
 func TestManager_CreateWorktree_AddsWindowToExistingSession(t *testing.T) {
 	t.Parallel()
 	mgr, mock := newTestManager(t)
