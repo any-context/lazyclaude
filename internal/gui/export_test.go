@@ -89,12 +89,13 @@ func (a *App) PollNotificationForTest() {
 // and calls showToolPopup for each one. Simulates what the ticker goroutine does
 // when the broker channel has events, without needing to run the event loop.
 func (a *App) DrainBrokerForTest() {
-	if a.notifyBrokerSub == nil {
+	ch := a.notify.BrokerCh()
+	if ch == nil {
 		return
 	}
 	for {
 		select {
-		case ev, ok := <-a.notifyBrokerSub.Ch():
+		case ev, ok := <-ch:
 			if !ok {
 				return
 			}

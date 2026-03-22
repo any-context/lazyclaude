@@ -1,9 +1,7 @@
 package gui
 
 import (
-	"bytes"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -11,9 +9,6 @@ import (
 	"github.com/KEMSHlM/lazyclaude/internal/gui/presentation"
 	"github.com/jesseduffield/gocui"
 )
-
-const serverLogPath = "/tmp/lazyclaude/server.log"
-const serverLogLines = 30
 
 // roundedFrame is the set of runes for rounded border corners.
 // Order: horizontal, vertical, top-left, top-right, bottom-left, bottom-right.
@@ -168,7 +163,15 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 	if a.sessions != nil {
 		items = a.sessions.Sessions()
 	}
-	a.renderSessionList(v, items)
+	if len(items) > 0 {
+		if a.cursor >= len(items) {
+			a.cursor = len(items) - 1
+		}
+		if a.cursor < 0 {
+			a.cursor = 0
+		}
+	}
+	renderSessionList(v, items, a.cursor)
 
 	// Logs view (lower left)
 	v2, err := g.SetView("logs", l.Server.X0, l.Server.Y0, l.Server.X1, l.Server.Y1, 0)
@@ -184,7 +187,7 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 		v2.FrameColor = gocui.ColorDefault
 	}
 	v2.Clear()
-	a.renderServerLog(v2)
+	renderServerLog(v2, a.logs, focusedName == "logs")
 
 	// Main panel (right side)
 	v3, err := g.SetView("main", l.Main.X0, l.Main.Y0, l.Main.X1, l.Main.Y1, 0)
@@ -381,115 +384,6 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 	fmt.Fprintf(v, "  %s\n", item.Path)
 }
 
-func (a *App) renderSessionList(v *gocui.View, items []SessionItem) {
-	if len(items) == 0 {
-		fmt.Fprintln(v, "")
-		fmt.Fprintln(v, presentation.Dim+"  No sessions"+presentation.Reset)
-		fmt.Fprintln(v, "")
-		fmt.Fprintln(v, "  Press "+presentation.Bold+"n"+presentation.Reset+" to create")
-		return
-	}
-
-	if a.cursor >= len(items) {
-		a.cursor = len(items) - 1
-	}
-	if a.cursor < 0 {
-		a.cursor = 0
-	}
-
-	for i, item := range items {
-		prefix := "  "
-		if i == a.cursor {
-			prefix = presentation.FgCyan + presentation.Bold + "> " + presentation.Reset
-		}
-
-		var icon string
-		switch item.Status {
-		case "Running":
-			icon = " " + presentation.IconRunning
-		case "Dead":
-			icon = " " + presentation.IconDead
-		case "Orphan":
-			icon = " " + presentation.IconOrphan
-		case "Detached":
-			icon = " " + presentation.IconDetached
-		}
-
-		name := item.Name
-		if item.Host != "" {
-			name = presentation.FgPurple + item.Host + presentation.Reset + ":" + name
-		}
-		fmt.Fprintf(v, "%s%-20s%s\n", prefix, name, icon)
-	}
-
-	v.SetCursor(0, a.cursor)
-}
-
-
-// readLogLines returns all log lines in reverse order (newest first).
-func (a *App) readLogLines() []string {
-	data, err := os.ReadFile(serverLogPath)
-	if err != nil {
-		return nil
-	}
-	raw := bytes.Split(bytes.TrimRight(data, "\n"), []byte("\n"))
-	// Reverse: newest first
-	lines := make([]string, len(raw))
-	for i, b := range raw {
-		lines[len(raw)-1-i] = string(b)
-	}
-	return lines
-}
-
-// renderServerLog writes all log lines to the view with cursor/selection highlighting.
-// Scrolling and viewport are managed by gocui via SetCursor/SetOrigin.
-func (a *App) renderServerLog(v *gocui.View) {
-	lines := a.readLogLines()
-	if len(lines) == 0 {
-		fmt.Fprintln(v, presentation.Dim+"  MCP: no log"+presentation.Reset)
-		a.logs.SetLineCount(0)
-		return
-	}
-	a.logs.SetLineCount(len(lines))
-	a.logs.ClampCursor()
-
-	selStart, selEnd := a.logs.SelectionRange()
-	cursorY := a.logs.CursorY()
-	selecting := a.logs.IsSelecting()
-	focused := a.panelManager.ActivePanel().Name() == "logs"
-	w := v.InnerWidth()
-
-	for i, raw := range lines {
-		line := " " + raw
-		inSelection := focused && selecting && i >= selStart && i <= selEnd
-		isCursor := focused && i == cursorY
-
-		if inSelection && isCursor {
-			fmt.Fprintf(v, "\x1b[48;5;33;1;37m%-*s\x1b[0m\n", w, line)
-		} else if inSelection {
-			fmt.Fprintf(v, "\x1b[48;5;24;37m%-*s\x1b[0m\n", w, line)
-		} else if isCursor && selecting {
-			fmt.Fprintf(v, "\x1b[48;5;238;1m%-*s\x1b[0m\n", w, line)
-		} else if isCursor {
-			fmt.Fprintf(v, "\x1b[48;5;240m%-*s\x1b[0m\n", w, line)
-		} else {
-			fmt.Fprintln(v, line)
-		}
-	}
-
-	// Let gocui manage scrolling: cursor position determines visible area
-	if focused {
-		v.SetCursor(0, cursorY)
-		// Ensure origin keeps cursor in view
-		_, oy := v.Origin()
-		h := v.InnerHeight()
-		if cursorY < oy {
-			v.SetOrigin(0, cursorY)
-		} else if cursorY >= oy+h {
-			v.SetOrigin(0, cursorY-h+1)
-		}
-	}
-}
 
 // copyToClipboard copies text to the system clipboard using pbcopy (macOS).
 func copyToClipboard(text string) {
