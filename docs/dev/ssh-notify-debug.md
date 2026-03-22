@@ -1,106 +1,77 @@
-# SSH Notify デバッグ
+# SSH Notify デバッグ — 解決済み
 
 **問題**: ssh_notify E2E テストで、リモート Claude Code の `Write` ツール使用時に lazyclaude の通知ポップアップが表示されない。
 
-## 判明した事実
+**解決**: 3つの修正で全チェーン動作確認。
 
-- Notification hook (permission_prompt) はリモートで発火し、MCP に到達 (200)
-- PreToolUse hook はリモートで発火しているが **エラー** (`PreToolUse:Write hook error` がフレームに表示)
-- Claude Code の Notification JSON に `tool_name` フィールドは含まれない
-- `message` フィールドに `"Claude needs your permission to use Write"` がある
-- `extractToolFromMessage` フォールバックで通知ポップアップ表示に成功
+## 修正まとめ
 
-## 仮説マップ
+### Fix 1: インライン hook → 外部 .js ファイル (H8)
+インライン `node -e "..."` のエスケープが Claude Code のシェル実行で壊れ、PreToolUse hook がエラー。
+外部 `.js` ファイルに分離して解決。
 
-```mermaid
-graph TD
-    ROOT[通知ポップアップが表示されない] --> A[通知は届いたがポップアップにならない]
-    ROOT --> B[PreToolUse hook がエラー]
+0b7c270: refactor: extract hook commands to external .js files
 
-    A --> H7[H7: tool_info なしだと toolName 空でスキップ]
-    B --> H8[H8: PreToolUse hook がエラーで tool_info 未送信]
-    B --> H10[H10: PreToolUse hook の stdout 出力が Claude の応答を壊す]
-
-    H7 --> FIX1[FIX: message からツール名抽出フォールバック]
-    H8 --> INVESTIGATE[要調査: hook error の原因]
-
-    style H7 fill:#9f9,stroke:#333
-    style FIX1 fill:#9f9,stroke:#333
-    style H8 fill:#ff9,stroke:#333
-    style ROOT fill:#f99,stroke:#333
-```
-
-## 仮説リスト
-
-### ~~H0: hook が発火したが HTTP POST が失敗~~ → 棄却
-実験1で確認: Notification hook は発火し POST 200 成功。
-
-### ~~H1: IDE接続モードで Notification hook がスキップ~~ → 棄却
-Notification hook は発火している。
-
-### ~~H2: Sleep 30s が足りない~~ → 棄却
-通知はサーバーに到達済み。
-
-### ~~H3: 認証ヘッダーで 401 拒否~~ → 棄却
-POST response: 200。
-
-### ~~H4: Claude Code が自前UI で処理し Notification hook を発火しない~~ → 棄却
-Notification hook は発火している。
-
-### ~~H5: lock file 読み取り失敗~~ → 棄却
-locks=["45979.lock"] で正常に読み取り。
-
-### ~~H6: MCP に届いたがフルスクリーン中で表示できない~~ → 棄却
-display-popup 経由でポップアップ表示成功 (実験3)。
-
-### H7: tool_info なしの permission_prompt ではポップアップが出ない → 確定・修正済み
-`resolveToolInfo` で `toolName=""` → `dispatchToolNotification` スキップ。
-`extractToolFromMessage` フォールバックで修正。
+### Fix 2: message からツール名抽出フォールバック (H7)
+Claude Code の Notification JSON に `tool_name` が含まれない。
+`message` フィールドの `"permission to use Write"` からツール名を抽出。
 
 150ca11: fix: extract tool name from Notification message when PreToolUse absent
 
-### H8: PreToolUse hook がリモートでエラー → 確定・要調査
-フレームに `PreToolUse:Write hook error` が表示。hook は発火しているがエラーで失敗。
-remote-hook.log に PRETOOLUSE 行が0件 → hook のログ出力に到達する前にクラッシュしている可能性。
-原因候補: node コマンドの構文エラー、パス問題、タイムアウト。
+### Fix 3: PID フォールバックで window 解決 (H11)
+SSH リモートでは PreToolUse と Notification の hook プロセスが別 PID で起動される。
+Notification の PID でキャッシュヒットしないため 404。
+最後に tool_info を受けた window にフォールバック。
 
-### ~~H9: PreToolUse hook の matcher が合わない~~ → 棄却
-hook は発火している (エラーが出ている = matcher は通過)。
+e6ae4cf: fix: fallback to last pending window when permission_prompt PID differs
 
-### H10: PreToolUse hook の stdout 出力が Claude の応答を壊す (要調査)
-現在の PreToolUse hook は `console.log(d)` で stdin を stdout にエコーしている。
-これが Claude Code に予期しない出力を返しエラーの原因になっている可能性。
+## 仮説マップ (最終)
 
----
+```mermaid
+graph TD
+    ROOT[通知ポップアップが表示されない] --> H8[H8: インライン hook がシェル展開でエラー]
+    ROOT --> H7[H7: tool_name 空で dispatchToolNotification スキップ]
+    ROOT --> H11[H11: hook PID 不一致で window 解決 404]
+
+    H8 --> FIX1[FIX: 外部 .js ファイル化]
+    H7 --> FIX2[FIX: message からツール名抽出]
+    H11 --> FIX3[FIX: LastPendingWindow フォールバック]
+
+    style H8 fill:#9f9,stroke:#333
+    style H7 fill:#9f9,stroke:#333
+    style H11 fill:#9f9,stroke:#333
+    style FIX1 fill:#9f9,stroke:#333
+    style FIX2 fill:#9f9,stroke:#333
+    style FIX3 fill:#9f9,stroke:#333
+    style ROOT fill:#9f9,stroke:#333
+```
+
+## 棄却した仮説
+
+- H0: hook POST 失敗 → Notification は 200 成功
+- H1: IDE接続モードで hook スキップ → hook は発火していた
+- H2: Sleep 不足 → 通知は到達済み
+- H3: 認証 401 → 200 成功
+- H4: Claude Code が自前 UI で処理 → hook は発火していた
+- H5: lock file 読み取り失敗 → 正常読み取り
+- H6: フルスクリーンで表示不可 → display-popup で表示成功
+- H9: matcher 不一致 → hook は発火 (エラーだった)
+- H10: console.log が応答を壊す → 削除しても効果なし (根本は別)
 
 ## 実験ログ
 
-### 実験 1: hook にログ出力追加 (H0 検証)
-0692ba1: claude-settings.json に /tmp/lazyclaude-hook.log 出力追加、entrypoint.sh でリモート hook ログ回収
-
-**結果**: Notification hook 発火確認、POST 200。PreToolUse 発火なし (ログ 0行)。H0,H1,H2,H3,H4,H5 棄却。
-
-### 実験 2: stdin 全文ダンプ (H7 検証)
-2374333: stdin の slice(0,200) を除去、フル出力
-
-**結果**: Notification JSON に `tool_name` なし。`message` に `"use Write"` あり。H7 確定。
-
-### 実験 3: message からツール名抽出 (H7 修正)
-150ca11: extractToolFromMessage フォールバック追加
-
-**結果**: サーバーログに `popup: spawning tool Write` 出現。ポップアップ表示成功。
-ただし `display-popup: exit status 129` も発生。
-フレームに `PreToolUse:Write hook error` を発見 → H8 確定。
-
----
+| コミット | 内容 | 結果 |
+|---------|------|------|
+| 0692ba1 | hook にログ出力追加 | Notification 発火確認、PreToolUse 0件 |
+| 2374333 | stdin 全文ダンプ | Notification JSON に tool_name なし |
+| 150ca11 | message からツール名抽出 | ポップアップ spawn 成功 (中身空) |
+| 252fddd | console.log 削除 | PreToolUse エラー変わらず |
+| 0b7c270 | 外部 .js ファイル化 | PreToolUse 成功、Notification 404 |
+| 2578237 | 404 デバッグログ | PID 不一致確認 (407 vs 457) |
+| e6ae4cf | LastPendingWindow フォールバック | 全チェーン成功、ポップアップ表示 |
 
 ## Issues
 
-### Issue 1: PreToolUse hook がリモートでエラー
-フレームに `PreToolUse:Write hook error`。remote-hook.log に PRETOOLUSE 行なし。
-hook の Node.js コードがログ出力前にクラッシュしている可能性。
-ログ付き hook が Docker イメージに正しく反映されているか要確認。
-
-### Issue 2: display-popup exit status 129
+### Issue 1: display-popup exit status 129
 `popup: spawn tool: display-popup: exit status 129 (stderr: )`
-Signal 1 (SIGHUP) で kill されている。テスト終了時のクリーンアップが原因の可能性。
+テスト終了時の SIGHUP でプロセスが kill される。テスト結果には影響なし。
