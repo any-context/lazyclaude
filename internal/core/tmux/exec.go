@@ -304,7 +304,7 @@ func (c *ExecClient) DisplayPopup(ctx context.Context, opts PopupOpts) error {
 	}
 	popupCmd := prefix + opts.Cmd
 
-	args := []string{"display-popup"}
+	args := []string{"display-popup", "-b", "rounded"}
 	if opts.Target != "" {
 		args = append(args, "-t", opts.Target)
 	} else if opts.Client != "" {

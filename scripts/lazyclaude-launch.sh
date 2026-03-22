@@ -43,7 +43,7 @@ fi
 
 # Otherwise, open a display-popup with the binary.
 LAZYCLAUDE_HOST_TMUX="$TMUX"
-exec tmux display-popup -B -w 80% -h 80% -d "${PANE_CWD:-.}" \
+exec tmux display-popup -b rounded -w 80% -h 80% -d "${PANE_CWD:-.}" \
     -E "LAZYCLAUDE_HOST_TMUX='$LAZYCLAUDE_HOST_TMUX' \
         LAZYCLAUDE_PANE_CMD='$PANE_CMD' \
         LAZYCLAUDE_PANE_PID='$PANE_PID' \
