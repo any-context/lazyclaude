@@ -32,6 +32,7 @@ func (m *mockActions) MoveCursorUp()                    { m.record("MoveCursorUp
 func (m *mockActions) CreateSession()                   { m.record("CreateSession") }
 func (m *mockActions) DeleteSession()                   { m.record("DeleteSession") }
 func (m *mockActions) AttachSession()                   { m.record("AttachSession") }
+func (m *mockActions) LaunchLazygit()                   { m.record("LaunchLazygit") }
 func (m *mockActions) EnterFullScreen()                 { m.record("EnterFullScreen") }
 func (m *mockActions) StartRename()                     { m.record("StartRename") }
 func (m *mockActions) StartWorktreeInput()              { m.record("StartWorktreeInput") }

@@ -84,6 +84,35 @@ func (a *App) DeleteSession() {
 	})
 }
 
+func (a *App) LaunchLazygit() {
+	if a.sessions == nil {
+		return
+	}
+	items := a.sessions.Sessions()
+	if a.cursor < 0 || a.cursor >= len(items) {
+		return
+	}
+	sess := items[a.cursor]
+	g := a.gui
+	if err := g.Suspend(); err != nil {
+		a.gui.Update(func(g *gocui.Gui) error {
+			a.setStatus(g, fmt.Sprintf("Suspend error: %v", err))
+			return nil
+		})
+		return
+	}
+	launchErr := a.sessions.LaunchLazygit(sess.Path, sess.Host)
+	if err := g.Resume(); err != nil {
+		return
+	}
+	if launchErr != nil {
+		a.gui.Update(func(g *gocui.Gui) error {
+			a.setStatus(g, fmt.Sprintf("lazygit error: %v", launchErr))
+			return nil
+		})
+	}
+}
+
 func (a *App) AttachSession() {
 	if a.sessions == nil {
 		return

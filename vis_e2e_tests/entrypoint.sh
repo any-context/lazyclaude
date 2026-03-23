@@ -24,6 +24,12 @@ fi
 
 # --- テープ固有セットアップ ---
 case "$TAPE_NAME" in
+    lazygit)
+        # /app に git repo を用意 (lazygit が起動に必要)
+        git config --global user.email "test@test.com"
+        git config --global user.name "Test"
+        cd /app && git init && git add go.mod && git commit -m "init" 2>/dev/null
+        ;;
     diff_popup)
         cat > /tmp/test.go << 'GOEOF'
 package main

@@ -41,6 +41,7 @@ type SessionProvider interface {
 	PendingNotifications() []*model.ToolNotification
 	SendChoice(window string, choice Choice) error
 	AttachSession(id string) error
+	LaunchLazygit(path, host string) error
 	CreateWorktree(name, prompt, projectRoot string) error
 	ResumeWorktree(worktreePath, prompt, projectRoot string) error
 	ListWorktrees(projectRoot string) ([]WorktreeInfo, error)

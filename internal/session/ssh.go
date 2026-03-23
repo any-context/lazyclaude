@@ -74,7 +74,7 @@ func buildSSHCommand(sess Session, mcpPort int, token string) (string, error) {
 	}
 	encoded := base64.StdEncoding.EncodeToString(scriptContent)
 
-	host, port := splitHostPort(sess.Host)
+	host, port := SplitHostPort(sess.Host)
 
 	var args []string
 	args = append(args, "exec", "ssh", "-t")
@@ -92,10 +92,10 @@ func buildSSHCommand(sess Session, mcpPort int, token string) (string, error) {
 	return strings.Join(args, " "), nil
 }
 
-// splitHostPort separates "user@host:port" into ("user@host", "port").
+// SplitHostPort separates "user@host:port" into ("user@host", "port").
 // If no port is specified, returns (host, "").
 // Handles: "host", "host:22", "user@host", "user@host:22", "[::1]".
-func splitHostPort(hostSpec string) (string, string) {
+func SplitHostPort(hostSpec string) (string, string) {
 	if strings.HasPrefix(hostSpec, "[") {
 		return hostSpec, ""
 	}

@@ -28,6 +28,9 @@ func (p *SessionsPanel) HandleKey(ev KeyEvent, actions AppActions) HandlerResult
 	case ev.Rune == 'a':
 		actions.AttachSession()
 		return Handled
+	case ev.Rune == 'g':
+		actions.LaunchLazygit()
+		return Handled
 	case ev.Key == gocui.KeyEnter:
 		actions.EnterFullScreen()
 		return Handled
@@ -59,6 +62,7 @@ func (p *SessionsPanel) OptionsBar() string {
 		presentation.StyledKey("d", "del") + "  " +
 		presentation.StyledKey("enter", "full") + "  " +
 		presentation.StyledKey("a", "attach") + "  " +
+		presentation.StyledKey("g", "lazygit") + "  " +
 		presentation.StyledKey("1/2/3", "send") + "  " +
 		presentation.StyledKey("R", "rename") + "  " +
 		presentation.StyledKey("w", "worktree") + "  " +

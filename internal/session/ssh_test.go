@@ -243,7 +243,7 @@ func TestSplitHostPort(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			host, port := splitHostPort(tt.input)
+			host, port := SplitHostPort(tt.input)
 			assert.Equal(t, tt.wantHost, host)
 			assert.Equal(t, tt.wantPort, port)
 		})

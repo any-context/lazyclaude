@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"log/slog"
@@ -342,6 +343,34 @@ func (a *sessionAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeInfo, 
 		result[i] = gui.WorktreeInfo{Name: item.Name, Path: item.Path, Branch: item.Branch}
 	}
 	return result, nil
+}
+
+func (a *sessionAdapter) LaunchLazygit(path, host string) error {
+	if host != "" {
+		sshHost, port := session.SplitHostPort(host)
+		args := []string{"-t"}
+		if port != "" {
+			args = append(args, "-p", port)
+		}
+		safePath := "'" + strings.ReplaceAll(path, "'", "'\\''") + "'"
+		remoteCmd := fmt.Sprintf("cd %s && lazygit", safePath)
+		encoded := base64.StdEncoding.EncodeToString([]byte(remoteCmd))
+		args = append(args, sshHost, fmt.Sprintf("eval \"$(echo %s | base64 -d)\"", encoded))
+		cmd := exec.Command("ssh", args...)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	}
+	if _, err := exec.LookPath("lazygit"); err != nil {
+		return fmt.Errorf("lazygit is not installed")
+	}
+	cmd := exec.Command("lazygit")
+	cmd.Dir = path
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func (a *sessionAdapter) AttachSession(id string) error {

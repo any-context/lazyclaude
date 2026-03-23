@@ -18,6 +18,7 @@ type AppActions interface {
 	CreateSession()
 	DeleteSession()
 	AttachSession()
+	LaunchLazygit()
 	EnterFullScreen()
 	StartRename()
 	StartWorktreeInput()

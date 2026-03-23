@@ -55,6 +55,7 @@ func (m *mockSessionProvider) SendChoice(window string, choice gui.Choice) error
 	return nil
 }
 func (m *mockSessionProvider) AttachSession(_ string) error                       { return nil }
+func (m *mockSessionProvider) LaunchLazygit(_, _ string) error                    { return nil }
 func (m *mockSessionProvider) CreateWorktree(_, _, _ string) error               { return nil }
 func (m *mockSessionProvider) ResumeWorktree(_, _, _ string) error               { return nil }
 func (m *mockSessionProvider) ListWorktrees(_ string) ([]gui.WorktreeInfo, error) { return nil, nil }
