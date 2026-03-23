@@ -155,13 +155,12 @@ func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
 		}
 		fmt.Fprint(v2, base)
 
-		// Skip focus steal if an input dialog is active (rename, worktree).
-		// The popup is visible but the dialog retains focus.
-		if !a.HasActiveDialog() {
-			if _, err := g.SetCurrentView(activeViewName); err != nil && !isUnknownView(err) {
-				return err
-			}
+		// Popup always gets focus. If a dialog is active, layoutMain
+		// will restore dialog focus after all popups are dismissed.
+		if _, err := g.SetCurrentView(activeViewName); err != nil && !isUnknownView(err) {
+			return err
 		}
+		g.Cursor = false
 	}
 
 	return nil

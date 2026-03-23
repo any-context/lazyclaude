@@ -20,3 +20,24 @@ func (a *App) HasActiveDialog() bool {
 func (a *App) ActiveDialogKind() DialogKind {
 	return a.activeDialog
 }
+
+// dialogFocusView returns the gocui view name that should have focus
+// for the current dialog. Returns "" if no dialog is active.
+// Used by layoutMain to restore focus after popup dismiss.
+func (a *App) dialogFocusView() string {
+	switch a.activeDialog {
+	case DialogRename:
+		return "rename-input"
+	case DialogWorktree:
+		if a.worktreeActiveField != "" {
+			return a.worktreeActiveField
+		}
+		return "worktree-branch"
+	case DialogWorktreeChooser:
+		return "worktree-chooser"
+	case DialogWorktreeResume:
+		return "worktree-resume-prompt"
+	default:
+		return ""
+	}
+}

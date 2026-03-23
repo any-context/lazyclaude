@@ -214,8 +214,23 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 		fmt.Fprint(v4, optionsText)
 	}
 
-	// Set focus to active panel's view (skip if any input dialog is active).
-	if !a.HasActiveDialog() {
+	// Focus priority: popup > dialog > panel.
+	// When popup is visible, layoutToolPopup handles focus.
+	// When dialog is active (no popup), restore focus to the dialog view.
+	// Otherwise, focus the active panel.
+	if a.hasPopup() {
+		// layoutToolPopup manages focus — skip here.
+	} else if a.HasActiveDialog() {
+		viewName := a.dialogFocusView()
+		if viewName != "" {
+			if _, err := g.SetCurrentView(viewName); err != nil && !isUnknownView(err) {
+				return err
+			}
+			if a.activeDialog != DialogWorktreeChooser {
+				g.Cursor = true
+			}
+		}
+	} else {
 		if _, err := g.SetCurrentView(focusedName); err != nil && !isUnknownView(err) {
 			return err
 		}
@@ -516,6 +531,7 @@ func (a *App) showWorktreeDialog(g *gocui.Gui) bool {
 // closeWorktreeDialog removes all worktree dialog views and restores focus.
 func (a *App) closeWorktreeDialog(g *gocui.Gui) {
 	a.activeDialog = DialogNone
+	a.worktreeActiveField = ""
 	g.DeleteView("worktree-branch")
 	g.DeleteView("worktree-prompt")
 	g.DeleteView("worktree-hint")

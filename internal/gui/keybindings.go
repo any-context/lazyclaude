@@ -194,6 +194,7 @@ func (a *App) setupGlobalKeybindings() error {
 
 	// Tab: switch between branch and prompt fields
 	if err := a.gui.SetKeybinding("worktree-branch", gocui.KeyTab, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.worktreeActiveField = "worktree-prompt"
 		if _, err := g.SetCurrentView("worktree-prompt"); err != nil && !isUnknownView(err) {
 			return err
 		}
@@ -202,6 +203,7 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 	if err := a.gui.SetKeybinding("worktree-prompt", gocui.KeyTab, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.worktreeActiveField = "worktree-branch"
 		if _, err := g.SetCurrentView("worktree-branch"); err != nil && !isUnknownView(err) {
 			return err
 		}

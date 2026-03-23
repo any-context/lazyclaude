@@ -91,6 +91,7 @@ type App struct {
 	popupMode          config.PopupMode             // how popups are displayed (auto/tmux/overlay)
 	renameSessionID    string                     // session ID being renamed (empty = no rename in progress)
 	activeDialog       DialogKind                 // current input dialog (DialogNone = no dialog)
+	worktreeActiveField string                    // which worktree dialog field has focus ("worktree-branch" or "worktree-prompt")
 	worktreeChoices    []WorktreeInfo             // items in worktree chooser
 	worktreeCursor     int                        // selected index in chooser (len(choices) = "New")
 	selectedWorktree   string                     // path of chosen existing worktree
