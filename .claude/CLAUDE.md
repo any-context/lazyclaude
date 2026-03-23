@@ -22,7 +22,7 @@ awk '/\[Frame 5\]/,/\[Frame 6\]/{if(/\[Frame 6\]/)exit; print}' vis_e2e_tests/ou
 
 - tape は人間の操作のみ。テスト都合は `entrypoint.sh`
 - 出力: `outputs/{name}/` に `.gif` + `.txt` + `.log`
-- lazyclaude の起動は `lazyclaude` コマンド直接入力ではなく、tmux plugin 経由 (`Ctrl+\`) で行う。Dockerfile の bash ラッパーが `lazyclaude setup` + `lazyclaude.tmux` を自動実行するため、tape 内では SSH 先で `Ctrl+\` を押すだけで popup が開く
+- lazyclaude の起動は `lazyclaude` コマンド直接入力ではなく、tmux plugin 経由 (`Ctrl+\`) で行う。Dockerfile の bash ラッパーが `lazyclaude setup` + `lazyclaude.tmux` を自動実行するため、tape 内では `Ctrl+\` を押すだけで popup が開く (SSH 不要。SSH は SSH テスト専用)
 - worktree で作業する場合は `.claude/worktree/` 配下で行う。Docker コンテナ名・ネットワーク名が他の実行と競合しないか事前確認すること (`docker compose ps` で既存コンテナを確認)
 - テスト完了後は `open vis_e2e_tests/outputs/<tape名>/` で Finder から gif 等の結果を確認する
 
