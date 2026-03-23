@@ -327,6 +327,23 @@ func (a *sessionAdapter) CreateWorktree(name, prompt, projectRoot string) error 
 	return err
 }
 
+func (a *sessionAdapter) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
+	_, err := a.mgr.ResumeWorktree(context.Background(), worktreePath, prompt, projectRoot)
+	return err
+}
+
+func (a *sessionAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeInfo, error) {
+	items, err := session.ListWorktrees(context.Background(), projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]gui.WorktreeInfo, len(items))
+	for i, item := range items {
+		result[i] = gui.WorktreeInfo{Name: item.Name, Path: item.Path, Branch: item.Branch}
+	}
+	return result, nil
+}
+
 func (a *sessionAdapter) AttachSession(id string) error {
 	sess := a.mgr.Store().FindByID(id)
 	if sess == nil {

@@ -42,6 +42,15 @@ type SessionProvider interface {
 	SendChoice(window string, choice Choice) error
 	AttachSession(id string) error
 	CreateWorktree(name, prompt, projectRoot string) error
+	ResumeWorktree(worktreePath, prompt, projectRoot string) error
+	ListWorktrees(projectRoot string) ([]WorktreeInfo, error)
+}
+
+// WorktreeInfo describes an existing worktree for the chooser.
+type WorktreeInfo struct {
+	Name   string
+	Path   string
+	Branch string
 }
 
 // SessionItem is a read-only view of a session for display.
@@ -82,6 +91,9 @@ type App struct {
 	popupMode          config.PopupMode             // how popups are displayed (auto/tmux/overlay)
 	renameSessionID    string                     // session ID being renamed (empty = no rename in progress)
 	activeDialog       DialogKind                 // current input dialog (DialogNone = no dialog)
+	worktreeChoices    []WorktreeInfo             // items in worktree chooser
+	worktreeCursor     int                        // selected index in chooser (len(choices) = "New")
+	selectedWorktree   string                     // path of chosen existing worktree
 }
 
 // SetPopupMode sets the popup display mode.

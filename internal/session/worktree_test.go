@@ -85,6 +85,67 @@ func TestIsWorktreePath(t *testing.T) {
 	}
 }
 
+func TestListWorktrees_ParsesPorcelainOutput(t *testing.T) {
+	t.Parallel()
+	porcelain := `worktree /project
+HEAD abc123
+branch refs/heads/main
+
+worktree /project/.claude/worktrees/fix-popup
+HEAD def456
+branch refs/heads/fix-popup
+
+worktree /project/.claude/worktrees/feat-auth
+HEAD 789abc
+branch refs/heads/feat/auth
+
+worktree /other/path
+HEAD 000000
+branch refs/heads/other
+
+`
+	items := parseWorktreePorcelain(porcelain)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 worktrees, got %d", len(items))
+	}
+	if items[0].Name != "fix-popup" {
+		t.Errorf("items[0].Name = %q, want %q", items[0].Name, "fix-popup")
+	}
+	if items[0].Branch != "fix-popup" {
+		t.Errorf("items[0].Branch = %q, want %q", items[0].Branch, "fix-popup")
+	}
+	if items[0].Path != "/project/.claude/worktrees/fix-popup" {
+		t.Errorf("items[0].Path = %q", items[0].Path)
+	}
+	if items[1].Name != "feat-auth" {
+		t.Errorf("items[1].Name = %q, want %q", items[1].Name, "feat-auth")
+	}
+	if items[1].Branch != "feat/auth" {
+		t.Errorf("items[1].Branch = %q, want %q", items[1].Branch, "feat/auth")
+	}
+}
+
+func TestListWorktrees_EmptyOutput(t *testing.T) {
+	t.Parallel()
+	items := parseWorktreePorcelain("")
+	if len(items) != 0 {
+		t.Errorf("expected 0 worktrees, got %d", len(items))
+	}
+}
+
+func TestListWorktrees_NoClaude(t *testing.T) {
+	t.Parallel()
+	porcelain := `worktree /project
+HEAD abc123
+branch refs/heads/main
+
+`
+	items := parseWorktreePorcelain(porcelain)
+	if len(items) != 0 {
+		t.Errorf("expected 0 worktrees, got %d", len(items))
+	}
+}
+
 func TestWriteWorktreeLauncher_BasicContent(t *testing.T) {
 	path, err := writeWorktreeLauncher("system prompt here", "user task")
 	if err != nil {

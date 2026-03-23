@@ -54,6 +54,32 @@ func renderSessionList(v *gocui.View, items []SessionItem, cursor int) {
 	v.SetCursor(0, cursor)
 }
 
+// renderWorktreeChooser writes the worktree selection list to a gocui view.
+func renderWorktreeChooser(v *gocui.View, items []WorktreeInfo, cursor int) {
+	v.Clear()
+	for i, item := range items {
+		prefix := "  "
+		if i == cursor {
+			prefix = presentation.FgCyan + presentation.Bold + "> " + presentation.Reset
+		}
+		branch := item.Branch
+		if branch == "" {
+			branch = "detached"
+		}
+		fmt.Fprintf(v, "%s%s %s(%s)\n", prefix,
+			presentation.IconWorktree, item.Name,
+			presentation.Dim+branch+presentation.Reset)
+	}
+	// "New worktree" entry
+	prefix := "  "
+	if cursor == len(items) {
+		prefix = presentation.FgCyan + presentation.Bold + "> " + presentation.Reset
+	}
+	fmt.Fprintf(v, "%s%s+ New worktree%s\n", prefix, presentation.FgGreen, presentation.Reset)
+
+	v.SetCursor(0, cursor)
+}
+
 // readLogLines returns all log lines in reverse order (newest first).
 func readLogLines() []string {
 	data, err := os.ReadFile(serverLogPath)

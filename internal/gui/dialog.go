@@ -4,9 +4,11 @@ package gui
 type DialogKind int
 
 const (
-	DialogNone     DialogKind = iota // no dialog
-	DialogRename                     // rename-input
-	DialogWorktree                   // worktree-branch + worktree-prompt
+	DialogNone             DialogKind = iota // no dialog
+	DialogRename                           // rename-input
+	DialogWorktree                         // worktree-branch + worktree-prompt (new)
+	DialogWorktreeChooser                  // worktree-chooser (select existing)
+	DialogWorktreeResume                   // worktree-resume-prompt (prompt only for existing)
 )
 
 // HasActiveDialog returns true if any input dialog is open.

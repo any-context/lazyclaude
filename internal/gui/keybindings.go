@@ -210,5 +210,124 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
+	// 7. Worktree chooser bindings (j/k/Enter/Esc)
+	chooserMove := func(delta int) func(*gocui.Gui, *gocui.View) error {
+		return func(g *gocui.Gui, v *gocui.View) error {
+			maxIdx := len(a.worktreeChoices) // last index = "New worktree"
+			a.worktreeCursor += delta
+			if a.worktreeCursor < 0 {
+				a.worktreeCursor = 0
+			}
+			if a.worktreeCursor > maxIdx {
+				a.worktreeCursor = maxIdx
+			}
+			renderWorktreeChooser(v, a.worktreeChoices, a.worktreeCursor)
+			return nil
+		}
+	}
+	for _, binding := range []struct {
+		key gocui.Key
+		ch  rune
+	}{
+		{key: gocui.KeyArrowDown}, {key: gocui.KeyArrowUp},
+	} {
+		delta := 1
+		if binding.key == gocui.KeyArrowUp {
+			delta = -1
+		}
+		if err := a.gui.SetKeybinding("worktree-chooser", binding.key, gocui.ModNone, chooserMove(delta)); err != nil {
+			return err
+		}
+	}
+	for _, ch := range []rune{'j', 'k'} {
+		delta := 1
+		if ch == 'k' {
+			delta = -1
+		}
+		if err := a.gui.SetKeybinding("worktree-chooser", ch, gocui.ModNone, chooserMove(delta)); err != nil {
+			return err
+		}
+	}
+
+	if err := a.gui.SetKeybinding("worktree-chooser", gocui.KeyEnter, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		idx := a.worktreeCursor
+		items := a.worktreeChoices
+		a.closeWorktreeChooser(g)
+
+		if idx >= len(items) {
+			// "New worktree" selected
+			if !a.showWorktreeDialog(g) {
+				a.setStatus(g, "Error: could not open worktree dialog")
+			}
+		} else {
+			// Existing worktree selected
+			a.selectedWorktree = items[idx].Path
+			if !a.showWorktreeResumePrompt(g, items[idx].Name) {
+				a.setStatus(g, "Error: could not open prompt dialog")
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err := a.gui.SetKeybinding("worktree-chooser", gocui.KeyEsc, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.closeWorktreeChooser(g)
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// 8. Worktree resume prompt bindings (Enter/Esc/Ctrl+J)
+	if err := a.gui.SetKeybinding("worktree-resume-prompt", gocui.KeyEnter, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		userPrompt := v.TextArea.GetContent()
+		wtPath := a.selectedWorktree
+		a.closeWorktreeResumePrompt(g)
+
+		go func() {
+			if a.sessions == nil {
+				return
+			}
+			abs, err := filepath.Abs(".")
+			if err != nil {
+				a.gui.Update(func(g *gocui.Gui) error {
+					a.setStatus(g, fmt.Sprintf("Error: %v", err))
+					return nil
+				})
+				return
+			}
+			if err := a.sessions.ResumeWorktree(wtPath, userPrompt, abs); err != nil {
+				a.gui.Update(func(g *gocui.Gui) error {
+					a.setStatus(g, fmt.Sprintf("Error: %v", err))
+					return nil
+				})
+				return
+			}
+			name := filepath.Base(wtPath)
+			a.gui.Update(func(g *gocui.Gui) error {
+				a.setStatus(g, "Worktree "+name+" resumed")
+				return nil
+			})
+		}()
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err := a.gui.SetKeybinding("worktree-resume-prompt", gocui.KeyEsc, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.closeWorktreeResumePrompt(g)
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err := a.gui.SetKeybinding("worktree-resume-prompt", gocui.KeyCtrlJ, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		v.TextArea.TypeCharacter("\n")
+		v.RenderTextArea()
+		return nil
+	}); err != nil {
+		return err
+	}
+
 	return nil
 }
