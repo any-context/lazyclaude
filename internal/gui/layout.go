@@ -253,7 +253,10 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 	}
 	v.Wrap = false
 	v.Editable = true
-	v.Editor = &inputEditor{app: a}
+	if a.editor == nil {
+		a.editor = &inputEditor{app: a}
+	}
+	v.Editor = a.editor
 	v.Clear()
 
 	// Render preview content (same pipeline as split-panel mode)

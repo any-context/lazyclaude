@@ -1,6 +1,12 @@
 package gui
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+// keyQueueSize is the capacity of the serial key forwarding queue.
+const keyQueueSize = 1024
 
 // FullScreenState manages fullscreen mode: target session, scroll offset,
 // key forwarding queue, and state transitions.
@@ -16,7 +22,7 @@ type FullScreenState struct {
 // NewFullScreenState creates a FullScreenState.
 func NewFullScreenState(preview *PreviewCache) *FullScreenState {
 	return &FullScreenState{
-		keyQueue: make(chan keyCmd, 64),
+		keyQueue: make(chan keyCmd, keyQueueSize),
 		preview:  preview,
 	}
 }
@@ -73,7 +79,7 @@ func (fs *FullScreenState) Exit() {
 	}
 }
 
-// EnqueueKey adds a key to the serial forwarding queue.
+// EnqueueKey adds a key name to the serial forwarding queue.
 // Non-blocking: if the queue is full, the key is dropped.
 func (fs *FullScreenState) EnqueueKey(target, key string) {
 	select {
@@ -82,31 +88,136 @@ func (fs *FullScreenState) EnqueueKey(target, key string) {
 	}
 }
 
+// EnqueueLiteral adds literal text to the serial forwarding queue.
+// Uses send-keys -l so the text is not interpreted as key names.
+func (fs *FullScreenState) EnqueueLiteral(target, text string) {
+	select {
+	case fs.keyQueue <- keyCmd{target: target, key: text, literal: true}:
+	default:
+	}
+}
+
 // RunKeyForwarder drains the key queue serially, preserving order.
+// Adjacent literal commands for the same target are batched into a single
+// send-keys -l call to handle paste bursts efficiently.
 func (fs *FullScreenState) RunKeyForwarder(done <-chan struct{}) {
 	for {
 		select {
 		case <-done:
 			return
 		case cmd := <-fs.keyQueue:
-			if fs.forwarder != nil {
-				fs.forwarder.ForwardKey(cmd.target, cmd.key)
+			if cmd.literal {
+				fs.dispatchBatch(cmd, done)
+			} else {
+				fs.dispatchKey(cmd)
 			}
 		}
 	}
 }
 
+// dispatchBatch collects consecutive literal commands for the same target
+// and sends them as a single ForwardLiteral call. Iterative (no recursion).
+func (fs *FullScreenState) dispatchBatch(first keyCmd, done <-chan struct{}) {
+	cmd := first
+	for {
+		var buf strings.Builder
+		buf.WriteString(cmd.key)
+		target := cmd.target
+
+		continueBatch := false
+		for {
+			select {
+			case <-done:
+				fs.flushLiteral(target, &buf)
+				return
+			case next := <-fs.keyQueue:
+				if next.literal && next.target == target {
+					buf.WriteString(next.key)
+					continue
+				}
+				fs.flushLiteral(target, &buf)
+				if next.literal {
+					cmd = next
+					continueBatch = true
+				} else {
+					fs.dispatchKey(next)
+				}
+			default:
+				fs.flushLiteral(target, &buf)
+				return
+			}
+			break
+		}
+		if !continueBatch {
+			return
+		}
+	}
+}
+
 // DrainQueue processes all pending keys synchronously (for testing).
+// Adjacent literal commands are batched, matching RunKeyForwarder behavior.
 func (fs *FullScreenState) DrainQueue() {
 	for {
 		select {
 		case cmd := <-fs.keyQueue:
-			if fs.forwarder != nil {
-				fs.forwarder.ForwardKey(cmd.target, cmd.key)
+			if cmd.literal {
+				fs.drainBatch(cmd)
+			} else {
+				fs.dispatchKey(cmd)
 			}
 		default:
 			return
 		}
+	}
+}
+
+// drainBatch is the synchronous equivalent of dispatchBatch for testing.
+// Iterative (no recursion).
+func (fs *FullScreenState) drainBatch(first keyCmd) {
+	cmd := first
+	for {
+		var buf strings.Builder
+		buf.WriteString(cmd.key)
+		target := cmd.target
+
+		continueBatch := false
+		for {
+			select {
+			case next := <-fs.keyQueue:
+				if next.literal && next.target == target {
+					buf.WriteString(next.key)
+					continue
+				}
+				fs.flushLiteral(target, &buf)
+				if next.literal {
+					cmd = next
+					continueBatch = true
+				} else {
+					fs.dispatchKey(next)
+				}
+			default:
+				fs.flushLiteral(target, &buf)
+				return
+			}
+			break
+		}
+		if !continueBatch {
+			return
+		}
+	}
+}
+
+// flushLiteral sends the accumulated literal buffer if non-empty.
+func (fs *FullScreenState) flushLiteral(target string, buf *strings.Builder) {
+	if fs.forwarder != nil && buf.Len() > 0 {
+		fs.forwarder.ForwardLiteral(target, buf.String())
+	}
+}
+
+// dispatchKey sends a non-literal key command (key name like "Enter", "Space").
+func (fs *FullScreenState) dispatchKey(cmd keyCmd) {
+	if fs.forwarder != nil {
+		fs.forwarder.ForwardKey(cmd.target, cmd.key)
 	}
 }
 

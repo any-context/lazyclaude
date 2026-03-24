@@ -42,6 +42,9 @@ if [ -n "${LAZYCLAUDE_POPUP_MODE:-}" ]; then
 fi
 
 # Otherwise, open a display-popup with the binary.
+# Wrap in a script that binds paste inside the popup.
+# tmux display-popup does not forward bracketed paste correctly (tmux #4431),
+# so we intercept Cmd+V by binding the system paste to paste-buffer -p.
 LAZYCLAUDE_HOST_TMUX="$TMUX"
 exec tmux display-popup -b rounded -w 80% -h 80% -d "${PANE_CWD:-.}" \
     -E "LAZYCLAUDE_HOST_TMUX='$LAZYCLAUDE_HOST_TMUX' \

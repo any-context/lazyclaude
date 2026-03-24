@@ -96,11 +96,18 @@ type App struct {
 	worktreeChoices    []WorktreeInfo             // items in worktree chooser
 	worktreeCursor     int                        // selected index in chooser (len(choices) = "New")
 	selectedWorktree   string                     // path of chosen existing worktree
+	debugLog           *os.File                   // optional debug log (nil = no debug logging)
+	editor             *inputEditor               // fullscreen key editor (for paste flush from ticker)
 }
 
 // SetPopupMode sets the popup display mode.
 func (a *App) SetPopupMode(mode config.PopupMode) {
 	a.popupMode = mode
+}
+
+// SetDebugLog sets the debug log file for input diagnostics.
+func (a *App) SetDebugLog(f *os.File) {
+	a.debugLog = f
 }
 
 // NewApp creates a new App. Call Run() to start the event loop.
@@ -232,6 +239,13 @@ func (a *App) Run() error {
 							a.showToolPopup(n)
 						}
 					}
+					// Flush paste buffer when paste ends.
+					// EventPaste{End} sets IsPasting=false but does not call Edit(),
+					// so we detect the transition here.
+					if a.editor != nil && a.editor.inPaste && a.editor.nativePaste && !g.IsPasting {
+						a.editor.debugLog("ticker: native IsPasting ended, flushing paste")
+						a.editor.flushPaste()
+					}
 					return nil
 				})
 			}
@@ -284,8 +298,9 @@ func (a *App) SetNotifyBroker(broker *event.Broker[model.Event]) {
 
 // keyCmd is a queued key forwarding command.
 type keyCmd struct {
-	target string
-	key    string
+	target  string
+	key     string
+	literal bool // true = send via send-keys -l (literal text, not key names)
 }
 
 

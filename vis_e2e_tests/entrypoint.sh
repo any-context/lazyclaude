@@ -54,6 +54,28 @@ GOEOF
         git commit -m "init" || true
         git worktree add .claude/worktrees/fix-popup -b fix-popup || true
         ;;
+    paste_special)
+        # Cmd+V を再現: ESC[200~ + text + ESC[201~ を send-keys -H で送信
+        cat > /tmp/paste-text.txt << 'PASTEEOF'
+Line 1: echo hello; echo world
+Line 2: cat file | grep pattern
+Line 3: export FOO=$BAR && run
+Line 4: if [ -f test ]; then echo ok; fi
+Line 5: curl -s https://example.com
+PASTEEOF
+        (
+            sleep 15
+            # ESC[200~ (paste start)
+            tmux send-keys -t main -H 1b 5b 32 30 30 7e
+            # テキスト (改行含む複数行)
+            while IFS= read -r line; do
+                tmux send-keys -t main -l "$line"
+                tmux send-keys -t main Enter
+            done < /tmp/paste-text.txt
+            # ESC[201~ (paste end)
+            tmux send-keys -t main -H 1b 5b 32 30 31 7e
+        ) &
+        ;;
 esac
 
 # --- フレーム監視 (バックグラウンド) ---

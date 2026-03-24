@@ -40,6 +40,7 @@ func newRootCmd() *cobra.Command {
 			defer lc.Close()
 
 			var logger *slog.Logger
+			var debugLogFile *os.File
 			paths := config.DefaultPaths()
 			tmuxSocket := "lazyclaude"
 			if s := os.Getenv("LAZYCLAUDE_TMUX_SOCKET"); s != "" {
@@ -68,6 +69,7 @@ func newRootCmd() *cobra.Command {
 				} else {
 					defer cmdLogFile.Close()
 					tmuxClient.SetDebugLog(cmdLogFile)
+					debugLogFile = cmdLogFile
 				}
 			}
 
@@ -123,6 +125,11 @@ func newRootCmd() *cobra.Command {
 
 			// Key forwarding via subprocess
 			app.SetInputForwarder(gui.NewTmuxInputForwarder(tmuxClient))
+
+			// Pass debug log file for input diagnostics
+			if debugLogFile != nil {
+				app.SetDebugLog(debugLogFile)
+			}
 
 			// Control mode for event-driven refresh.
 			// The connection dies when all tmux windows are deleted.

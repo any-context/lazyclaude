@@ -208,5 +208,26 @@ func TestMockClient_ErrorInjection(t *testing.T) {
 	}
 }
 
+func TestMockClient_SendKeysLiteral(t *testing.T) {
+	t.Parallel()
+	m := tmux.NewMockClient()
+
+	err := m.SendKeysLiteral(context.Background(), "claude:lc-test", ";")
+	require.NoError(t, err)
+	err = m.SendKeysLiteral(context.Background(), "claude:lc-test", "あ")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{";", "あ"}, m.SentKeys["claude:lc-test"])
+}
+
+func TestMockClient_SendKeysLiteral_Error(t *testing.T) {
+	t.Parallel()
+	m := tmux.NewMockClient()
+	m.ErrSendKeys = errors.New("test error")
+
+	err := m.SendKeysLiteral(context.Background(), "target", "x")
+	assert.Error(t, err)
+}
+
 // Verify MockClient implements Client interface at compile time.
 var _ tmux.Client = (*tmux.MockClient)(nil)

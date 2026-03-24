@@ -137,6 +137,38 @@ func (c *ControlClient) SendKeys(target string, keys ...string) error {
 	return err
 }
 
+// SendKeysLiteral sends text literally through the control connection (send-keys -l).
+// The text is double-quoted to prevent tmux from interpreting special characters
+// (semicolons, spaces, etc.) as command separators or argument delimiters.
+func (c *ControlClient) SendKeysLiteral(target string, text string) error {
+	if err := validateControlTarget(target); err != nil {
+		return err
+	}
+	// Newlines/carriage returns break the control mode line protocol.
+	// NUL bytes would truncate the write at the C layer.
+	for _, ch := range text {
+		if ch == '\n' || ch == '\r' || ch == '\x00' {
+			return fmt.Errorf("literal text contains unsafe character %q", ch)
+		}
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return fmt.Errorf("control client closed")
+	}
+	// TODO: The escaping below may need review for edge cases with tmux
+	// control mode quoting (e.g., unusual Unicode, combining characters,
+	// or tmux version-specific behavior).
+	//
+	// Quote the text so tmux control mode doesn't split on spaces or
+	// interpret ; as a command separator. Escape embedded double quotes.
+	escaped := strings.ReplaceAll(text, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	_, err := fmt.Fprintf(c.stdin, "send-keys -l -t %s -- \"%s\"\n", target, escaped)
+	return err
+}
+
 // validateControlArg rejects strings that could inject tmux commands.
 // validateControlTarget rejects tmux command injection in target strings.
 // Spaces are blocked because they would split the command into multiple args.
@@ -190,6 +222,12 @@ func (c *ControlClient) Close() error {
 		<-c.done
 	}
 	return c.cmd.Wait()
+}
+
+// PasteToPane is not supported via control mode because it requires file I/O
+// (load-buffer) that is not available through the control mode stdin protocol.
+func (c *ControlClient) PasteToPane(_ string, _ string) error {
+	return fmt.Errorf("PasteToPane not supported via control mode")
 }
 
 func (c *ControlClient) readLoop() {
