@@ -100,6 +100,30 @@ func (a *App) CloseWorktreeDialogForTest() {
 	a.closeWorktreeDialog(a.gui)
 }
 
+// InitEditorForTest ensures the inputEditor is created for testing.
+func (a *App) InitEditorForTest() {
+	if a.editor == nil {
+		a.editor = &inputEditor{app: a}
+	}
+}
+
+// EditForTest calls the inputEditor's Edit method directly for testing the
+// paste detection state machine. Returns false if no editor is set up.
+func (a *App) EditForTest(key gocui.Key, ch rune, mod gocui.Modifier) bool {
+	if a.editor == nil {
+		return false
+	}
+	return a.editor.Edit(nil, key, ch, mod)
+}
+
+// KeyEscForTest exposes gocui.KeyEsc for use in external test packages.
+const KeyEscForTest = gocui.KeyEsc
+
+// DrainQueueForTest drains the fullscreen key queue synchronously (for paste tests).
+func (a *App) DrainQueueForTest() {
+	a.fullscreen.DrainQueue()
+}
+
 // DrainBrokerForTest drains any pending events from the notify broker subscription
 // and calls showToolPopup for each one. Simulates what the ticker goroutine does
 // when the broker channel has events, without needing to run the event loop.

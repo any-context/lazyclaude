@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// keyQueueSize is the capacity of the serial key forwarding queue.
+const keyQueueSize = 1024
+
 // FullScreenState manages fullscreen mode: target session, scroll offset,
 // key forwarding queue, and state transitions.
 type FullScreenState struct {
@@ -19,7 +22,7 @@ type FullScreenState struct {
 // NewFullScreenState creates a FullScreenState.
 func NewFullScreenState(preview *PreviewCache) *FullScreenState {
 	return &FullScreenState{
-		keyQueue: make(chan keyCmd, 1024),
+		keyQueue: make(chan keyCmd, keyQueueSize),
 		preview:  preview,
 	}
 }
@@ -121,6 +124,7 @@ func (fs *FullScreenState) dispatchBatch(first keyCmd, done <-chan struct{}) {
 		buf.WriteString(cmd.key)
 		target := cmd.target
 
+		continueBatch := false
 		for {
 			select {
 			case <-done:
@@ -134,16 +138,19 @@ func (fs *FullScreenState) dispatchBatch(first keyCmd, done <-chan struct{}) {
 				fs.flushLiteral(target, &buf)
 				if next.literal {
 					cmd = next
-					goto nextBatch
+					continueBatch = true
+				} else {
+					fs.dispatchKey(next)
 				}
-				fs.dispatchKey(next)
-				return
 			default:
 				fs.flushLiteral(target, &buf)
 				return
 			}
+			break
 		}
-	nextBatch:
+		if !continueBatch {
+			return
+		}
 	}
 }
 
@@ -173,6 +180,7 @@ func (fs *FullScreenState) drainBatch(first keyCmd) {
 		buf.WriteString(cmd.key)
 		target := cmd.target
 
+		continueBatch := false
 		for {
 			select {
 			case next := <-fs.keyQueue:
@@ -183,16 +191,19 @@ func (fs *FullScreenState) drainBatch(first keyCmd) {
 				fs.flushLiteral(target, &buf)
 				if next.literal {
 					cmd = next
-					goto nextBatch
+					continueBatch = true
+				} else {
+					fs.dispatchKey(next)
 				}
-				fs.dispatchKey(next)
-				return
 			default:
 				fs.flushLiteral(target, &buf)
 				return
 			}
+			break
 		}
-	nextBatch:
+		if !continueBatch {
+			return
+		}
 	}
 }
 

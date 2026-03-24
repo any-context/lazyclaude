@@ -174,6 +174,100 @@ func TestFullScreen_SpecialKeysSentAsKeyName(t *testing.T) {
 	assert.Empty(t, fwd.Literals(), "special keys must NOT use ForwardLiteral")
 }
 
+// --- Paste detection tests ---
+// These test the inputEditor state machine by calling EditForTest directly.
+
+// setupPasteTestApp creates a headless App with sessions, forwarder, and editor
+// ready for paste detection testing.
+func setupPasteTestApp(t *testing.T) (*gui.App, *gui.MockInputForwarder) {
+	t.Helper()
+	app, err := gui.NewAppHeadless(gui.ModeMain, 80, 24)
+	require.NoError(t, err)
+
+	mock := &mockSessionProvider{
+		sessions: []gui.SessionItem{
+			{ID: "s1", Name: "test", Status: "Running", TmuxWindow: "@0"},
+		},
+	}
+	app.SetSessions(mock)
+
+	fwd := &gui.MockInputForwarder{}
+	app.SetInputForwarder(fwd)
+	app.EnterFullScreenForTest("s1")
+	app.InitEditorForTest()
+
+	return app, fwd
+}
+
+// sendRunes calls EditForTest for each rune in the string.
+func sendRunes(app *gui.App, s string) {
+	for _, ch := range s {
+		app.EditForTest(0, ch, 0)
+	}
+}
+
+func TestPaste_BracketedPasteFlow(t *testing.T) {
+	app, fwd := setupPasteTestApp(t)
+
+	// Send ESC to start escape sequence detection
+	app.EditForTest(gui.KeyEscForTest, 0, 0)
+	// Send "[200~" to complete the paste start marker
+	sendRunes(app, "[200~")
+	// Send paste content
+	sendRunes(app, "hello")
+	// Send ESC to start end marker detection
+	app.EditForTest(gui.KeyEscForTest, 0, 0)
+	// Send "[201~" to complete the paste end marker
+	sendRunes(app, "[201~")
+
+	// forwardPaste runs in a goroutine, so wait for it
+	require.Eventually(t, func() bool { return len(fwd.Pastes()) == 1 }, time.Second, 5*time.Millisecond)
+	assert.Equal(t, []string{"hello"}, fwd.Pastes(), "paste content should be forwarded via ForwardPaste")
+}
+
+func TestPaste_IncompleteEscFlushesAsNormalInput(t *testing.T) {
+	app, fwd := setupPasteTestApp(t)
+
+	// Send ESC followed by a non-matching char (not '[')
+	app.EditForTest(gui.KeyEscForTest, 0, 0)
+	sendRunes(app, "x")
+
+	// Drain the queue
+	app.DrainQueueForTest()
+
+	// Esc should be forwarded as "Escape" key and 'x' as literal
+	keys := fwd.Keys()
+	assert.NotEmpty(t, keys, "incomplete escape should flush as normal input")
+	assert.Empty(t, fwd.Pastes(), "no paste should be detected")
+}
+
+func TestPaste_NestedEscInsidePasteTreatedAsContent(t *testing.T) {
+	app, fwd := setupPasteTestApp(t)
+
+	// Start paste
+	app.EditForTest(gui.KeyEscForTest, 0, 0)
+	sendRunes(app, "[200~")
+
+	// Send content with an Esc that doesn't form end marker
+	sendRunes(app, "before")
+	app.EditForTest(gui.KeyEscForTest, 0, 0)
+	sendRunes(app, "X") // Not "[201~", so Esc+X become paste content
+
+	sendRunes(app, "after")
+
+	// End paste
+	app.EditForTest(gui.KeyEscForTest, 0, 0)
+	sendRunes(app, "[201~")
+
+	// forwardPaste runs in a goroutine, so wait for it
+	require.Eventually(t, func() bool { return len(fwd.Pastes()) == 1 }, time.Second, 5*time.Millisecond)
+
+	pastes := fwd.Pastes()
+	require.Len(t, pastes, 1, "should have exactly one paste")
+	assert.Contains(t, pastes[0], "before", "paste should contain content before nested Esc")
+	assert.Contains(t, pastes[0], "after", "paste should contain content after nested Esc")
+}
+
 func TestFullScreen_PopupBlocksForwarding(t *testing.T) {
 	app, err := gui.NewAppHeadless(gui.ModeMain, 80, 24)
 	require.NoError(t, err)

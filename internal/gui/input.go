@@ -50,6 +50,7 @@ type MockInputForwarder struct {
 	mu       sync.Mutex
 	keys     []string
 	literals []string // keys sent via ForwardLiteral
+	pastes   []string // text sent via ForwardPaste
 	target   string
 }
 
@@ -75,6 +76,7 @@ func (f *MockInputForwarder) ForwardPaste(target string, text string) error {
 	defer f.mu.Unlock()
 	f.target = target
 	f.keys = append(f.keys, text)
+	f.pastes = append(f.pastes, text)
 	return nil
 }
 
@@ -84,6 +86,15 @@ func (f *MockInputForwarder) Literals() []string {
 	defer f.mu.Unlock()
 	result := make([]string, len(f.literals))
 	copy(result, f.literals)
+	return result
+}
+
+// Pastes returns a copy of the paste texts sent via ForwardPaste.
+func (f *MockInputForwarder) Pastes() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	result := make([]string, len(f.pastes))
+	copy(result, f.pastes)
 	return result
 }
 
@@ -385,8 +396,13 @@ func (e *inputEditor) flushEscBuf() {
 
 // startEscTimer starts a timer that flushes the escape buffer
 // if no more events arrive (standalone Esc press).
-// Uses a generation counter to prevent stale timers from flushing
-// a newly-started escape sequence.
+//
+// Thread safety: the generation counter (escGen) prevents stale timer
+// callbacks from flushing a newly-started escape buffer. When a new Esc
+// arrives, escGen is incremented and the old timer's captured generation
+// no longer matches, so its callback is a no-op. All inputEditor fields
+// are accessed on the gocui event-loop goroutine; the timer callback
+// uses gui.Update() to re-enter that goroutine before touching any state.
 func (e *inputEditor) startEscTimer() {
 	e.cancelEscTimer()
 	e.escGen++

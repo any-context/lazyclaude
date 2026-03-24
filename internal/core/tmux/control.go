@@ -157,6 +157,10 @@ func (c *ControlClient) SendKeysLiteral(target string, text string) error {
 	if c.closed {
 		return fmt.Errorf("control client closed")
 	}
+	// TODO: The escaping below may need review for edge cases with tmux
+	// control mode quoting (e.g., unusual Unicode, combining characters,
+	// or tmux version-specific behavior).
+	//
 	// Quote the text so tmux control mode doesn't split on spaces or
 	// interpret ; as a command separator. Escape embedded double quotes.
 	escaped := strings.ReplaceAll(text, `\`, `\\`)
@@ -218,6 +222,12 @@ func (c *ControlClient) Close() error {
 		<-c.done
 	}
 	return c.cmd.Wait()
+}
+
+// PasteToPane is not supported via control mode because it requires file I/O
+// (load-buffer) that is not available through the control mode stdin protocol.
+func (c *ControlClient) PasteToPane(_ string, _ string) error {
+	return fmt.Errorf("PasteToPane not supported via control mode")
 }
 
 func (c *ControlClient) readLoop() {

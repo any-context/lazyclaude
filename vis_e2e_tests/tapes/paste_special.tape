@@ -7,8 +7,8 @@ Set Height 1200
 Set FontSize 16
 Set WaitTimeout 60s
 
-# lazyclaude 起動
-Type "lazyclaude" Enter
+# lazyclaude 起動 (tmux plugin 経由)
+Ctrl+\
 Wait+Screen /No sessions/
 
 # セッション作成
