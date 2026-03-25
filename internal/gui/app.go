@@ -115,18 +115,29 @@ func (a *App) startPasteWatchdog() {
 			case <-done:
 				return
 			case <-ch:
-				// Wait for paste to accumulate.
-				select {
-				case <-done:
-					return
-				case <-time.After(pasteWatchdogTimeout):
-				}
-				if a.editor != nil {
+				// Drain loop: keep flushing partial content while paste is ongoing.
+				// Large pastes overflow tcell's event channel (256 slots), blocking
+				// the event loop. Each drain unblocks the channel so more characters
+				// can arrive. The loop exits when inPaste becomes false (paste end
+				// marker was processed by the event loop).
+				for {
+					select {
+					case <-done:
+						return
+					case <-time.After(pasteWatchdogTimeout):
+					}
+					if a.editor == nil {
+						break
+					}
 					a.editor.pasteMu.Lock()
-					shouldFlush := a.editor.inPaste && a.editor.pasteBuf.Len() > 0
+					stillPasting := a.editor.inPaste
+					hasData := a.editor.pasteBuf.Len() > 0
 					a.editor.pasteMu.Unlock()
-					if shouldFlush {
-						a.editor.flushPaste()
+					if !stillPasting {
+						break
+					}
+					if hasData {
+						a.editor.drainPaste()
 					}
 				}
 			}

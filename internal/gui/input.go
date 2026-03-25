@@ -398,15 +398,30 @@ func (e *inputEditor) appendPasteChar(key gocui.Key, ch rune) {
 }
 
 // flushPaste extracts the paste buffer and forwards it via tmux paste-buffer.
-// Thread-safe: called from both the gocui event loop (when paste end marker
-// is detected) and the watchdog goroutine (when tcell's event channel
-// overflows and the event loop is deadlocked).
+// Sets inPaste=false, ending the paste session.
+// Called from the gocui event loop when the paste end marker is detected.
 func (e *inputEditor) flushPaste() {
 	e.pasteMu.Lock()
 	text := e.pasteBuf.String()
 	e.pasteBuf.Reset()
 	e.inPaste = false
 	e.nativePaste = false
+	e.pasteMu.Unlock()
+	if text == "" {
+		return
+	}
+	e.app.forwardPaste(text)
+}
+
+// drainPaste extracts the paste buffer but keeps inPaste=true so that
+// subsequent characters continue to be buffered. Called by the watchdog
+// goroutine when tcell's event channel overflows — the paste is still
+// ongoing but we need to flush partial content to unblock the channel.
+func (e *inputEditor) drainPaste() {
+	e.pasteMu.Lock()
+	text := e.pasteBuf.String()
+	e.pasteBuf.Reset()
+	// Keep inPaste=true — more characters may follow.
 	e.pasteMu.Unlock()
 	if text == "" {
 		return
