@@ -119,14 +119,14 @@ func (a *App) startPasteWatchdog() {
 				select {
 				case <-done:
 					return
-				case <-time.After(200 * time.Millisecond):
+				case <-time.After(pasteWatchdogTimeout):
 				}
 				if a.editor != nil {
 					a.editor.pasteMu.Lock()
 					shouldFlush := a.editor.inPaste && a.editor.pasteBuf.Len() > 0
 					a.editor.pasteMu.Unlock()
 					if shouldFlush {
-						a.editor.flushPasteFromWatchdog()
+						a.editor.flushPaste()
 					}
 				}
 			}

@@ -123,6 +123,11 @@ func RuneToLiteral(ch rune) string {
 // so 10ms is generous. A standalone Esc press has no following bytes.
 const escTimeout = 10 * time.Millisecond
 
+// pasteWatchdogTimeout is how long the watchdog waits after paste starts
+// before flushing the buffer. This handles tcell event channel overflow
+// (256 slots) where EventPaste{End} is blocked and the event loop deadlocks.
+const pasteWatchdogTimeout = 200 * time.Millisecond
+
 // pasteStartSuffix is "[200~" — the bytes after ESC in a paste start marker.
 const pasteStartSuffix = "[200~"
 
@@ -141,17 +146,19 @@ type editEvent struct {
 // Detects bracketed paste markers (ESC[200~ / ESC[201~) in the event
 // stream — works even when tcell fails to parse them (tmux popup bug).
 //
-// All fields are accessed exclusively on the gocui event-loop goroutine.
-// The escTimer callback uses gui.Update() to re-enter the event loop.
+// Fields guarded by pasteMu (inPaste, nativePaste, pasteBuf) are shared
+// between the gocui event-loop goroutine and the paste watchdog goroutine.
+// All other fields (escBuf, escTimer, escGen) are accessed exclusively on
+// the gocui event-loop goroutine — the watchdog never touches them.
 type inputEditor struct {
 	app         *App
-	escBuf      []editEvent     // events buffered while detecting escape sequence
-	inPaste     bool            // between paste start and end markers
-	nativePaste bool            // true if paste was detected via tcell IsPasting
-	pasteBuf    strings.Builder // accumulated paste content
+	escBuf      []editEvent     // event-loop only: buffered escape sequence detection
+	inPaste     bool            // guarded by pasteMu: between paste start and end markers
+	nativePaste bool            // guarded by pasteMu: paste detected via tcell IsPasting
+	pasteBuf    strings.Builder // guarded by pasteMu: accumulated paste content
 	pasteMu     sync.Mutex      // guards inPaste, nativePaste, pasteBuf
-	escTimer    *time.Timer     // fires to flush standalone Esc
-	escGen      uint64          // generation counter for escTimer identity
+	escTimer    *time.Timer     // event-loop only: fires to flush standalone Esc
+	escGen      uint64          // event-loop only: generation counter for escTimer
 	pasteNotify chan struct{}    // signals watchdog that paste started
 }
 
@@ -289,6 +296,7 @@ func (e *inputEditor) handleEscSeq(key gocui.Key, ch rune, mod gocui.Modifier) b
 		e.inPaste = true
 		e.pasteMu.Unlock()
 		e.escBuf = e.escBuf[:0]
+		e.notifyWatchdog()
 		return true
 	}
 
@@ -389,25 +397,11 @@ func (e *inputEditor) appendPasteChar(key gocui.Key, ch rune) {
 	}
 }
 
-// flushPaste sends the accumulated paste buffer via tmux paste-buffer.
+// flushPaste extracts the paste buffer and forwards it via tmux paste-buffer.
+// Thread-safe: called from both the gocui event loop (when paste end marker
+// is detected) and the watchdog goroutine (when tcell's event channel
+// overflows and the event loop is deadlocked).
 func (e *inputEditor) flushPaste() {
-	e.pasteMu.Lock()
-	text := e.pasteBuf.String()
-	e.pasteBuf.Reset()
-	e.inPaste = false
-	e.nativePaste = false
-	e.pasteMu.Unlock()
-	if text == "" {
-		return
-	}
-	e.app.forwardPaste(text)
-}
-
-// flushPasteFromWatchdog is called from the watchdog goroutine when
-// the gocui event loop is deadlocked. It extracts the paste buffer
-// and forwards it. The event loop will eventually resume when tcell's
-// inputProcessor unblocks (after the event channel drains).
-func (e *inputEditor) flushPasteFromWatchdog() {
 	e.pasteMu.Lock()
 	text := e.pasteBuf.String()
 	e.pasteBuf.Reset()
