@@ -490,6 +490,14 @@ func (e *inputEditor) forwardAny(key gocui.Key, ch rune, mod gocui.Modifier) boo
 		e.app.forwardKey(ch)
 		return true
 	}
+	// ESC is not in specialKeyMap because Edit() intercepts it for paste
+	// marker detection. After the escTimer determines it's a standalone
+	// ESC (not part of ESC[200~), flushEscBuf calls forwardAny which
+	// needs to forward it as "Escape" to the Claude Code pane.
+	if key == gocui.KeyEsc {
+		e.app.forwardSpecialKey("Escape")
+		return true
+	}
 	if tmuxKey, ok := specialKeyMap[key]; ok {
 		e.app.forwardSpecialKey(tmuxKey)
 		return true
