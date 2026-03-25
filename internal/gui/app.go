@@ -95,18 +95,48 @@ type App struct {
 	worktreeChoices    []WorktreeInfo             // items in worktree chooser
 	worktreeCursor     int                        // selected index in chooser (len(choices) = "New")
 	selectedWorktree   string                     // path of chosen existing worktree
-	debugLog           *os.File                   // optional debug log (nil = no debug logging)
-	editor             *inputEditor               // fullscreen key editor (for paste flush from ticker)
+	editor             *inputEditor               // fullscreen key editor (for paste flush)
+	watchdogDone       chan struct{}               // signals watchdog to stop
+	watchdogStarted    bool                        // prevents multiple watchdog goroutines
+}
+
+// startPasteWatchdog starts the watchdog goroutine if not already running.
+// Called from layout when the editor is first created.
+func (a *App) startPasteWatchdog() {
+	if a.watchdogStarted || a.editor == nil || a.watchdogDone == nil {
+		return
+	}
+	a.watchdogStarted = true
+	ch := a.editor.pasteNotify
+	done := a.watchdogDone
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-ch:
+				// Wait for paste to accumulate.
+				select {
+				case <-done:
+					return
+				case <-time.After(200 * time.Millisecond):
+				}
+				if a.editor != nil {
+					a.editor.pasteMu.Lock()
+					shouldFlush := a.editor.inPaste && a.editor.pasteBuf.Len() > 0
+					a.editor.pasteMu.Unlock()
+					if shouldFlush {
+						a.editor.flushPasteFromWatchdog()
+					}
+				}
+			}
+		}
+	}()
 }
 
 // SetPopupMode sets the popup display mode.
 func (a *App) SetPopupMode(mode config.PopupMode) {
 	a.popupMode = mode
-}
-
-// SetDebugLog sets the debug log file for input diagnostics.
-func (a *App) SetDebugLog(f *os.File) {
-	a.debugLog = f
 }
 
 // NewApp creates a new App. Call Run() to start the event loop.
@@ -200,6 +230,10 @@ func (a *App) Run() error {
 	done := make(chan struct{})
 	go a.fullscreen.RunKeyForwarder(done)
 
+	// Paste watchdog: started lazily when the editor is first created.
+	// See runPasteWatchdog().
+	a.watchdogDone = done
+
 	// Refresh loop: event-driven via notify channels + ticker fallback.
 	go func() {
 		ticker := time.NewTicker(100 * time.Millisecond)
@@ -237,13 +271,6 @@ func (a *App) Run() error {
 						for _, n := range a.sessions.PendingNotifications() {
 							a.showToolPopup(n)
 						}
-					}
-					// Flush paste buffer when paste ends.
-					// EventPaste{End} sets IsPasting=false but does not call Edit(),
-					// so we detect the transition here.
-					if a.editor != nil && a.editor.inPaste && a.editor.nativePaste && !g.IsPasting {
-						a.editor.debugLog("ticker: native IsPasting ended, flushing paste")
-						a.editor.flushPaste()
 					}
 					return nil
 				})

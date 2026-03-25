@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os/exec"
@@ -226,7 +227,7 @@ func (c *ControlClient) Close() error {
 
 // PasteToPane is not supported via control mode because it requires file I/O
 // (load-buffer) that is not available through the control mode stdin protocol.
-func (c *ControlClient) PasteToPane(_ string, _ string) error {
+func (c *ControlClient) PasteToPane(_ context.Context, _ string, _ string) error {
 	return fmt.Errorf("PasteToPane not supported via control mode")
 }
 
