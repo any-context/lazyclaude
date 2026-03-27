@@ -342,7 +342,7 @@ func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userP
 
 	var systemPrompt string
 	if mcpPort > 0 {
-		systemPrompt = BuildWorkerPrompt(wtPath, projectRoot, id, mcpPort, mcpToken)
+		systemPrompt = BuildWorkerPrompt(wtPath, projectRoot, id, mcpPort, mcpToken, m.paths.PortFile(), m.paths.IDEDir)
 	} else {
 		systemPrompt = BuildWorktreePrompt(wtPath, projectRoot)
 	}
@@ -616,7 +616,7 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot string) (*Ses
 	workerList := strings.Join(workerLines, "\n")
 
 	id := uuid.New().String()
-	systemPrompt := BuildPMPrompt(id, mcpPort, token, workerList)
+	systemPrompt := BuildPMPrompt(id, mcpPort, token, workerList, m.paths.PortFile(), m.paths.IDEDir)
 
 	launcher, err := writeWorktreeLauncher(systemPrompt, "")
 	if err != nil {

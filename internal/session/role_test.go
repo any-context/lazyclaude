@@ -54,7 +54,7 @@ func TestRole_IsValid(t *testing.T) {
 
 func TestBuildPMPrompt_ContainsRequiredFields(t *testing.T) {
 	t.Parallel()
-	prompt := session.BuildPMPrompt("sess-abc123", 9876, "tok-secret", "worker-1, worker-2")
+	prompt := session.BuildPMPrompt("sess-abc123", 9876, "tok-secret", "worker-1, worker-2", "/tmp/lazyclaude-mcp.port", "/home/user/.claude/ide")
 
 	cases := []struct {
 		desc    string
@@ -72,6 +72,9 @@ func TestBuildPMPrompt_ContainsRequiredFields(t *testing.T) {
 		{"review criteria security", "security"},
 		{"auth header", "X-Auth-Token:"},
 		{"push delivery notice", "delivered directly"},
+		{"port file path", "/tmp/lazyclaude-mcp.port"},
+		{"ide dir path", "/home/user/.claude/ide"},
+		{"connection recovery", "Connection Recovery"},
 	}
 	for _, tc := range cases {
 		if !strings.Contains(prompt, tc.snippet) {
@@ -82,7 +85,7 @@ func TestBuildPMPrompt_ContainsRequiredFields(t *testing.T) {
 
 func TestBuildPMPrompt_NoPollInstructions(t *testing.T) {
 	t.Parallel()
-	prompt := session.BuildPMPrompt("sess-xyz", 8080, "tok-abc", "")
+	prompt := session.BuildPMPrompt("sess-xyz", 8080, "tok-abc", "", "/tmp/mcp.port", "/tmp/ide")
 	if strings.Contains(prompt, "/msg/poll") {
 		t.Error("BuildPMPrompt should not contain /msg/poll (push-based, no polling needed)")
 	}
@@ -90,7 +93,7 @@ func TestBuildPMPrompt_NoPollInstructions(t *testing.T) {
 
 func TestBuildPMPrompt_EmptyWorkerList(t *testing.T) {
 	t.Parallel()
-	prompt := session.BuildPMPrompt("sess-xyz", 8080, "tok-abc", "")
+	prompt := session.BuildPMPrompt("sess-xyz", 8080, "tok-abc", "", "/tmp/mcp.port", "/tmp/ide")
 	if !strings.Contains(prompt, "8080") {
 		t.Error("BuildPMPrompt with empty worker list should still contain port")
 	}
@@ -104,6 +107,8 @@ func TestBuildWorkerPrompt_ContainsRequiredFields(t *testing.T) {
 		"sess-worker-99",
 		9876,
 		"tok-secret",
+		"/tmp/lazyclaude-mcp.port",
+		"/home/user/.claude/ide",
 	)
 
 	cases := []struct {
@@ -122,6 +127,9 @@ func TestBuildWorkerPrompt_ContainsRequiredFields(t *testing.T) {
 		{"review request instruction", "review"},
 		{"auth header", "X-Auth-Token:"},
 		{"push delivery notice", "delivered directly"},
+		{"port file path", "/tmp/lazyclaude-mcp.port"},
+		{"ide dir path", "/home/user/.claude/ide"},
+		{"connection recovery", "Connection Recovery"},
 	}
 	for _, tc := range cases {
 		if !strings.Contains(prompt, tc.snippet) {
@@ -138,6 +146,8 @@ func TestBuildWorkerPrompt_NoPollInstructions(t *testing.T) {
 		"sess-worker-99",
 		9876,
 		"tok-secret",
+		"/tmp/mcp.port",
+		"/tmp/ide",
 	)
 	if strings.Contains(prompt, "/msg/poll") {
 		t.Error("BuildWorkerPrompt should not contain /msg/poll (push-based, no polling needed)")
@@ -148,7 +158,7 @@ func TestBuildWorkerPrompt_PathIsolation(t *testing.T) {
 	t.Parallel()
 	worktree := "/home/user/project/.claude/worktrees/my-task"
 	root := "/home/user/project"
-	prompt := session.BuildWorkerPrompt(worktree, root, "id-1", 8080, "t")
+	prompt := session.BuildWorkerPrompt(worktree, root, "id-1", 8080, "t", "/tmp/mcp.port", "/tmp/ide")
 
 	// Must mention both paths for isolation enforcement
 	if !strings.Contains(prompt, worktree) {
@@ -162,7 +172,7 @@ func TestBuildWorkerPrompt_PathIsolation(t *testing.T) {
 func TestBuildPMPrompt_CurlExampleIsUsable(t *testing.T) {
 	t.Parallel()
 	// Verify the curl example uses correct HTTP method conventions
-	prompt := session.BuildPMPrompt("id-pm", 1234, "mytoken", "")
+	prompt := session.BuildPMPrompt("id-pm", 1234, "mytoken", "", "/tmp/mcp.port", "/tmp/ide")
 
 	// /msg/send requires POST; /msg/sessions requires GET
 	if !strings.Contains(prompt, "/msg/send") {

@@ -22,6 +22,19 @@ curl -s -X POST -H "X-Auth-Token: %s" \
 curl -s -H "X-Auth-Token: %s" \
   "http://localhost:%d/msg/sessions"
 
+## Connection Recovery
+
+The port and token above were captured at session creation. If the MCP server
+restarts, they become stale and curl will fail with "Connection refused".
+
+To get the current values:
+```bash
+PORT=$(cat %s)
+TOKEN=$(python3 -c "import json; print(json.load(open('$(echo %s/$PORT.lock)'))['authToken'])")
+```
+
+Then use `$PORT` and `$TOKEN` in the curl commands above.
+
 ## Review Criteria
 
 Evaluate each PR on the following axes:
