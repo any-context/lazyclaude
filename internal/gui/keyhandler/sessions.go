@@ -32,7 +32,11 @@ func (p *SessionsPanel) HandleKey(ev KeyEvent, actions AppActions) HandlerResult
 		actions.LaunchLazygit()
 		return Handled
 	case ev.Key == gocui.KeyEnter:
-		actions.EnterFullScreen()
+		if actions.CursorIsProject() {
+			actions.ToggleProjectExpanded()
+		} else {
+			actions.EnterFullScreen()
+		}
 		return Handled
 	case ev.Rune == 'r':
 		actions.EnterFullScreen()

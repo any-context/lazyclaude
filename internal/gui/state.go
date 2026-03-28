@@ -3,12 +3,13 @@ package gui
 // enterFullScreen enters fullscreen mode for the given session.
 func (a *App) enterFullScreen(sessionID string) {
 	a.fullscreen.Enter(sessionID)
-	if a.sessions != nil {
-		for i, item := range a.sessions.Sessions() {
-			if item.ID == sessionID {
-				a.cursor = i
-				break
-			}
+	// Rebuild cache in case it hasn't been populated yet (e.g. called before layout).
+	a.refreshTreeNodes()
+	// Ensure cursor points at the session node (for resolveForwardTarget).
+	for i, node := range a.treeNodes() {
+		if node.Kind == SessionNode && node.Session != nil && node.Session.ID == sessionID {
+			a.cursor = i
+			break
 		}
 	}
 }
@@ -20,16 +21,13 @@ func (a *App) exitFullScreen() {
 
 // resolveSessionTarget returns the tmux target for the selected session.
 func (a *App) resolveSessionTarget() string {
-	if a.sessions == nil {
+	sess := a.currentSession()
+	if sess == nil {
 		return ""
 	}
-	items := a.sessions.Sessions()
-	if a.cursor < 0 || a.cursor >= len(items) {
-		return ""
-	}
-	t := items[a.cursor].TmuxWindow
+	t := sess.TmuxWindow
 	if t == "" {
-		id := items[a.cursor].ID
+		id := sess.ID
 		if id == "" {
 			return ""
 		}

@@ -31,6 +31,8 @@ const (
 // SessionProvider abstracts session operations for the GUI layer.
 type SessionProvider interface {
 	Sessions() []SessionItem
+	Projects() []ProjectItem
+	ToggleProjectExpanded(projectID string)
 	Create(path, host string) error
 	Delete(id string) error
 	Rename(id, newName string) error
@@ -96,6 +98,7 @@ type App struct {
 	editor             *inputEditor               // fullscreen key editor (for paste flush)
 	watchdogDone       chan struct{}               // signals watchdog to stop
 	watchdogStarted    bool                        // prevents multiple watchdog goroutines
+	cachedNodes        []TreeNode                   // rebuilt once per layout cycle
 }
 
 // startPasteWatchdog starts the watchdog goroutine if not already running.

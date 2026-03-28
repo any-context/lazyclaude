@@ -29,7 +29,7 @@ func TestSessionsPanel_Keys(t *testing.T) {
 		{keyhandler.KeyEvent{Rune: 'P'}, "StartPMSession"},
 	}
 	for _, tt := range tests {
-		a := &mockActions{}
+		a := newMockActions()
 		r := p.HandleKey(tt.ev, a)
 		if r != keyhandler.Handled {
 			t.Errorf("key %v: want Handled", tt.ev)
@@ -42,7 +42,7 @@ func TestSessionsPanel_Keys(t *testing.T) {
 
 func TestSessionsPanel_UnknownKey(t *testing.T) {
 	p := &keyhandler.SessionsPanel{}
-	a := &mockActions{}
+	a := newMockActions()
 	r := p.HandleKey(keyhandler.KeyEvent{Rune: 'z'}, a)
 	if r != keyhandler.Unhandled {
 		t.Error("unknown key should be Unhandled")
@@ -63,7 +63,7 @@ func TestLogsPanel_Keys(t *testing.T) {
 		{keyhandler.KeyEvent{Rune: 'y'}, "LogsCopySelection"},
 	}
 	for _, tt := range tests {
-		a := &mockActions{}
+		a := newMockActions()
 		r := p.HandleKey(tt.ev, a)
 		if r != keyhandler.Handled {
 			t.Errorf("key %v: want Handled", tt.ev)
@@ -118,7 +118,7 @@ func TestFullScreenHandler_ExitKeys(t *testing.T) {
 func TestGlobalHandler_Quit(t *testing.T) {
 	pm := keyhandler.NewPanelManager(&keyhandler.SessionsPanel{})
 	h := keyhandler.NewGlobalHandler(pm)
-	a := &mockActions{}
+	a := newMockActions()
 
 	r := h.HandleKey(keyhandler.KeyEvent{Rune: 'q'}, a)
 	if r != keyhandler.Handled || a.lastCall() != "Quit" {
@@ -129,7 +129,7 @@ func TestGlobalHandler_Quit(t *testing.T) {
 func TestGlobalHandler_Tab(t *testing.T) {
 	pm := keyhandler.NewPanelManager(&keyhandler.SessionsPanel{}, &keyhandler.LogsPanel{})
 	h := keyhandler.NewGlobalHandler(pm)
-	a := &mockActions{}
+	a := newMockActions()
 
 	if pm.FocusIdx() != 0 {
 		t.Fatal("initial focus should be 0")

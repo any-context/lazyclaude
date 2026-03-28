@@ -57,6 +57,8 @@ func (m *mockActions) LogsCursorToTop()                 { m.record("LogsCursorTo
 func (m *mockActions) LogsToggleSelect()                { m.record("LogsToggleSelect") }
 func (m *mockActions) LogsCopySelection()               { m.record("LogsCopySelection") }
 func (m *mockActions) Quit()                            { m.record("Quit") }
+func (m *mockActions) ToggleProjectExpanded()            { m.record("ToggleProjectExpanded") }
+func (m *mockActions) CursorIsProject() bool             { return false }
 
 func newDispatcher() *keydispatch.Dispatcher {
 	pm := keyhandler.NewPanelManager(&keyhandler.SessionsPanel{}, &keyhandler.LogsPanel{})

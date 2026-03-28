@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
+	"github.com/google/uuid"
 )
 
 // Status represents the runtime status of a session.
@@ -65,11 +66,20 @@ func (s *Session) WindowName() string {
 	return "lc-" + s.ID[:8]
 }
 
+// stateFile is the versioned on-disk format for state.json.
+const stateVersion = 2
+
+type stateFile struct {
+	Version  int       `json:"version"`
+	Projects []Project `json:"projects"`
+}
+
 // Store manages session persistence to a JSON file.
+// Internally organizes sessions into Projects by project root path.
 type Store struct {
 	mu       sync.RWMutex
 	path     string
-	sessions []Session
+	projects []Project
 }
 
 // NewStore creates a store backed by the given file path.
@@ -77,7 +87,8 @@ func NewStore(path string) *Store {
 	return &Store{path: path}
 }
 
-// Load reads sessions from disk.
+// Load reads projects from disk. If the file is legacy format ([]Session),
+// it resets to empty (no migration).
 func (s *Store) Load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -85,21 +96,25 @@ func (s *Store) Load() error {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			s.sessions = nil
+			s.projects = nil
 			return nil
 		}
 		return fmt.Errorf("read state: %w", err)
 	}
 
-	var sessions []Session
-	if err := json.Unmarshal(data, &sessions); err != nil {
-		return fmt.Errorf("parse state: %w", err)
+	// Try versioned format first
+	var sf stateFile
+	if err := json.Unmarshal(data, &sf); err == nil && sf.Version == stateVersion {
+		s.projects = sf.Projects
+		return nil
 	}
-	s.sessions = sessions
+
+	// Legacy format or unrecognized — reset
+	s.projects = nil
 	return nil
 }
 
-// Save writes sessions to disk atomically (write to temp, then rename).
+// Save writes projects to disk atomically (write to temp, then rename).
 func (s *Store) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -109,7 +124,11 @@ func (s *Store) Save() error {
 		return fmt.Errorf("create state dir: %w", err)
 	}
 
-	data, err := json.MarshalIndent(s.sessions, "", "  ")
+	sf := stateFile{
+		Version:  stateVersion,
+		Projects: s.projects,
+	}
+	data, err := json.MarshalIndent(sf, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
 	}
@@ -136,63 +155,156 @@ func (s *Store) Save() error {
 	return nil
 }
 
-// All returns a copy of all sessions.
+// Projects returns a deep copy of all projects.
+// The returned values do not share pointers with store internals.
+func (s *Store) Projects() []Project {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]Project, len(s.projects))
+	for i, p := range s.projects {
+		result[i] = p
+		if p.PM != nil {
+			pm := *p.PM
+			result[i].PM = &pm
+		}
+		if len(p.Sessions) > 0 {
+			sessions := make([]Session, len(p.Sessions))
+			copy(sessions, p.Sessions)
+			result[i].Sessions = sessions
+		}
+	}
+	return result
+}
+
+// All returns a flat copy of all sessions across all projects.
+// PM sessions are included.
 func (s *Store) All() []Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make([]Session, len(s.sessions))
-	copy(result, s.sessions)
+	var result []Session
+	for _, p := range s.projects {
+		if p.PM != nil {
+			result = append(result, *p.PM)
+		}
+		result = append(result, p.Sessions...)
+	}
 	return result
 }
 
-// Add inserts a new session.
+// Add inserts a session, auto-creating or finding the parent project.
+// PM sessions (Role=RolePM) are stored as Project.PM.
 func (s *Store) Add(sess Session) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sessions = append(s.sessions, sess)
+
+	projectPath := InferProjectRoot(sess.Path)
+	idx := s.findProjectIdxLocked(projectPath)
+
+	if idx < 0 {
+		// Create new project
+		p := Project{
+			ID:        uuid.New().String(),
+			Name:      filepath.Base(projectPath),
+			Path:      projectPath,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			Expanded:  true,
+		}
+		if sess.Role == RolePM {
+			p.PM = &sess
+		} else {
+			p.Sessions = []Session{sess}
+		}
+		s.projects = append(s.projects, p)
+		return
+	}
+
+	if sess.Role == RolePM {
+		s.projects[idx].PM = &sess
+	} else {
+		s.projects[idx].Sessions = append(s.projects[idx].Sessions, sess)
+	}
+	s.projects[idx].UpdatedAt = time.Now()
 }
 
-// Remove deletes a session by ID.
+// Remove deletes a session by ID. Removes the project if it becomes empty.
 func (s *Store) Remove(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for i, sess := range s.sessions {
-		if sess.ID == id {
-			result := make([]Session, 0, len(s.sessions)-1)
-			result = append(result, s.sessions[:i]...)
-			result = append(result, s.sessions[i+1:]...)
-			s.sessions = result
+	for pi := range s.projects {
+		// Check PM
+		if s.projects[pi].PM != nil && s.projects[pi].PM.ID == id {
+			s.projects[pi].PM = nil
+			s.maybeRemoveProjectLocked(pi)
 			return true
+		}
+		// Check sessions
+		for si := range s.projects[pi].Sessions {
+			if s.projects[pi].Sessions[si].ID == id {
+				sessions := make([]Session, 0, len(s.projects[pi].Sessions)-1)
+				sessions = append(sessions, s.projects[pi].Sessions[:si]...)
+				sessions = append(sessions, s.projects[pi].Sessions[si+1:]...)
+				s.projects[pi].Sessions = sessions
+				s.maybeRemoveProjectLocked(pi)
+				return true
+			}
 		}
 	}
 	return false
 }
 
-// FindByID returns a session by ID.
+// FindByID returns a session by ID, searching all projects.
 func (s *Store) FindByID(id string) *Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	for i := range s.sessions {
-		if s.sessions[i].ID == id {
-			sess := s.sessions[i]
+	for pi := range s.projects {
+		if s.projects[pi].PM != nil && s.projects[pi].PM.ID == id {
+			sess := *s.projects[pi].PM
 			return &sess
+		}
+		for si := range s.projects[pi].Sessions {
+			if s.projects[pi].Sessions[si].ID == id {
+				sess := s.projects[pi].Sessions[si]
+				return &sess
+			}
 		}
 	}
 	return nil
 }
 
-// FindByName returns a session by name.
+// FindByName returns a session by name, searching all projects.
 func (s *Store) FindByName(name string) *Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	for i := range s.sessions {
-		if s.sessions[i].Name == name {
-			sess := s.sessions[i]
+	for pi := range s.projects {
+		if s.projects[pi].PM != nil && s.projects[pi].PM.Name == name {
+			sess := *s.projects[pi].PM
 			return &sess
+		}
+		for si := range s.projects[pi].Sessions {
+			if s.projects[pi].Sessions[si].Name == name {
+				sess := s.projects[pi].Sessions[si]
+				return &sess
+			}
+		}
+	}
+	return nil
+}
+
+// FindProjectByPath returns a project by its root path.
+func (s *Store) FindProjectByPath(path string) *Project {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for i := range s.projects {
+		if s.projects[i].Path == path {
+			p := s.projects[i]
+			return &p
 		}
 	}
 	return nil
@@ -203,24 +315,38 @@ func (s *Store) Rename(id, newName string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for i := range s.sessions {
-		if s.sessions[i].ID == id {
-			s.sessions[i].Name = newName
-			s.sessions[i].UpdatedAt = time.Now()
+	for pi := range s.projects {
+		if s.projects[pi].PM != nil && s.projects[pi].PM.ID == id {
+			s.projects[pi].PM.Name = newName
+			s.projects[pi].PM.UpdatedAt = time.Now()
 			return true
+		}
+		for si := range s.projects[pi].Sessions {
+			if s.projects[pi].Sessions[si].ID == id {
+				s.projects[pi].Sessions[si].Name = newName
+				s.projects[pi].Sessions[si].UpdatedAt = time.Now()
+				return true
+			}
 		}
 	}
 	return false
 }
 
-// MarkAllStatus sets the status of all sessions.
+// MarkAllStatus sets the status of all sessions across all projects.
 func (s *Store) MarkAllStatus(status Status) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for i := range s.sessions {
-		s.sessions[i].Status = status
-		s.sessions[i].TmuxWindow = ""
-		s.sessions[i].PID = 0
+	for pi := range s.projects {
+		if s.projects[pi].PM != nil {
+			s.projects[pi].PM.Status = status
+			s.projects[pi].PM.TmuxWindow = ""
+			s.projects[pi].PM.PID = 0
+		}
+		for si := range s.projects[pi].Sessions {
+			s.projects[pi].Sessions[si].Status = status
+			s.projects[pi].Sessions[si].TmuxWindow = ""
+			s.projects[pi].Sessions[si].PID = 0
+		}
 	}
 }
 
@@ -245,12 +371,9 @@ func (s *Store) GenerateName(dirPath, host string) string {
 func (s *Store) BackdateForTest(id string, d time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for i := range s.sessions {
-		if s.sessions[i].ID == id {
-			s.sessions[i].CreatedAt = s.sessions[i].CreatedAt.Add(-d)
-			return
-		}
-	}
+	s.mutateSessionLocked(id, func(sess *Session) {
+		sess.CreatedAt = sess.CreatedAt.Add(-d)
+	})
 }
 
 // SetTmuxWindow sets the TmuxWindow field of a session by ID.
@@ -258,12 +381,9 @@ func (s *Store) BackdateForTest(id string, d time.Duration) {
 func (s *Store) SetTmuxWindow(id, window string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for i := range s.sessions {
-		if s.sessions[i].ID == id {
-			s.sessions[i].TmuxWindow = window
-			return
-		}
-	}
+	s.mutateSessionLocked(id, func(sess *Session) {
+		sess.TmuxWindow = window
+	})
 }
 
 // SetStatus sets the Status field of a session by ID.
@@ -271,21 +391,71 @@ func (s *Store) SetTmuxWindow(id, window string) {
 func (s *Store) SetStatus(id string, status Status) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for i := range s.sessions {
-		if s.sessions[i].ID == id {
-			s.sessions[i].Status = status
+	s.mutateSessionLocked(id, func(sess *Session) {
+		sess.Status = status
+	})
+}
+
+// ToggleProjectExpanded toggles the Expanded state of a project by ID.
+func (s *Store) ToggleProjectExpanded(projectID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.projects {
+		if s.projects[i].ID == projectID {
+			s.projects[i].Expanded = !s.projects[i].Expanded
 			return
 		}
 	}
 }
 
 func (s *Store) nameExistsLocked(name string) bool {
-	for _, sess := range s.sessions {
-		if sess.Name == name {
+	for _, p := range s.projects {
+		if p.PM != nil && p.PM.Name == name {
 			return true
+		}
+		for _, sess := range p.Sessions {
+			if sess.Name == name {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+func (s *Store) findProjectIdxLocked(path string) int {
+	for i := range s.projects {
+		if s.projects[i].Path == path {
+			return i
+		}
+	}
+	return -1
+}
+
+func (s *Store) maybeRemoveProjectLocked(idx int) {
+	p := s.projects[idx]
+	if p.PM == nil && len(p.Sessions) == 0 {
+		result := make([]Project, 0, len(s.projects)-1)
+		result = append(result, s.projects[:idx]...)
+		result = append(result, s.projects[idx+1:]...)
+		s.projects = result
+	}
+}
+
+// mutateSessionLocked finds a session by ID across all projects and applies fn.
+// Caller must hold s.mu.
+func (s *Store) mutateSessionLocked(id string, fn func(*Session)) {
+	for pi := range s.projects {
+		if s.projects[pi].PM != nil && s.projects[pi].PM.ID == id {
+			fn(s.projects[pi].PM)
+			return
+		}
+		for si := range s.projects[pi].Sessions {
+			if s.projects[pi].Sessions[si].ID == id {
+				fn(&s.projects[pi].Sessions[si])
+				return
+			}
+		}
+	}
 }
 
 // SyncWithTmux updates runtime state by comparing with tmux windows.
@@ -303,33 +473,42 @@ func (s *Store) SyncWithTmux(windows []tmux.WindowInfo, panes []tmux.PaneInfo) {
 		paneByWindow[p.Window] = p
 	}
 
-	for i := range s.sessions {
-		wName := s.sessions[i].WindowName()
+	syncSession := func(sess *Session) {
+		wName := sess.WindowName()
 		w, found := windowByName[wName]
 		if !found {
-			s.sessions[i].Status = StatusOrphan
-			s.sessions[i].TmuxWindow = ""
-			s.sessions[i].PID = 0
-			continue
+			sess.Status = StatusOrphan
+			sess.TmuxWindow = ""
+			sess.PID = 0
+			return
 		}
 
-		s.sessions[i].TmuxWindow = w.ID
+		sess.TmuxWindow = w.ID
 		p, hasPane := paneByWindow[w.ID]
 		if !hasPane {
-			s.sessions[i].Status = StatusDetached
-			s.sessions[i].PID = 0
-			continue
+			sess.Status = StatusDetached
+			sess.PID = 0
+			return
 		}
 
 		if p.Dead {
-			s.sessions[i].Status = StatusDead
-			s.sessions[i].PID = 0
+			sess.Status = StatusDead
+			sess.PID = 0
 		} else if p.PID > 0 {
-			s.sessions[i].Status = StatusRunning
-			s.sessions[i].PID = p.PID
+			sess.Status = StatusRunning
+			sess.PID = p.PID
 		} else {
-			s.sessions[i].Status = StatusDetached
-			s.sessions[i].PID = 0
+			sess.Status = StatusDetached
+			sess.PID = 0
+		}
+	}
+
+	for pi := range s.projects {
+		if s.projects[pi].PM != nil {
+			syncSession(s.projects[pi].PM)
+		}
+		for si := range s.projects[pi].Sessions {
+			syncSession(&s.projects[pi].Sessions[si])
 		}
 	}
 }

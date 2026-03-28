@@ -4,10 +4,15 @@ import "github.com/KEMSHlM/lazyclaude/internal/core/choice"
 
 // mockActions records which actions were called.
 type mockActions struct {
-	calls      []string
-	hasPopup   bool
-	fullScreen bool
-	mode       int
+	calls          []string
+	hasPopup       bool
+	fullScreen     bool
+	mode           int
+	cursorIsProject bool
+}
+
+func newMockActions() *mockActions {
+	return &mockActions{cursorIsProject: false} // default: SessionNode
 }
 
 func (m *mockActions) record(name string) { m.calls = append(m.calls, name) }
@@ -52,3 +57,5 @@ func (m *mockActions) LogsCursorToTop()                 { m.record("LogsCursorTo
 func (m *mockActions) LogsToggleSelect()                { m.record("LogsToggleSelect") }
 func (m *mockActions) LogsCopySelection()               { m.record("LogsCopySelection") }
 func (m *mockActions) Quit()                            { m.record("Quit") }
+func (m *mockActions) ToggleProjectExpanded()            { m.record("ToggleProjectExpanded") }
+func (m *mockActions) CursorIsProject() bool             { return m.cursorIsProject }

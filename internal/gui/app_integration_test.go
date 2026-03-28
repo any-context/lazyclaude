@@ -29,6 +29,21 @@ func (m *mockSessionProvider) Sessions() []gui.SessionItem {
 	defer m.mu.Unlock()
 	return m.sessions
 }
+func (m *mockSessionProvider) Projects() []gui.ProjectItem {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.sessions) == 0 {
+		return nil
+	}
+	return []gui.ProjectItem{{
+		ID:       "test-project",
+		Name:     "test",
+		Path:     "/test",
+		Expanded: true,
+		Sessions: m.sessions,
+	}}
+}
+func (m *mockSessionProvider) ToggleProjectExpanded(_ string) {}
 func (m *mockSessionProvider) Create(_, _ string) error { return nil }
 func (m *mockSessionProvider) Delete(_ string) error    { return nil }
 func (m *mockSessionProvider) Rename(_, _ string) error { return nil }

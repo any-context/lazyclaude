@@ -483,6 +483,16 @@ func (m *Manager) Sessions() []Session {
 	return m.store.All()
 }
 
+// Projects returns all projects (read-only copy).
+func (m *Manager) Projects() []Project {
+	return m.store.Projects()
+}
+
+// ToggleProjectExpanded toggles a project's expanded state.
+func (m *Manager) ToggleProjectExpanded(projectID string) {
+	m.store.ToggleProjectExpanded(projectID)
+}
+
 // readMCPInfo reads the MCP server port and auth token from disk.
 // The port file contains the port number; the lock file contains the auth token.
 func (m *Manager) readMCPInfo() (int, string, error) {
@@ -578,17 +588,17 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot string) (*Ses
 	defer m.mu.Unlock()
 
 	// Check that no PM session already exists for this projectRoot.
-	for _, s := range m.store.All() {
-		if s.Role == RolePM && s.Path == projectRoot {
-			return nil, fmt.Errorf("pm session already exists for %q", projectRoot)
-		}
+	if p := m.store.FindProjectByPath(projectRoot); p != nil && p.PM != nil {
+		return nil, fmt.Errorf("pm session already exists for %q", projectRoot)
 	}
 
-	// Build worker list string from existing worker sessions.
+	// Build worker list string from existing worker sessions in this project.
 	var workerLines []string
-	for _, s := range m.store.All() {
-		if s.Role == RoleWorker {
-			workerLines = append(workerLines, fmt.Sprintf("- %s (id=%s, path=%s)", s.Name, s.ID, s.Path))
+	if p := m.store.FindProjectByPath(projectRoot); p != nil {
+		for _, s := range p.Sessions {
+			if s.Role == RoleWorker {
+				workerLines = append(workerLines, fmt.Sprintf("- %s (id=%s, path=%s)", s.Name, s.ID, s.Path))
+			}
 		}
 	}
 	workerList := strings.Join(workerLines, "\n")

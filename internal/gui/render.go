@@ -13,9 +13,42 @@ import (
 const serverLogPath = "/tmp/lazyclaude/server.log"
 const serverLogLines = 30
 
-// renderSessionList writes the session list to a gocui view.
-func renderSessionList(v *gocui.View, items []SessionItem, cursor int) {
-	if len(items) == 0 {
+// sessionStatusIcon returns the status icon for a session item.
+func sessionStatusIcon(item *SessionItem) string {
+	switch {
+	case item.Status == "Dead":
+		return " " + presentation.IconDead
+	case item.Status == "Orphan":
+		return " " + presentation.IconOrphan
+	case item.Activity == "pending":
+		return " " + presentation.IconPending
+	case item.Status == "Running":
+		return " " + presentation.IconRunning
+	case item.Status == "Detached":
+		return " " + presentation.IconDetached
+	default:
+		return ""
+	}
+}
+
+// sessionDisplayName returns the decorated name for a session item.
+func sessionDisplayName(item *SessionItem) string {
+	name := item.Name
+	if item.Host != "" {
+		name = presentation.FgPurple + item.Host + presentation.Reset + ":" + name
+	}
+	if session.IsWorktreePath(item.Path) {
+		name = presentation.IconWorktree + " " + name
+	}
+	if item.Role == "pm" {
+		name = presentation.IconPM + " " + name
+	}
+	return name
+}
+
+// renderTree writes the project/session tree to a gocui view.
+func renderTree(v *gocui.View, nodes []TreeNode, cursor int) {
+	if len(nodes) == 0 {
 		fmt.Fprintln(v, "")
 		fmt.Fprintln(v, presentation.Dim+"  No sessions"+presentation.Reset)
 		fmt.Fprintln(v, "")
@@ -23,37 +56,25 @@ func renderSessionList(v *gocui.View, items []SessionItem, cursor int) {
 		return
 	}
 
-	for i, item := range items {
+	for i, node := range nodes {
 		prefix := "  "
 		if i == cursor {
 			prefix = presentation.FgCyan + presentation.Bold + "> " + presentation.Reset
 		}
 
-		var icon string
-		switch {
-		case item.Status == "Dead":
-			icon = " " + presentation.IconDead
-		case item.Status == "Orphan":
-			icon = " " + presentation.IconOrphan
-		case item.Activity == "pending":
-			icon = " " + presentation.IconPending
-		case item.Status == "Running":
-			icon = " " + presentation.IconRunning
-		case item.Status == "Detached":
-			icon = " " + presentation.IconDetached
-		}
+		switch node.Kind {
+		case ProjectNode:
+			expandIcon := presentation.IconProjectCollapsed
+			if node.Project.Expanded {
+				expandIcon = presentation.IconProjectExpanded
+			}
+			fmt.Fprintf(v, "%s%s %s\n", prefix, expandIcon, node.Project.Name)
 
-		name := item.Name
-		if item.Host != "" {
-			name = presentation.FgPurple + item.Host + presentation.Reset + ":" + name
+		case SessionNode:
+			name := sessionDisplayName(node.Session)
+			icon := sessionStatusIcon(node.Session)
+			fmt.Fprintf(v, "%s  %-18s%s\n", prefix, name, icon)
 		}
-		if session.IsWorktreePath(item.Path) {
-			name = presentation.IconWorktree + " " + name
-		}
-		if item.Role == "pm" {
-			name = presentation.IconPM + " " + name
-		}
-		fmt.Fprintf(v, "%s%-20s%s\n", prefix, name, icon)
 	}
 
 	v.SetCursor(0, cursor)

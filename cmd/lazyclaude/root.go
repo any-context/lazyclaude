@@ -257,6 +257,16 @@ func (a *sessionAdapter) Sessions() []gui.SessionItem {
 	return buildSessionItems(sessions, pending)
 }
 
+func (a *sessionAdapter) Projects() []gui.ProjectItem {
+	projects := a.mgr.Projects()
+	pending := pendingWindowSet(a.PendingNotifications())
+	return buildProjectItems(projects, pending)
+}
+
+func (a *sessionAdapter) ToggleProjectExpanded(projectID string) {
+	a.mgr.ToggleProjectExpanded(projectID)
+}
+
 // pendingWindowSet builds a set of tmux window IDs that have pending notifications.
 func pendingWindowSet(notifications []*model.ToolNotification) map[string]bool {
 	set := make(map[string]bool, len(notifications))
@@ -266,26 +276,55 @@ func pendingWindowSet(notifications []*model.ToolNotification) map[string]bool {
 	return set
 }
 
-// buildSessionItems converts session.Session slice to gui.SessionItem slice,
-// setting Activity="pending" for Running sessions whose TmuxWindow is in the pending set.
+// buildProjectItems converts session.Project slice to gui.ProjectItem slice.
+func buildProjectItems(projects []session.Project, pending map[string]bool) []gui.ProjectItem {
+	items := make([]gui.ProjectItem, len(projects))
+	for i, p := range projects {
+		var pm *gui.SessionItem
+		if p.PM != nil {
+			si := sessionToItem(*p.PM, pending)
+			pm = &si
+		}
+		sessions := make([]gui.SessionItem, len(p.Sessions))
+		for j, s := range p.Sessions {
+			sessions[j] = sessionToItem(s, pending)
+		}
+		items[i] = gui.ProjectItem{
+			ID:       p.ID,
+			Name:     p.Name,
+			Path:     p.Path,
+			Expanded: p.Expanded,
+			PM:       pm,
+			Sessions: sessions,
+		}
+	}
+	return items
+}
+
+// sessionToItem converts a single session.Session to gui.SessionItem.
+func sessionToItem(s session.Session, pending map[string]bool) gui.SessionItem {
+	activity := ""
+	if s.Status == session.StatusRunning && pending[s.TmuxWindow] {
+		activity = "pending"
+	}
+	return gui.SessionItem{
+		ID:         s.ID,
+		Name:       s.Name,
+		Path:       s.Path,
+		Host:       s.Host,
+		Status:     s.Status.String(),
+		Flags:      s.Flags,
+		TmuxWindow: s.TmuxWindow,
+		Activity:   activity,
+		Role:       string(s.Role),
+	}
+}
+
+// buildSessionItems converts session.Session slice to gui.SessionItem slice.
 func buildSessionItems(sessions []session.Session, pending map[string]bool) []gui.SessionItem {
 	items := make([]gui.SessionItem, len(sessions))
 	for i, s := range sessions {
-		activity := ""
-		if s.Status == session.StatusRunning && pending[s.TmuxWindow] {
-			activity = "pending"
-		}
-		items[i] = gui.SessionItem{
-			ID:         s.ID,
-			Name:       s.Name,
-			Path:       s.Path,
-			Host:       s.Host,
-			Status:     s.Status.String(),
-			Flags:      s.Flags,
-			TmuxWindow: s.TmuxWindow,
-			Activity:   activity,
-			Role:       string(s.Role),
-		}
+		items[i] = sessionToItem(s, pending)
 	}
 	return items
 }

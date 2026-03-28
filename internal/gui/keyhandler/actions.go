@@ -26,6 +26,10 @@ type AppActions interface {
 	PurgeOrphans()
 	StartPMSession()
 
+	// Tree operations
+	ToggleProjectExpanded()
+	CursorIsProject() bool
+
 	// Popup
 	DismissPopup(c choice.Choice)
 	DismissAllPopups(c choice.Choice)

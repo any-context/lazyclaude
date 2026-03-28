@@ -113,6 +113,9 @@ func ComputePopupLayout(width, height int) Layout {
 func (a *App) layout(g *gocui.Gui) error {
 	maxX, maxY := g.Size()
 
+	// Rebuild tree nodes once per layout cycle for consistency.
+	a.refreshTreeNodes()
+
 	// Detect terminal resize -> clear preview cache
 	if maxX != a.lastWidth || maxY != a.lastHeight {
 		a.preview.Invalidate()
@@ -160,19 +163,19 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 		v.FrameColor = gocui.ColorDefault
 	}
 	v.Clear()
-	var items []SessionItem
+	var nodes []TreeNode
 	if a.sessions != nil {
-		items = a.sessions.Sessions()
+		nodes = a.treeNodes()
 	}
-	if len(items) > 0 {
-		if a.cursor >= len(items) {
-			a.cursor = len(items) - 1
+	if len(nodes) > 0 {
+		if a.cursor >= len(nodes) {
+			a.cursor = len(nodes) - 1
 		}
 		if a.cursor < 0 {
 			a.cursor = 0
 		}
 	}
-	renderSessionList(v, items, a.cursor)
+	renderTree(v, nodes, a.cursor)
 
 	// Logs view (lower left)
 	v2, err := g.SetView("logs", l.Server.X0, l.Server.Y0, l.Server.X1, l.Server.Y1, 0)
@@ -201,6 +204,11 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 	v3.Clear()
 	previewW := l.Main.Width() - 1
 	previewH := l.Main.Height() - 2
+	// Build flat session items for preview from current tree nodes
+	var items []SessionItem
+	if a.sessions != nil {
+		items = a.sessions.Sessions()
+	}
 	a.renderPreview(v3, items, previewW, previewH)
 
 	// Options bar (bottom, frameless) — dynamic per focused panel
@@ -347,7 +355,9 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 		return
 	}
 
-	if len(items) == 0 || a.cursor >= len(items) {
+	// Resolve current item from tree node
+	node := a.currentNode()
+	if node == nil {
 		v.Title = " Preview "
 		fmt.Fprintln(v, "")
 		fmt.Fprintln(v, presentation.Dim+"  Select a session or press "+
@@ -356,7 +366,21 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 		return
 	}
 
-	item := items[a.cursor]
+	// Project node: show project info, no preview
+	if node.Kind == ProjectNode {
+		v.Title = fmt.Sprintf(" %s ", node.Project.Name)
+		fmt.Fprintln(v, "")
+		fmt.Fprintf(v, "  %s%s%s\n", presentation.Bold, node.Project.Name, presentation.Reset)
+		fmt.Fprintf(v, "  %s%s%s\n", presentation.Dim, node.Project.Path, presentation.Reset)
+		sessCount := len(node.Project.Sessions)
+		if node.Project.PM != nil {
+			sessCount++
+		}
+		fmt.Fprintf(v, "  %s%d session(s)%s\n", presentation.Dim, sessCount, presentation.Reset)
+		return
+	}
+
+	item := *node.Session
 	if session.IsWorktreePath(item.Path) {
 		v.Title = fmt.Sprintf(" [worktree] %s ", item.Name)
 	} else {

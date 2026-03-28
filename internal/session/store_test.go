@@ -212,7 +212,7 @@ func TestStore_SyncWithTmux(t *testing.T) {
 
 func TestStore_BackwardCompat_NoRoleField(t *testing.T) {
 	t.Parallel()
-	// JSON without a "role" field (legacy state.json)
+	// Legacy format (flat []Session) is reset to empty on load
 	legacy := `[{"id":"id-1","name":"my-app","path":"/path","created_at":"2024-01-01T00:00:00Z","updated_at":"2024-01-01T00:00:00Z"}]`
 	dir := t.TempDir()
 	path := filepath.Join(dir, "state.json")
@@ -221,10 +221,9 @@ func TestStore_BackwardCompat_NoRoleField(t *testing.T) {
 	store := session.NewStore(path)
 	require.NoError(t, store.Load())
 
-	all := store.All()
-	require.Len(t, all, 1)
-	// Role must default to RoleNone (empty string) for backward compat
-	assert.Equal(t, session.RoleNone, all[0].Role)
+	// Legacy format should be reset
+	assert.Empty(t, store.All())
+	assert.Empty(t, store.Projects())
 }
 
 func TestStore_RoleRoundTrip(t *testing.T) {
@@ -261,10 +260,17 @@ func TestStore_RoleOmittedWhenNone(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	var raw []map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(data, &raw))
-	require.Len(t, raw, 1)
-	_, hasRole := raw[0]["role"]
+	// New format: {"version":2,"projects":[...]}
+	var sf map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &sf))
+	var projects []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(sf["projects"], &projects))
+	require.Len(t, projects, 1)
+	// Check the session inside the project
+	var sessions []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(projects[0]["sessions"], &sessions))
+	require.Len(t, sessions, 1)
+	_, hasRole := sessions[0]["role"]
 	assert.False(t, hasRole, "role key should be absent when RoleNone (omitempty)")
 }
 

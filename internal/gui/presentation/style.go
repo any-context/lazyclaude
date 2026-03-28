@@ -45,8 +45,10 @@ const (
 	IconCheck    = "✓"
 	IconDot      = "·"
 	IconSep      = "│"
-	IconWorktree = "\x1b[38;5;214m[W]\x1b[0m" // orange [W] for worktree sessions
-	IconPM       = "\x1b[38;5;141m[PM]\x1b[0m" // purple [PM] for PM sessions
+	IconWorktree        = "\x1b[38;5;214m[W]\x1b[0m"  // orange [W] for worktree sessions
+	IconPM              = "\x1b[38;5;141m[PM]\x1b[0m" // purple [PM] for PM sessions
+	IconProjectExpanded = "\x1b[1m\xe2\x96\xbc\x1b[0m"  // bold ▼ for expanded project
+	IconProjectCollapsed = "\x1b[1m\xe2\x96\xb6\x1b[0m" // bold ▶ for collapsed project
 )
 
 // StyledKey renders a keybinding hint: key in bold, description in dim.

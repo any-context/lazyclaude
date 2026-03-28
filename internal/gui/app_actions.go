@@ -17,13 +17,66 @@ var _ keyhandler.AppActions = (*App)(nil)
 func (a *App) HasPopup() bool    { return a.hasPopup() }
 func (a *App) IsFullScreen() bool { return a.fullscreen.IsActive() }
 
+// --- Tree helpers ---
+
+// refreshTreeNodes rebuilds the flat tree node list from projects.
+// Called once per layout cycle to ensure consistency within a render pass.
+func (a *App) refreshTreeNodes() {
+	if a.sessions == nil {
+		a.cachedNodes = nil
+		return
+	}
+	a.cachedNodes = BuildTreeNodes(a.sessions.Projects())
+}
+
+// treeNodes returns the cached flat tree node list.
+func (a *App) treeNodes() []TreeNode {
+	return a.cachedNodes
+}
+
+// currentNode returns the tree node at the cursor, or nil if out of bounds.
+func (a *App) currentNode() *TreeNode {
+	nodes := a.cachedNodes
+	if a.cursor < 0 || a.cursor >= len(nodes) {
+		return nil
+	}
+	return &nodes[a.cursor]
+}
+
+// currentSession returns the session at the cursor, or nil if cursor is on a project.
+func (a *App) currentSession() *SessionItem {
+	node := a.currentNode()
+	if node == nil || node.Kind != SessionNode {
+		return nil
+	}
+	return node.Session
+}
+
+// --- Tree operations ---
+
+func (a *App) ToggleProjectExpanded() {
+	node := a.currentNode()
+	if node == nil || node.Kind != ProjectNode {
+		return
+	}
+	a.sessions.ToggleProjectExpanded(node.ProjectID)
+	// Rebuild cache immediately so cursor bounds are correct.
+	a.refreshTreeNodes()
+}
+
+func (a *App) CursorIsProject() bool {
+	node := a.currentNode()
+	return node != nil && node.Kind == ProjectNode
+}
+
 // --- Session cursor ---
 
 func (a *App) MoveCursorDown() {
 	if a.sessions == nil {
 		return
 	}
-	if a.cursor < len(a.sessions.Sessions())-1 {
+	nodes := a.treeNodes()
+	if a.cursor < len(nodes)-1 {
 		a.cursor++
 	}
 }
@@ -64,18 +117,19 @@ func (a *App) DeleteSession() {
 	if a.sessions == nil {
 		return
 	}
-	items := a.sessions.Sessions()
-	if a.cursor < 0 || a.cursor >= len(items) {
+	sess := a.currentSession()
+	if sess == nil {
 		return
 	}
-	if err := a.sessions.Delete(items[a.cursor].ID); err != nil {
+	if err := a.sessions.Delete(sess.ID); err != nil {
 		a.gui.Update(func(g *gocui.Gui) error {
 			a.setStatus(g, fmt.Sprintf("Error: %v", err))
 			return nil
 		})
 		return
 	}
-	if a.cursor > 0 && a.cursor >= len(a.sessions.Sessions()) {
+	nodes := a.treeNodes()
+	if a.cursor > 0 && a.cursor >= len(nodes) {
 		a.cursor--
 	}
 	a.gui.Update(func(g *gocui.Gui) error {
@@ -88,11 +142,11 @@ func (a *App) LaunchLazygit() {
 	if a.sessions == nil {
 		return
 	}
-	items := a.sessions.Sessions()
-	if a.cursor < 0 || a.cursor >= len(items) {
+	s := a.currentSession()
+	if s == nil {
 		return
 	}
-	sess := items[a.cursor]
+	sess := *s
 	g := a.gui
 	if err := g.Suspend(); err != nil {
 		a.gui.Update(func(g *gocui.Gui) error {
@@ -117,8 +171,8 @@ func (a *App) AttachSession() {
 	if a.sessions == nil {
 		return
 	}
-	items := a.sessions.Sessions()
-	if a.cursor < 0 || a.cursor >= len(items) {
+	sess := a.currentSession()
+	if sess == nil {
 		return
 	}
 	g := a.gui
@@ -129,7 +183,7 @@ func (a *App) AttachSession() {
 		})
 		return
 	}
-	attachErr := a.sessions.AttachSession(items[a.cursor].ID)
+	attachErr := a.sessions.AttachSession(sess.ID)
 	if err := g.Resume(); err != nil {
 		return
 	}
@@ -145,23 +199,25 @@ func (a *App) EnterFullScreen() {
 	if a.sessions == nil {
 		return
 	}
-	items := a.sessions.Sessions()
-	if a.cursor >= 0 && a.cursor < len(items) {
-		a.enterFullScreen(items[a.cursor].ID)
+	sess := a.currentSession()
+	if sess == nil {
+		return
 	}
+	a.enterFullScreen(sess.ID)
 }
 
 func (a *App) StartRename() {
 	if a.sessions == nil || a.dialog.RenameID != "" {
 		return
 	}
-	items := a.sessions.Sessions()
-	if a.cursor < 0 || a.cursor >= len(items) {
+	sess := a.currentSession()
+	if sess == nil {
 		return
 	}
-	a.dialog.RenameID = items[a.cursor].ID
+	a.dialog.RenameID = sess.ID
+	name := sess.Name
 	a.gui.Update(func(g *gocui.Gui) error {
-		if !a.showRenameInput(g, items[a.cursor].Name) {
+		if !a.showRenameInput(g, name) {
 			a.dialog.RenameID = ""
 		}
 		return nil
