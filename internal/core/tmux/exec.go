@@ -268,7 +268,9 @@ func (c *ExecClient) ResizeWindow(ctx context.Context, target string, width, hei
 func (c *ExecClient) ListPanes(ctx context.Context, session string) ([]PaneInfo, error) {
 	args := []string{"list-panes", "-F", "#{pane_id}\t#{window_id}\t#{pane_pid}\t#{pane_dead}"}
 	if session != "" {
-		args = append(args, "-t", session)
+		// -s lists panes across ALL windows in the session.
+		// Without -s, -t targets only the active window.
+		args = append(args, "-s", "-t", session)
 	} else {
 		args = append(args, "-a")
 	}
