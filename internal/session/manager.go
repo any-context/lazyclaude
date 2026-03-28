@@ -186,14 +186,7 @@ func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, e
 	if err != nil {
 		return nil, fmt.Errorf("resolve path %q: %w", sess.Path, err)
 	}
-	m.log.Debug("create.tmux", "exists", exists, "window", windowName, "cmd", claudeCmd, "dir", absPath)
-	// Always log SSH commands to server log for debugging pane-is-dead issues.
-	if host != "" {
-		if f, err := os.OpenFile("/tmp/lazyclaude/server.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
-			fmt.Fprintf(f, "[create] host=%s cmd=%s\n", host, claudeCmd)
-			f.Close()
-		}
-	}
+	m.log.Debug("create.tmux", "exists", exists, "window", windowName, "dir", absPath)
 
 	env := claudeEnv()
 	width, height := termSize()
