@@ -157,10 +157,12 @@ func newRootCmd() *cobra.Command {
 // event delivery. Returns the server if started successfully, or nil when an
 // external server is already alive (the caller should fall back to ensureMCPServer).
 func tryStartInProcessServer(paths config.Paths, tmuxClient tmux.Client, tmuxSocket string, logger *slog.Logger) *server.Server {
-	// If an external server is already alive, do not start a second one.
-	// Only check health — do NOT call EnsureServer which would spawn a subprocess.
+	// If an external daemon is already alive, stop it so we can start an
+	// in-process server with a wired notify broker.
 	if server.IsAlive(paths.PortFile()) {
-		return nil
+		server.StopDaemon(paths.PortFile())
+		// Give the daemon a moment to release the port file and socket.
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	token, err := generateToken()

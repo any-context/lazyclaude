@@ -39,6 +39,21 @@ func RestartServer(opts EnsureOpts) (EnsureResult, error) {
 	return startServer(opts)
 }
 
+// StopDaemon reads the port file, kills the running daemon, and removes
+// the port file so a new server can bind. It is a no-op if no server is running.
+func StopDaemon(portFile string) {
+	data, err := os.ReadFile(portFile)
+	if err != nil {
+		return
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || port <= 0 {
+		return
+	}
+	killServerOnPort(port)
+	os.Remove(portFile)
+}
+
 // killServerOnPort finds and kills the server process listening on the given port.
 func killServerOnPort(port int) {
 	// Find PID from lock file
