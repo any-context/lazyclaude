@@ -75,6 +75,13 @@ func (b *Broker[T]) Publish(event T) {
 	}
 }
 
+// HasSubscribers returns true if at least one active subscriber exists.
+func (b *Broker[T]) HasSubscribers() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.subs) > 0
+}
+
 // Close shuts the broker down and closes every subscriber channel.
 // Subsequent calls to Close are no-ops.
 func (b *Broker[T]) Close() {

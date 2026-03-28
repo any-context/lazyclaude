@@ -31,6 +31,7 @@ type Config struct {
 	IDEDir     string // lock files directory
 	PortFile   string // path to write the listening port
 	RuntimeDir string // choice files directory
+	TmuxSocket string // lazyclaude tmux socket name (e.g., "lazyclaude")
 }
 
 // Server is the MCP WebSocket + HTTP server.
@@ -67,7 +68,7 @@ func New(cfg Config, tmuxClient tmux.Client, logger *log.Logger) *Server {
 		parts := strings.SplitN(hostSocket, ",", 2)
 		hostTmux = tmux.NewExecClientWithSocket(parts[0])
 	}
-	popupOrch := tmuxadapter.NewPopupOrchestrator(cfg.BinaryPath, cfg.RuntimeDir, tmuxClient, hostTmux, logger)
+	popupOrch := tmuxadapter.NewPopupOrchestrator(cfg.BinaryPath, cfg.TmuxSocket, cfg.RuntimeDir, tmuxClient, hostTmux, logger)
 	handler.SetPopup(popupOrch)
 
 	s := &Server{
@@ -102,6 +103,11 @@ func (s *Server) Start(ctx context.Context) (int, error) {
 
 	port := ln.Addr().(*net.TCPAddr).Port
 	s.config.Port = port
+
+	// Clean stale lock files from crashed servers before writing our own.
+	if n := s.lock.CleanStale(); n > 0 {
+		s.log.Printf("cleaned %d stale lock file(s)", n)
+	}
 
 	// Write lock file
 	if err := s.lock.Write(port, s.config.Token); err != nil {
@@ -392,8 +398,8 @@ func (s *Server) resolveToolInfo(window string, req notifyRequest) (toolName, in
 	return toolName, input, cwd
 }
 
-// dispatchToolNotification builds a ToolNotification, enqueues it to disk,
-// publishes it to the in-process broker, and spawns a tmux display-popup.
+// dispatchToolNotification builds a ToolNotification and delivers it via
+// the appropriate single path: broker (TUI in-process) or display-popup (daemon).
 func (s *Server) dispatchToolNotification(window, toolName, input, cwd string) {
 	// Detect max option from Claude's permission dialog.
 	// Use bare window ID (e.g., "@1") — tmux resolves it across sessions.
@@ -402,7 +408,6 @@ func (s *Server) dispatchToolNotification(window, toolName, input, cwd string) {
 		maxOpt = tmuxadapter.DetectMaxOption(content)
 	}
 
-	// Write notification file for TUI overlay fallback (SSH remote compat).
 	n := model.ToolNotification{
 		ToolName:  toolName,
 		Input:     input,
@@ -411,21 +416,26 @@ func (s *Server) dispatchToolNotification(window, toolName, input, cwd string) {
 		Timestamp: time.Now(),
 		MaxOption: maxOpt,
 	}
-	if err := notify.Enqueue(s.config.RuntimeDir, n); err != nil {
-		s.log.Printf("notify: write notification: %v", err)
+
+	// NOTE: HasSubscribers() and Publish() acquire separate locks, so a
+	// subscriber could Cancel() between the check and the Publish(). In that
+	// narrow window the event is silently dropped. This is acceptable because
+	// (a) it only happens during TUI shutdown, and (b) Publish is non-blocking
+	// by design — a dropped event during shutdown has no user impact.
+	if s.notifyBroker.HasSubscribers() {
+		// TUI is in-process and subscribed — broker delivers directly.
+		// No display-popup needed (TUI handles overlay in both normal and fullscreen).
+		// No disk enqueue needed (broker bypasses file polling).
+		s.notifyBroker.Publish(model.Event{Notification: &n})
+		s.log.Printf("notify: delivered via broker for window %s", window)
+	} else {
+		// No TUI subscriber — daemon mode or TUI not running.
+		// Enqueue to disk (SSH remote compat) and spawn display-popup.
+		if err := notify.Enqueue(s.config.RuntimeDir, n); err != nil {
+			s.log.Printf("notify: write notification: %v", err)
+		}
+		s.popupOrch.SpawnToolPopup(context.Background(), window, toolName, input, cwd)
 	}
-
-	// Publish to in-process broker for fast local GUI notification.
-	// Non-blocking: if no subscriber is ready, the event is dropped.
-	s.notifyBroker.Publish(model.Event{Notification: &n})
-
-	// Spawn tmux display-popup only if TUI is NOT open.
-	// If TUI is open (lock file exists), it handles popups via overlay.
-	// If TUI is closed, server shows display-popup on user's tmux.
-	// Always spawn popup. PopupOrchestrator decides which tmux to use:
-	// - TUI closed → hostTmux (user's tmux display-popup)
-	// - TUI open but suspended (fullscreen) → lazyclaude tmux display-popup
-	s.popupOrch.SpawnToolPopup(context.Background(), window, toolName, input, cwd)
 }
 
 func (s *Server) writePortFile(port int) error {

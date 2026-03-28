@@ -206,8 +206,10 @@ func TestMsgSend_PushDelivery_RecipientNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
-// TestMsgSend_PushDelivery_RecipientNotRunning returns 502 when recipient is not running.
-func TestMsgSend_PushDelivery_RecipientNotRunning(t *testing.T) {
+// TestMsgSend_PushDelivery_DeadSessionStillAttempts verifies that /msg/send
+// does not reject based on status alone — it tries tmux delivery regardless.
+// If the pane is truly dead, tmux send-keys will fail and return 502.
+func TestMsgSend_PushDelivery_DeadSessionStillAttempts(t *testing.T) {
 	t.Parallel()
 
 	sessions := []server.SessionInfo{
@@ -223,7 +225,8 @@ func TestMsgSend_PushDelivery_RecipientNotRunning(t *testing.T) {
 		"body": "LGTM",
 	})
 	defer resp.Body.Close()
-	assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
+	// MockClient.SendKeysLiteral succeeds → delivery succeeds even with status="Dead".
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 // TestMsgSend_PushDelivery_PasteError returns 502 when PasteToPane fails.

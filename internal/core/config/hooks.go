@@ -10,13 +10,25 @@ import (
 // Hook marker: commands containing this path are identified as lazyclaude hooks.
 const hookMarker = "/notify"
 
+// findAliveLockJS is shared JavaScript that reads all lock files, validates PID
+// liveness via process.kill(pid, 0), and picks the highest port (most recent).
+// Sets `best` to {lock, port} or null if no alive server found.
+const findAliveLockJS = `const fs=require('fs'),path=require('path'),home=require('os').homedir();` +
+	`const lockDir=path.join(home,'.claude','ide');` +
+	`const locks=fs.readdirSync(lockDir).filter(f=>f.endsWith('.lock'));` +
+	`let best=null;for(const f of locks){try{` +
+	`const lk=JSON.parse(fs.readFileSync(path.join(lockDir,f),'utf8'));` +
+	`const p=parseInt(f,10);` +
+	`try{process.kill(lk.pid,0);if(!best||p>best.port)best={lock:lk,port:p};}catch{}` +
+	`}catch{}}`
+
 // preToolUseHookCommand is the node one-liner for PreToolUse hooks.
-// Reads tool info from stdin, posts to /notify with type=tool_info.
-const preToolUseHookCommand = `node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const i=JSON.parse(d),fs=require('fs'),path=require('path'),http=require('http'),home=require('os').homedir();const lockDir=path.join(home,'.claude','ide');const locks=fs.readdirSync(lockDir).filter(f=>f.endsWith('.lock'));if(locks.length){const lock=JSON.parse(fs.readFileSync(path.join(lockDir,locks[0]),'utf8'));const port=parseInt(locks[0],10);const body=JSON.stringify({type:'tool_info',pid:process.ppid,tool_name:i.tool_name||'',tool_input:i.tool_input||{}});const req=http.request({hostname:'127.0.0.1',port,path:'/notify',method:'POST',timeout:300,headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body),'X-Claude-Code-Ide-Authorization':lock.authToken}});req.on('error',()=>{});req.on('timeout',()=>{req.destroy()});req.write(body);req.end();}}catch{}console.log(d);})"`
+// Validates lock PID liveness and picks the most recent server.
+const preToolUseHookCommand = `node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const i=JSON.parse(d);const http=require('http');` + findAliveLockJS + `if(!best){console.log(d);return;}const body=JSON.stringify({type:'tool_info',pid:process.ppid,tool_name:i.tool_name||'',tool_input:i.tool_input||{}});const req=http.request({hostname:'127.0.0.1',port:best.port,path:'/notify',method:'POST',timeout:300,headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body),'X-Claude-Code-Ide-Authorization':best.lock.authToken}});req.on('error',()=>{});req.on('timeout',()=>{req.destroy()});req.write(body);req.end();}catch{}console.log(d);})"` //nolint:lll
 
 // notificationHookCommand is the node one-liner for Notification hooks.
-// Reads notification from stdin, posts permission_prompt events to /notify.
-const notificationHookCommand = `node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const i=JSON.parse(d);if(i.notification_type!=='permission_prompt')return;const fs=require('fs'),path=require('path'),http=require('http'),home=require('os').homedir();const lockDir=path.join(home,'.claude','ide');const locks=fs.readdirSync(lockDir).filter(f=>f.endsWith('.lock'));if(!locks.length)return;const lock=JSON.parse(fs.readFileSync(path.join(lockDir,locks[0]),'utf8'));const port=parseInt(locks[0],10);const body=JSON.stringify({pid:process.ppid,tool_name:i.tool_name||'',tool_input:i.tool_input||{},message:i.message||''});const req=http.request({hostname:'127.0.0.1',port,path:'/notify',method:'POST',timeout:2000,headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body),'X-Claude-Code-Ide-Authorization':lock.authToken}});req.on('error',()=>{});req.on('timeout',()=>{req.destroy()});req.write(body);req.end();}catch{}})"` //nolint:lll
+// Validates lock PID liveness and picks the most recent server.
+const notificationHookCommand = `node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const i=JSON.parse(d);if(i.notification_type!=='permission_prompt')return;const http=require('http');` + findAliveLockJS + `if(!best)return;const body=JSON.stringify({pid:process.ppid,tool_name:i.tool_name||'',tool_input:i.tool_input||{},message:i.message||''});const req=http.request({hostname:'127.0.0.1',port:best.port,path:'/notify',method:'POST',timeout:2000,headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body),'X-Claude-Code-Ide-Authorization':best.lock.authToken}});req.on('error',()=>{});req.on('timeout',()=>{req.destroy()});req.write(body);req.end();}catch{}})"` //nolint:lll
 
 // ReadClaudeSettings reads ~/.claude/settings.json.
 // Returns empty map if file does not exist.

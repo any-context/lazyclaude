@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/KEMSHlM/lazyclaude/internal/core/config"
@@ -133,6 +134,28 @@ func TestWriteClaudeSettings(t *testing.T) {
 	var read map[string]any
 	require.NoError(t, json.Unmarshal(data, &read))
 	assert.Equal(t, "bar", read["foo"])
+}
+
+// TestHookCommand_ValidatesLockPID verifies that hook commands check PID liveness
+// before using a lock file, preventing connection to stale/dead servers.
+func TestHookCommand_ValidatesLockPID(t *testing.T) {
+	t.Parallel()
+	settings := config.SetLazyClaudeHooks(map[string]any{})
+	hooks := settings["hooks"].(map[string]any)
+
+	for _, hookType := range []string{"PreToolUse", "Notification"} {
+		entries := hooks[hookType].([]any)
+		entry := entries[0].(map[string]any)
+		hookList := entry["hooks"].([]any)
+		hook := hookList[0].(map[string]any)
+		cmd := hook["command"].(string)
+
+		// Hook must validate PID of lock file owner before using it.
+		// process.kill(pid, 0) is the Node.js way to check PID liveness.
+		if !strings.Contains(cmd, "process.kill") && !strings.Contains(cmd, "kill(") {
+			t.Errorf("%s hook must validate lock PID liveness (process.kill(pid, 0))", hookType)
+		}
+	}
 }
 
 func TestSetLazyClaudeHooks_Roundtrip(t *testing.T) {

@@ -333,6 +333,41 @@ func TestBroker_ZeroBufferSize(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// TestBroker_HasSubscribers — tracks active subscriber count correctly
+// ---------------------------------------------------------------------------
+
+func TestBroker_HasSubscribers(t *testing.T) {
+	t.Parallel()
+
+	b := event.NewBroker[int]()
+	defer b.Close()
+
+	assert.False(t, b.HasSubscribers(), "no subscribers initially")
+
+	sub1 := b.Subscribe(4)
+	assert.True(t, b.HasSubscribers(), "true after first subscribe")
+
+	sub2 := b.Subscribe(4)
+	assert.True(t, b.HasSubscribers(), "true with two subscribers")
+
+	sub1.Cancel()
+	assert.True(t, b.HasSubscribers(), "true with one remaining subscriber")
+
+	sub2.Cancel()
+	assert.False(t, b.HasSubscribers(), "false after all cancelled")
+}
+
+func TestBroker_HasSubscribers_AfterClose(t *testing.T) {
+	t.Parallel()
+
+	b := event.NewBroker[int]()
+	_ = b.Subscribe(4)
+	b.Close()
+
+	assert.False(t, b.HasSubscribers(), "false after broker closed")
+}
+
+// ---------------------------------------------------------------------------
 // Benchmark
 // ---------------------------------------------------------------------------
 

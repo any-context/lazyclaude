@@ -34,7 +34,7 @@ func TestHandler_OpenDiff_WithPopup_StoresDiffChoice(t *testing.T) {
 
 	// Create popup orchestrator with mock tmux client.
 	// MockClient.DisplayPopup returns immediately (simulates popup close).
-	orch := tmuxadapter.NewPopupOrchestrator("lazyclaude", os.TempDir(), mock, nil, logger)
+	orch := tmuxadapter.NewPopupOrchestrator("lazyclaude", "lazyclaude", os.TempDir(), mock, nil, logger)
 	handler.SetPopup(orch)
 
 	// Pre-write the choice file that `lazyclaude diff` would write on exit.
@@ -79,7 +79,7 @@ func TestHandler_OpenDiff_WithPopup_RejectChoice(t *testing.T) {
 	tmpDir := t.TempDir()
 	handler.SetRuntimeDir(tmpDir)
 
-	orch := tmuxadapter.NewPopupOrchestrator("lazyclaude", os.TempDir(), mock, nil, logger)
+	orch := tmuxadapter.NewPopupOrchestrator("lazyclaude", "lazyclaude", os.TempDir(), mock, nil, logger)
 	handler.SetPopup(orch)
 
 	paths := config.Paths{RuntimeDir: tmpDir}
@@ -115,7 +115,7 @@ func TestHandler_OpenDiff_WithPopup_CancelNotStored(t *testing.T) {
 	tmpDir := t.TempDir()
 	handler.SetRuntimeDir(tmpDir)
 
-	orch := tmuxadapter.NewPopupOrchestrator("lazyclaude", os.TempDir(), mock, nil, logger)
+	orch := tmuxadapter.NewPopupOrchestrator("lazyclaude", "lazyclaude", os.TempDir(), mock, nil, logger)
 	handler.SetPopup(orch)
 
 	// Write Cancel choice (user pressed Esc)

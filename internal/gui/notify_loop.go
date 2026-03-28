@@ -52,6 +52,12 @@ func (nl *NotifyLoop) BrokerCh() <-chan model.Event {
 	return nl.brokerSub.Ch()
 }
 
+// HasBroker returns true if an event broker is wired for direct delivery.
+// When true, file-based polling is redundant and should be skipped.
+func (nl *NotifyLoop) HasBroker() bool {
+	return nl.brokerSub != nil
+}
+
 // SetOnTick sets a callback invoked every ticker cycle.
 func (nl *NotifyLoop) SetOnTick(fn func()) {
 	nl.onTick = fn

@@ -2,8 +2,6 @@ package gui
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -237,12 +235,6 @@ func (a *App) initDispatcher() {
 func (a *App) Run() error {
 	defer a.gui.Close()
 
-	// TUI lock file: signals to MCP server that TUI is open.
-	// Server skips display-popup when this file exists.
-	tuiLock := filepath.Join(os.TempDir(), "lazyclaude-tui.lock")
-	os.WriteFile(tuiLock, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
-	defer os.Remove(tuiLock)
-
 	// Serial key forwarder: preserves keystroke order (critical for IME input).
 	done := make(chan struct{})
 	go a.fullscreen.RunKeyForwarder(done)
@@ -284,7 +276,9 @@ func (a *App) Run() error {
 			case <-ticker.C:
 				a.notify.OnTick()
 				a.gui.Update(func(g *gocui.Gui) error {
-					if a.sessions != nil {
+					// When broker is wired (in-process server), notifications
+					// arrive via brokerCh — skip file polling to avoid duplicates.
+					if a.sessions != nil && !a.notify.HasBroker() {
 						for _, n := range a.sessions.PendingNotifications() {
 							a.showToolPopup(n)
 						}

@@ -38,14 +38,6 @@ func newServerCmd() *cobra.Command {
 			if b := os.Getenv("LAZYCLAUDE_POPUP_BINARY"); b != "" {
 				binaryPath = b
 			}
-			cfg := server.Config{
-				Port:       port,
-				Token:      token,
-				BinaryPath: binaryPath,
-				IDEDir:     paths.IDEDir,
-				PortFile:   paths.PortFile(),
-				RuntimeDir: paths.RuntimeDir,
-			}
 
 			logger := log.New(os.Stderr, "lazyclaude: ", log.LstdFlags)
 			tmuxSocket := "lazyclaude"
@@ -53,6 +45,16 @@ func newServerCmd() *cobra.Command {
 				tmuxSocket = s
 			}
 			tmuxClient := tmux.NewExecClientWithSocket(tmuxSocket)
+
+			cfg := server.Config{
+				Port:       port,
+				Token:      token,
+				BinaryPath: binaryPath,
+				IDEDir:     paths.IDEDir,
+				PortFile:   paths.PortFile(),
+				RuntimeDir: paths.RuntimeDir,
+				TmuxSocket: tmuxSocket,
+			}
 			srv := server.New(cfg, tmuxClient, logger)
 
 			ctx, cancel := context.WithCancel(context.Background())

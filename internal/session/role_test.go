@@ -60,8 +60,6 @@ func TestBuildPMPrompt_ContainsRequiredFields(t *testing.T) {
 		desc    string
 		snippet string
 	}{
-		{"port", "9876"},
-		{"token", "tok-secret"},
 		{"sessionID", "sess-abc123"},
 		{"worker list", "worker-1, worker-2"},
 		{"send endpoint", "/msg/send"},
@@ -74,7 +72,7 @@ func TestBuildPMPrompt_ContainsRequiredFields(t *testing.T) {
 		{"push delivery notice", "delivered directly"},
 		{"port file path", "/tmp/lazyclaude-mcp.port"},
 		{"ide dir path", "/home/user/.claude/ide"},
-		{"connection recovery", "Connection Recovery"},
+		{"dynamic discovery", "$PORT"},
 	}
 	for _, tc := range cases {
 		if !strings.Contains(prompt, tc.snippet) {
@@ -94,8 +92,8 @@ func TestBuildPMPrompt_NoPollInstructions(t *testing.T) {
 func TestBuildPMPrompt_EmptyWorkerList(t *testing.T) {
 	t.Parallel()
 	prompt := session.BuildPMPrompt("sess-xyz", 8080, "tok-abc", "", "/tmp/mcp.port", "/tmp/ide")
-	if !strings.Contains(prompt, "8080") {
-		t.Error("BuildPMPrompt with empty worker list should still contain port")
+	if !strings.Contains(prompt, "$PORT") {
+		t.Error("BuildPMPrompt with empty worker list should still contain $PORT")
 	}
 }
 
@@ -117,8 +115,6 @@ func TestBuildWorkerPrompt_ContainsRequiredFields(t *testing.T) {
 	}{
 		{"worktree path", "/project/.claude/worktrees/feat-x"},
 		{"project root", "/project"},
-		{"port", "9876"},
-		{"token", "tok-secret"},
 		{"sessionID", "sess-worker-99"},
 		{"send endpoint", "/msg/send"},
 		{"sessions endpoint", "/msg/sessions"},
@@ -129,7 +125,7 @@ func TestBuildWorkerPrompt_ContainsRequiredFields(t *testing.T) {
 		{"push delivery notice", "delivered directly"},
 		{"port file path", "/tmp/lazyclaude-mcp.port"},
 		{"ide dir path", "/home/user/.claude/ide"},
-		{"connection recovery", "Connection Recovery"},
+		{"dynamic discovery", "$PORT"},
 	}
 	for _, tc := range cases {
 		if !strings.Contains(prompt, tc.snippet) {
@@ -166,6 +162,66 @@ func TestBuildWorkerPrompt_PathIsolation(t *testing.T) {
 	}
 	if !strings.Contains(prompt, root) {
 		t.Errorf("BuildWorkerPrompt missing project root %q", root)
+	}
+}
+
+// TestBuildWorkerPrompt_DynamicDiscovery verifies that curl commands use
+// dynamic port/token discovery (cat portFile + python3 lockFile) instead of
+// hardcoded values. This prevents stale connection after server restart.
+func TestBuildWorkerPrompt_DynamicDiscovery(t *testing.T) {
+	t.Parallel()
+	prompt := session.BuildWorkerPrompt(
+		"/project/.claude/worktrees/feat-x",
+		"/project",
+		"sess-worker-99",
+		9876,
+		"tok-secret",
+		"/tmp/lazyclaude-mcp.port",
+		"/home/user/.claude/ide",
+	)
+
+	// The prompt must NOT contain hardcoded "localhost:9876" — all curl
+	// commands must use $PORT for dynamic server discovery.
+	if strings.Contains(prompt, "localhost:9876") {
+		t.Error("prompt must not contain hardcoded localhost:9876; curl should use $PORT")
+	}
+
+	// The prompt must NOT contain "X-Auth-Token: tok-secret" — all curl
+	// commands must use $TOKEN for dynamic token discovery.
+	if strings.Contains(prompt, "Token: tok-secret") {
+		t.Error("prompt must not contain hardcoded token in curl; should use $TOKEN")
+	}
+
+	// Must use $PORT and $TOKEN variables in curl commands
+	if !strings.Contains(prompt, "$PORT") {
+		t.Error("prompt must contain $PORT variable for dynamic port")
+	}
+	if !strings.Contains(prompt, "$TOKEN") {
+		t.Error("prompt must contain $TOKEN variable for dynamic token")
+	}
+
+	// Must contain dynamic discovery commands using portFile and ideDir
+	if !strings.Contains(prompt, "$(cat") {
+		t.Error("prompt must contain $(cat ...) for dynamic port discovery")
+	}
+}
+
+// TestBuildPMPrompt_DynamicDiscovery verifies PM prompt also uses dynamic discovery.
+func TestBuildPMPrompt_DynamicDiscovery(t *testing.T) {
+	t.Parallel()
+	prompt := session.BuildPMPrompt("sess-pm", 9876, "tok-secret", "", "/tmp/lazyclaude-mcp.port", "/home/user/.claude/ide")
+
+	if strings.Contains(prompt, "localhost:9876") {
+		t.Error("prompt must not contain hardcoded localhost:9876; curl should use $PORT")
+	}
+	if strings.Contains(prompt, "Token: tok-secret") {
+		t.Error("prompt must not contain hardcoded token in curl; should use $TOKEN")
+	}
+	if !strings.Contains(prompt, "$PORT") {
+		t.Error("prompt must contain $PORT variable")
+	}
+	if !strings.Contains(prompt, "$TOKEN") {
+		t.Error("prompt must contain $TOKEN variable")
 	}
 }
 

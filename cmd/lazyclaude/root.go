@@ -86,7 +86,7 @@ func newRootCmd() *cobra.Command {
 			// directly to the GUI for immediate popup delivery (no 100ms poll delay).
 			// Falls back to a subprocess if the server is already running as a daemon.
 			var notifyBroker *event.Broker[model.Event]
-			inProcessSrv := tryStartInProcessServer(paths, tmuxClient, logger)
+			inProcessSrv := tryStartInProcessServer(paths, tmuxClient, tmuxSocket, logger)
 			if inProcessSrv != nil {
 				notifyBroker = inProcessSrv.NotifyBroker()
 				inProcessSrv.SetSessionLister(&sessionListerAdapter{mgr: mgr})
@@ -156,7 +156,7 @@ func newRootCmd() *cobra.Command {
 // process so the notify broker can be wired directly to the GUI for immediate
 // event delivery. Returns the server if started successfully, or nil when an
 // external server is already alive (the caller should fall back to ensureMCPServer).
-func tryStartInProcessServer(paths config.Paths, tmuxClient tmux.Client, logger *slog.Logger) *server.Server {
+func tryStartInProcessServer(paths config.Paths, tmuxClient tmux.Client, tmuxSocket string, logger *slog.Logger) *server.Server {
 	// If an external server is already alive, do not start a second one.
 	// Only check health — do NOT call EnsureServer which would spawn a subprocess.
 	if server.IsAlive(paths.PortFile()) {
@@ -189,6 +189,7 @@ func tryStartInProcessServer(paths config.Paths, tmuxClient tmux.Client, logger 
 		IDEDir:     paths.IDEDir,
 		PortFile:   paths.PortFile(),
 		RuntimeDir: paths.RuntimeDir,
+		TmuxSocket: tmuxSocket,
 	}
 
 	srv := server.New(cfg, tmuxClient, srvLogger)

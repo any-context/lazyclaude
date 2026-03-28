@@ -100,12 +100,25 @@ func (s *Server) handleMsgSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if recipient.Status != "Running" {
-		http.Error(w, "recipient session is not running", http.StatusBadGateway)
-		return
+	// Resolve tmux window: prefer stored value, fall back to tmux query.
+	// This avoids dependence on status detection being correct.
+	window := recipient.Window
+	if window == "" {
+		// Compute window name from session ID and look it up directly in tmux.
+		wName := "lc-" + recipient.ID
+		if len(recipient.ID) > 8 {
+			wName = "lc-" + recipient.ID[:8]
+		}
+		if windows, err := s.tmux.ListWindows(context.Background(), "lazyclaude"); err == nil {
+			for _, win := range windows {
+				if win.Name == wName {
+					window = win.ID
+					break
+				}
+			}
+		}
 	}
-
-	if recipient.Window == "" {
+	if window == "" {
 		http.Error(w, "recipient session has no tmux window", http.StatusBadGateway)
 		return
 	}
@@ -114,7 +127,9 @@ func (s *Server) handleMsgSend(w http.ResponseWriter, r *http.Request) {
 	text := fmt.Sprintf("[MESSAGE from %s (%s)]\ntype: %s\n---\n%s\n",
 		senderName, req.From, req.Type, req.Body)
 
-	target := "lazyclaude:" + recipient.Window
+	// Deliver directly via tmux send-keys. Let tmux report the error
+	// if the pane doesn't exist — no status pre-check needed.
+	target := "lazyclaude:" + window
 	if err := s.tmux.SendKeysLiteral(context.Background(), target, text); err != nil {
 		s.log.Printf("msg/send: send text to pane %s: %v", target, err)
 		http.Error(w, "failed to deliver message", http.StatusBadGateway)

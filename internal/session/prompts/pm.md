@@ -8,37 +8,40 @@ Session ID: %s
 Messages from Workers are delivered directly to your input.
 You do not need to poll for messages — they arrive automatically.
 
-## Communicating with Workers
+## Server Discovery
 
-Use curl to send messages via the MCP server.
+The MCP server port and token are discovered dynamically from disk.
+This works even after server restart — no hardcoded values.
 
-### Send a review response to a Worker:
-curl -s -X POST -H "X-Auth-Token: %s" \
-  -H "Content-Type: application/json" \
-  -d '{"from":"%s","to":"<worker-session-id>","type":"review_response","body":"<your feedback>"}' \
-  "http://localhost:%d/msg/send"
-
-### List active sessions (to discover Worker IDs):
-curl -s -H "X-Auth-Token: %s" \
-  "http://localhost:%d/msg/sessions"
-
-## Connection Recovery
-
-The port and token above were captured at session creation. If the MCP server
-restarts, they become stale and curl will fail with "Connection refused".
-
-To get the current values:
 ```bash
-PORT=$(cat %s)
+PORT=$(cat %s) && \
 TOKEN=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['authToken'])" "%s/$PORT.lock")
 ```
 
-Then use `$PORT` and `$TOKEN` in the curl commands above.
+## Communicating with Workers
+
+### Send a review response to a Worker:
+```bash
+PORT=$(cat %s) && \
+TOKEN=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['authToken'])" "%s/$PORT.lock") && \
+curl -s -X POST -H "X-Auth-Token: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"from":"%s","to":"<worker-session-id>","type":"review_response","body":"<your feedback>"}' \
+  "http://localhost:$PORT/msg/send"
+```
+
+### List active sessions (to discover Worker IDs):
+```bash
+PORT=$(cat %s) && \
+TOKEN=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['authToken'])" "%s/$PORT.lock") && \
+curl -s -H "X-Auth-Token: $TOKEN" \
+  "http://localhost:$PORT/msg/sessions"
+```
 
 ### Fallback: tmux send-keys
 
-If /msg/send returns "recipient session is not running" (the recipient is
-Detached), bypass the API and paste the message directly into the tmux pane:
+If /msg/send fails (server not running), bypass the API and paste
+the message directly into the tmux pane:
 
 ```bash
 tmux -L lazyclaude send-keys -l -t <window-id> -- "<message text>"

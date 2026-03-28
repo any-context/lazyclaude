@@ -32,6 +32,7 @@ func runSetup() error {
 	if hostTmux := os.Getenv("LAZYCLAUDE_HOST_TMUX"); hostTmux != "" {
 		extraEnv = append(extraEnv, "LAZYCLAUDE_HOST_TMUX="+hostTmux)
 	}
+	extraEnv = append(extraEnv, "LAZYCLAUDE_TMUX_SOCKET=lazyclaude")
 	result, err := server.RestartServer(server.EnsureOpts{
 		Binary:   os.Args[0],
 		PortFile: paths.PortFile(),

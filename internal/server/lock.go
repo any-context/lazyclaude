@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 )
 
 // LockFile represents the contents of an IDE lock file.
@@ -68,6 +69,47 @@ func (m *LockManager) Remove(port int) error {
 func (m *LockManager) Exists(port int) bool {
 	_, err := os.Stat(m.lockPath(port))
 	return err == nil
+}
+
+// CleanStale removes lock files whose PID is no longer alive.
+// Returns the number of removed files.
+func (m *LockManager) CleanStale() int {
+	entries, err := os.ReadDir(m.ideDir)
+	if err != nil {
+		return 0
+	}
+	removed := 0
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".lock" {
+			continue
+		}
+		path := filepath.Join(m.ideDir, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var lock LockFile
+		if err := json.Unmarshal(data, &lock); err != nil {
+			continue
+		}
+		if lock.PID <= 0 {
+			os.Remove(path)
+			removed++
+			continue
+		}
+		proc, err := os.FindProcess(lock.PID)
+		if err != nil {
+			os.Remove(path)
+			removed++
+			continue
+		}
+		// Signal 0 checks if process exists without sending a signal.
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			os.Remove(path)
+			removed++
+		}
+	}
+	return removed
 }
 
 func (m *LockManager) lockPath(port int) string {

@@ -168,9 +168,10 @@ func TestServer_NotifyBroker_MultipleSubscribers(t *testing.T) {
 	}
 }
 
-// TestServer_NotifyBroker_FileQueueStillWritten confirms the file-based queue
-// continues to work alongside the broker (no regression).
-func TestServer_NotifyBroker_FileQueueStillWritten(t *testing.T) {
+// TestServer_NotifyBroker_FileQueueSkippedWhenSubscribed verifies that
+// when a broker subscriber exists, the file queue is NOT written
+// (single-path dispatch: broker handles delivery).
+func TestServer_NotifyBroker_FileQueueSkippedWhenSubscribed(t *testing.T) {
 	t.Parallel()
 	srv, port, _ := startTestServer(t)
 	srv.State().SetConn("c1", &server.ConnState{PID: 8765, Window: "@5"})
@@ -196,9 +197,32 @@ func TestServer_NotifyBroker_FileQueueStillWritten(t *testing.T) {
 		t.Fatal("timed out waiting for broker event")
 	}
 
-	// File queue is also written (fallback path).
+	// File queue must NOT be written when broker has subscribers.
 	ns, err := notify.ReadAll(srv.RuntimeDir())
 	require.NoError(t, err)
-	require.Len(t, ns, 1, "file-based queue must still be written")
-	assert.Equal(t, "Write", ns[0].ToolName)
+	assert.Empty(t, ns, "file queue should be empty when broker has subscribers")
+}
+
+// TestServer_NotifyBroker_FileQueueWrittenWhenNoSubscriber verifies that
+// when no broker subscriber exists, the file queue IS written (daemon mode).
+func TestServer_NotifyBroker_FileQueueWrittenWhenNoSubscriber(t *testing.T) {
+	t.Parallel()
+	srv, port, _ := startTestServer(t)
+	srv.State().SetConn("c1", &server.ConnState{PID: 8766, Window: "@6"})
+
+	// No subscriber — simulates daemon mode.
+	body, _ := json.Marshal(map[string]any{
+		"pid":       8766,
+		"tool_name": "Bash",
+		"input":     `{"command":"ls"}`,
+	})
+	resp := postNotify(t, port, body)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// File queue must be written when no subscriber exists.
+	ns, err := notify.ReadAll(srv.RuntimeDir())
+	require.NoError(t, err)
+	require.Len(t, ns, 1, "file queue must be written when no subscriber")
+	assert.Equal(t, "Bash", ns[0].ToolName)
 }

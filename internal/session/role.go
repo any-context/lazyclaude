@@ -37,15 +37,15 @@ func (r Role) IsValid() bool {
 var pmSystemPrompt string
 
 // BuildPMPrompt generates the system prompt injected into a PM session at launch.
-// It embeds port, authToken, sessionID, and file paths so Claude can call the MCP API
-// and recover connection info dynamically if the server restarts.
+// All curl commands use dynamic server discovery (portFile + ideDir) instead of
+// hardcoded port/token, so they survive MCP server restarts.
 // The template is loaded from prompts/pm.md.
 func BuildPMPrompt(sessionID string, mcpPort int, authToken string, workerList string, portFile string, ideDir string) string {
 	return fmt.Sprintf(pmSystemPrompt,
-		sessionID,                    // Session ID line
-		authToken, sessionID, mcpPort, // send curl: token, from, port
-		authToken, mcpPort, // sessions curl: token, port
-		portFile, ideDir, // connection recovery: port file, IDE dir
+		sessionID,    // Session ID line
+		portFile, ideDir, // Server Discovery section
+		portFile, ideDir, sessionID, // send curl: discovery + from field
+		portFile, ideDir, // sessions curl: discovery
 		workerList,
 	)
 }
@@ -54,19 +54,16 @@ func BuildPMPrompt(sessionID string, mcpPort int, authToken string, workerList s
 var workerRolePrompt string
 
 // BuildWorkerPrompt generates the system prompt injected into a Worker session at launch.
-// It embeds worktree isolation rules, MCP API curl examples, and file paths for
-// dynamic connection recovery if the server restarts.
+// All curl commands use dynamic server discovery (portFile + ideDir) instead of
+// hardcoded port/token, so they survive MCP server restarts.
 // The template is loaded from prompts/worker.md.
 func BuildWorkerPrompt(worktreePath, projectRoot, sessionID string, mcpPort int, authToken string, portFile string, ideDir string) string {
 	return fmt.Sprintf(workerRolePrompt,
 		projectRoot,  // NEVER modify ... must remain untouched
 		worktreePath, // Worktree path line
 		sessionID,    // Session ID line
-		authToken,    // send curl: token
-		sessionID,    // send curl: "from" field
-		mcpPort,      // send curl: port
-		authToken,    // sessions curl: token
-		mcpPort,      // sessions curl: port
-		portFile, ideDir, // connection recovery: port file, IDE dir
+		portFile, ideDir, // Server Discovery section
+		portFile, ideDir, sessionID, // send curl: discovery + from field
+		portFile, ideDir, // sessions curl: discovery
 	)
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"sync"
 	"time"
 
@@ -24,6 +23,7 @@ type toolPopupReq struct {
 // is active at a time per window.
 type PopupOrchestrator struct {
 	binary     string      // path to lazyclaude binary
+	socket     string      // lazyclaude tmux socket name (e.g., "lazyclaude")
 	tmux       tmux.Client // lazyclaude tmux (-L lazyclaude)
 	hostTmux   tmux.Client // user's tmux (for display-popup)
 	runtimeDir string      // for consuming notification files after popup
@@ -35,10 +35,13 @@ type PopupOrchestrator struct {
 }
 
 // NewPopupOrchestrator creates a popup orchestrator.
+// socket is the lazyclaude tmux socket name, passed to popup subprocesses via
+// LAZYCLAUDE_TMUX_SOCKET so they can send keys to the correct tmux server.
 // hostTmux is the user's tmux client (for display-popup). Can be nil if unknown.
-func NewPopupOrchestrator(binary, runtimeDir string, tmuxClient, hostTmux tmux.Client, logger *log.Logger) *PopupOrchestrator {
+func NewPopupOrchestrator(binary, socket, runtimeDir string, tmuxClient, hostTmux tmux.Client, logger *log.Logger) *PopupOrchestrator {
 	return &PopupOrchestrator{
 		binary:     binary,
+		socket:     socket,
 		runtimeDir: runtimeDir,
 		tmux:       tmuxClient,
 		hostTmux:   hostTmux,
@@ -113,8 +116,8 @@ func (p *PopupOrchestrator) spawnToolPopupBlocking(ctx context.Context, req tool
 		"TOOL_INPUT": req.input,
 		"TOOL_CWD":   req.cwd,
 	}
-	if s := os.Getenv("LAZYCLAUDE_TMUX_SOCKET"); s != "" {
-		env["LAZYCLAUDE_TMUX_SOCKET"] = s
+	if p.socket != "" {
+		env["LAZYCLAUDE_TMUX_SOCKET"] = p.socket
 	}
 	opts := tmux.PopupOpts{
 		Width:  w,
@@ -147,8 +150,8 @@ func (p *PopupOrchestrator) SpawnDiffPopup(ctx context.Context, window, oldPath,
 	cmd := fmt.Sprintf("%s diff --window %s --send-keys --old %s --new %s",
 		p.binary, window, oldPath, newContentsFile)
 	env := map[string]string{}
-	if s := os.Getenv("LAZYCLAUDE_TMUX_SOCKET"); s != "" {
-		env["LAZYCLAUDE_TMUX_SOCKET"] = s
+	if p.socket != "" {
+		env["LAZYCLAUDE_TMUX_SOCKET"] = p.socket
 	}
 	opts := tmux.PopupOpts{
 		Width:  80,

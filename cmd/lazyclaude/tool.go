@@ -16,6 +16,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// lazyclaudeTmuxClient returns a tmux client that connects to the lazyclaude
+// tmux server. Uses LAZYCLAUDE_TMUX_SOCKET env var if set, otherwise the default server.
+func lazyclaudeTmuxClient() tmux.Client {
+	if s := os.Getenv("LAZYCLAUDE_TMUX_SOCKET"); s != "" {
+		return tmux.NewExecClientWithSocket(s)
+	}
+	return tmux.NewExecClient()
+}
+
 func newToolCmd() *cobra.Command {
 	var window string
 	var sendKeys bool
@@ -49,10 +58,10 @@ func runToolPopup(window, toolName, toolInput, toolCWD string, sendKeys bool) er
 	td := presentation.ParseToolInput(toolName, toolInput, toolCWD)
 	bodyLines := presentation.FormatToolLines(td)
 
-	// Detect dialog option count from Claude's pane (before rendering our popup)
+	// Detect dialog option count from Claude's pane (before rendering our popup).
 	maxOption := 3
 	if window != "" {
-		client := tmux.NewExecClient()
+		client := lazyclaudeTmuxClient()
 		target := window
 		if !strings.Contains(window, ":") {
 			target = "lazyclaude:" + window
@@ -153,17 +162,12 @@ func runToolPopup(window, toolName, toolInput, toolCWD string, sendKeys bool) er
 	// Consume notification files so TUI doesn't show stale popups on resume.
 	// Skip on Cancel (Esc) — keep files so TUI can show them as pending.
 	if choiceVal != choice.Cancel {
-		notify.ReadAll(os.TempDir())
+		notify.ReadAll(config.DefaultPaths().RuntimeDir)
 	}
 
 	// Send the choice key directly to Claude Code's pane
 	if sendKeys && window != "" && choiceVal != choice.Cancel {
-		var client tmux.Client
-		if s := os.Getenv("LAZYCLAUDE_TMUX_SOCKET"); s != "" {
-			client = tmux.NewExecClientWithSocket(s)
-		} else {
-			client = tmux.NewExecClient()
-		}
+		client := lazyclaudeTmuxClient()
 		if err := tmuxadapter.SendToPane(context.Background(), client, window, choiceVal); err != nil {
 			fmt.Fprintf(os.Stderr, "send-keys: %v\n", err)
 		}

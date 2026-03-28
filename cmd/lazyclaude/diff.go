@@ -10,7 +10,6 @@ import (
 	"github.com/KEMSHlM/lazyclaude/internal/adapter/tmuxadapter"
 	"github.com/KEMSHlM/lazyclaude/internal/core/choice"
 	"github.com/KEMSHlM/lazyclaude/internal/core/config"
-	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 	"github.com/KEMSHlM/lazyclaude/internal/gui/presentation"
 	"github.com/jesseduffield/gocui"
 	"github.com/spf13/cobra"
@@ -40,10 +39,10 @@ func newDiffCmd() *cobra.Command {
 }
 
 func runDiffPopup(window, oldFile, newFile string, sendKeys bool) error {
-	// Detect dialog option count from Claude's pane
+	// Detect dialog option count from Claude's pane.
 	maxOption := 3
 	if window != "" {
-		client := tmux.NewExecClient()
+		client := lazyclaudeTmuxClient()
 		target := window
 		if !strings.Contains(window, ":") {
 			target = "lazyclaude:" + window
@@ -229,12 +228,7 @@ func runDiffPopup(window, oldFile, newFile string, sendKeys bool) error {
 
 	// Send the choice key directly to Claude Code's pane
 	if sendKeys && window != "" && choiceVal != choice.Cancel {
-		var client tmux.Client
-		if s := os.Getenv("LAZYCLAUDE_TMUX_SOCKET"); s != "" {
-			client = tmux.NewExecClientWithSocket(s)
-		} else {
-			client = tmux.NewExecClient()
-		}
+		client := lazyclaudeTmuxClient()
 		if err := tmuxadapter.SendToPane(context.Background(), client, window, choiceVal); err != nil {
 			fmt.Fprintf(os.Stderr, "send-keys: %v\n", err)
 		}
