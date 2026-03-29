@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -297,8 +298,17 @@ func (a *App) SetSessions(sp SessionProvider) {
 }
 
 // SetPlugins sets the plugin provider for the plugins panel.
+// Triggers an async refresh to load initial data.
 func (a *App) SetPlugins(pp PluginProvider) {
 	a.plugins = pp
+	// Load plugin data in background
+	go func() {
+		ctx := context.Background()
+		if err := pp.Refresh(ctx); err != nil {
+			a.pluginState.errMsg = err.Error()
+		}
+		a.gui.Update(func(g *gocui.Gui) error { return nil })
+	}()
 }
 
 // SetInputForwarder sets the input forwarder for full-screen mode.
