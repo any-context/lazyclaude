@@ -94,7 +94,7 @@ func TestManager_Create_RemoteSession(t *testing.T) {
 
 	sess, err := mgr.Create(context.Background(), "/home/user/work", "srv1")
 	require.NoError(t, err)
-	assert.Equal(t, "srv1:work", sess.Name)
+	assert.Equal(t, "work", sess.Name)
 	assert.Equal(t, "srv1", sess.Host)
 
 	// Verify SSH command was passed to tmux
@@ -102,7 +102,7 @@ func TestManager_Create_RemoteSession(t *testing.T) {
 	assert.Contains(t, lastCmd, "ssh")
 	assert.Contains(t, lastCmd, "srv1")
 	assert.Contains(t, lastCmd, "-R")
-	assert.Contains(t, lastCmd, "claude")
+	assert.Contains(t, lastCmd, "base64 -d")
 }
 
 func TestManager_Delete(t *testing.T) {

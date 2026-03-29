@@ -16,6 +16,7 @@ const (
 
 	// 256-color foreground (for finer control)
 	FgPurple  = "\x1b[38;5;141m" // soft purple (crush-inspired primary)
+	FgTeal    = "\x1b[38;5;80m"  // teal accent
 	FgDimGray = "\x1b[38;5;242m" // dim gray for muted text
 )
 

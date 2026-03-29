@@ -23,7 +23,7 @@ func TestWriteRemoteScript_CreatesFile(t *testing.T) {
 	defer os.Remove(path)
 
 	assert.FileExists(t, path)
-	assert.Contains(t, path, "lazyclaude-ssh-")
+	assert.Contains(t, path, "/lazyclaude/ssh-")
 }
 
 func TestWriteRemoteScript_PlainBash(t *testing.T) {
