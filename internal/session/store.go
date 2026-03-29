@@ -106,6 +106,10 @@ func (s *Store) Load() error {
 	var sf stateFile
 	if err := json.Unmarshal(data, &sf); err == nil && sf.Version == stateVersion {
 		s.projects = sf.Projects
+		// Expanded is not persisted (json:"-"), default to expanded on load.
+		for i := range s.projects {
+			s.projects[i].Expanded = true
+		}
 		return nil
 	}
 

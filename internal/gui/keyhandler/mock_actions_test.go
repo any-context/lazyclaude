@@ -58,6 +58,8 @@ func (m *mockActions) LogsToggleSelect()                { m.record("LogsToggleSe
 func (m *mockActions) LogsCopySelection()               { m.record("LogsCopySelection") }
 func (m *mockActions) Quit()                            { m.record("Quit") }
 func (m *mockActions) ToggleProjectExpanded()            { m.record("ToggleProjectExpanded") }
+func (m *mockActions) CollapseProject()                  { m.record("CollapseProject") }
+func (m *mockActions) ExpandProject()                    { m.record("ExpandProject") }
 func (m *mockActions) CursorIsProject() bool             { return m.cursorIsProject }
 func (m *mockActions) PanelNextTab()                     { m.record("PanelNextTab") }
 func (m *mockActions) PanelPrevTab()                     { m.record("PanelPrevTab") }

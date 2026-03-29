@@ -66,6 +66,28 @@ func (a *App) ToggleProjectExpanded() {
 	a.refreshTreeNodes()
 }
 
+func (a *App) CollapseProject() {
+	node := a.currentNode()
+	if node == nil || node.Kind != ProjectNode {
+		return
+	}
+	if node.Project != nil && node.Project.Expanded {
+		a.sessions.ToggleProjectExpanded(node.ProjectID)
+		a.refreshTreeNodes()
+	}
+}
+
+func (a *App) ExpandProject() {
+	node := a.currentNode()
+	if node == nil || node.Kind != ProjectNode {
+		return
+	}
+	if node.Project != nil && !node.Project.Expanded {
+		a.sessions.ToggleProjectExpanded(node.ProjectID)
+		a.refreshTreeNodes()
+	}
+}
+
 func (a *App) CursorIsProject() bool {
 	node := a.currentNode()
 	return node != nil && node.Kind == ProjectNode
