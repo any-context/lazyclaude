@@ -30,7 +30,7 @@ PREFIX ?= /usr/local
 
 install: build
 	install -d $(PREFIX)/bin
-	install -m 755 scripts/lazyclaude-launch.sh $(PREFIX)/bin/$(BINARY)
+	install -m 755 bin/$(BINARY) $(PREFIX)/bin/$(BINARY)
 
 clean:
 	rm -rf bin/
