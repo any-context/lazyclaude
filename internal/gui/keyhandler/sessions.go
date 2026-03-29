@@ -19,6 +19,12 @@ func (p *SessionsPanel) HandleKey(ev KeyEvent, actions AppActions) HandlerResult
 	case ev.Rune == 'k' || ev.Key == gocui.KeyArrowUp:
 		actions.MoveCursorUp()
 		return Handled
+	case ev.Rune == 'h' || ev.Key == gocui.KeyArrowLeft:
+		actions.CollapseProject()
+		return Handled
+	case ev.Rune == 'l' || ev.Key == gocui.KeyArrowRight:
+		actions.ExpandProject()
+		return Handled
 	case ev.Rune == 'n':
 		actions.CreateSession()
 		return Handled
@@ -68,6 +74,7 @@ func (p *SessionsPanel) OptionsBarForTab(_ int) string {
 		presentation.StyledKey("n", "new") + "  " +
 		presentation.StyledKey("d", "del") + "  " +
 		presentation.StyledKey("enter", "full") + "  " +
+		presentation.StyledKey("h/l", "fold") + "  " +
 		presentation.StyledKey("a", "attach") + "  " +
 		presentation.StyledKey("g", "lazygit") + "  " +
 		presentation.StyledKey("1/2/3", "send") + "  " +

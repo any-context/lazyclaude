@@ -28,6 +28,8 @@ type AppActions interface {
 
 	// Tree operations
 	ToggleProjectExpanded()
+	CollapseProject()
+	ExpandProject()
 	CursorIsProject() bool
 
 	// Popup

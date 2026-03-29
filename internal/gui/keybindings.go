@@ -39,7 +39,7 @@ func (a *App) dispatchKey(key gocui.Key) func(*gocui.Gui, *gocui.View) error {
 // setupGlobalKeybindings registers physical keys and delegates to the Dispatcher.
 func (a *App) setupGlobalKeybindings() error {
 	// 1. Rune keys dispatched through the chain
-	runes := []rune{'j', 'k', 'n', 'd', 'e', 'i', 'r', 'u', 'R', 'D', 'P', 'q', 'p', 'y', 'a', 'Y', 'g', 'G', 'v', 'w', 'W', '[', ']', '1', '2', '3'}
+	runes := []rune{'h', 'j', 'k', 'l', 'n', 'd', 'e', 'i', 'r', 'u', 'R', 'D', 'P', 'q', 'p', 'y', 'a', 'Y', 'g', 'G', 'v', 'w', 'W', '[', ']', '1', '2', '3'}
 	for _, ch := range runes {
 		if err := a.gui.SetKeybinding("", ch, gocui.ModNone, a.dispatchRune(ch)); err != nil {
 			return err
@@ -50,7 +50,7 @@ func (a *App) setupGlobalKeybindings() error {
 	specials := []gocui.Key{
 		gocui.KeyEnter, gocui.KeyEsc, gocui.KeyCtrlC, gocui.KeyCtrlD,
 		gocui.KeyCtrlBackslash, gocui.KeyTab, gocui.KeyBacktab,
-		gocui.KeyArrowUp, gocui.KeyArrowDown,
+		gocui.KeyArrowUp, gocui.KeyArrowDown, gocui.KeyArrowLeft, gocui.KeyArrowRight,
 		gocui.KeyCtrlY, gocui.KeyCtrlA, gocui.KeyCtrlN,
 	}
 	for _, key := range specials {

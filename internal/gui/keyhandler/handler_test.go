@@ -40,6 +40,29 @@ func TestSessionsPanel_Keys(t *testing.T) {
 	}
 }
 
+func TestSessionsPanel_FoldKeys(t *testing.T) {
+	p := &keyhandler.SessionsPanel{}
+	tests := []struct {
+		ev   keyhandler.KeyEvent
+		want string
+	}{
+		{keyhandler.KeyEvent{Rune: 'h'}, "CollapseProject"},
+		{keyhandler.KeyEvent{Key: gocui.KeyArrowLeft}, "CollapseProject"},
+		{keyhandler.KeyEvent{Rune: 'l'}, "ExpandProject"},
+		{keyhandler.KeyEvent{Key: gocui.KeyArrowRight}, "ExpandProject"},
+	}
+	for _, tt := range tests {
+		a := newMockActions()
+		r := p.HandleKey(tt.ev, a)
+		if r != keyhandler.Handled {
+			t.Errorf("key %v: want Handled", tt.ev)
+		}
+		if a.lastCall() != tt.want {
+			t.Errorf("key %v: got %q, want %q", tt.ev, a.lastCall(), tt.want)
+		}
+	}
+}
+
 func TestSessionsPanel_UnknownKey(t *testing.T) {
 	p := &keyhandler.SessionsPanel{}
 	a := newMockActions()
