@@ -68,10 +68,11 @@ GOEOF
         ;;
     plugin_mode)
         # プラグインモード E2E: プラグインの install/toggle/uninstall を実演
-        # 1. 公式マーケットプレイスを追加 (既にあればスキップ)
+        # 1. 公式マーケットプレイスを追加
         claude plugins marketplace add anthropics/claude-plugins-official 2>/dev/null || true
-        # 2. テスト用プラグインをインストール
-        claude plugins install example-plugin --scope project 2>/dev/null || true
+        # 2. テスト用プラグインを2つインストール (ローカルパス参照で git clone 不要)
+        claude plugins install agent-sdk-dev --scope project 2>/dev/null || true
+        claude plugins install plugin-dev --scope project 2>/dev/null || true
         ;;
     paste_special)
         # Bracketed paste E2E: send ESC[200~ + multiline text + ESC[201~

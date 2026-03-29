@@ -10,7 +10,8 @@ Set WaitTimeout 60s
 # ============================
 # Plugin Management E2E Test
 # ============================
-# entrypoint.sh が事前に example-plugin をインストール済み
+# entrypoint.sh が事前に agent-sdk-dev と plugin-dev をインストール済み
+# 公式マーケットプレイスが追加済み
 
 # 1. 起動: Sessions / Plugins / Logs の3パネル表示
 Ctrl+\
@@ -18,43 +19,41 @@ Wait+Screen /No sessions/
 Sleep 2s
 
 # 2. Tab → Plugins にフォーカス (Installed タブ)
-#    右パネルがプラグイン詳細に変化
-#    example-plugin が [E] で表示されるはず
+#    右パネルにプラグイン詳細が表示される
+#    agent-sdk-dev, plugin-dev が [E] で表示される
 Tab
 Sleep 3s
 
-# 3. e で disable → [D] に変わる
+# 3. j で2つ目のプラグインに移動
+Type "j"
+Sleep 2s
+
+# 4. e で disable → [D] に変わる
 Type "e"
 Sleep 3s
 
-# 4. e で enable → [E] に戻る
+# 5. e で enable → [E] に戻る
 Type "e"
 Sleep 3s
 
-# 5. ] で Marketplace タブに切替
+# 6. d でアンインストール
+Type "d"
+Sleep 3s
+
+# 7. ] で Marketplace タブに切替
 #    マーケットプレイスのプラグイン一覧が表示される
 Type "]"
 Sleep 3s
 
-# 6. j で下にナビゲーション
-Type "j" Sleep 500ms
+# 8. j でナビゲーション
 Type "j" Sleep 500ms
 Type "j" Sleep 500ms
 
-# 7. i でインストール (カーソル位置のプラグイン)
-Type "i"
-Sleep 5s
-
-# 8. [ で Installed タブに戻る
-#    新しくインストールしたプラグインが追加されている
+# 9. [ で Installed タブに戻る
 Type "["
-Sleep 3s
+Sleep 2s
 
-# 9. d でアンインストール (カーソル位置のプラグイン)
-Type "d"
-Sleep 3s
-
-# 10. Tab → Sessions に戻り、右パネルがセッションプレビューに復帰
+# 10. Tab → Logs → Sessions に戻り、右パネルがセッションプレビューに復帰
 Tab
 Sleep 1s
 Tab
