@@ -113,13 +113,29 @@ func (a *App) MoveCursorUp() {
 	a.syncPluginProject()
 }
 
-// syncPluginProjectOnce triggers the first project sync during layout.
-// After the first sync, cursor movements handle subsequent changes.
+// syncPluginProjectOnce triggers the first plugin load during layout.
+// Tries to derive the project path from the session tree; if no sessions
+// exist yet, falls back to the process working directory so that installed
+// plugins are displayed immediately.
 func (a *App) syncPluginProjectOnce() {
 	if a.plugins == nil || a.pluginState.projectDir != "" {
 		return
 	}
-	a.syncPluginProject()
+
+	// Try session tree first (preferred: project-scoped context).
+	node := a.currentNode()
+	if node != nil {
+		a.syncPluginProject()
+		if a.pluginState.projectDir != "" {
+			return
+		}
+	}
+
+	// Fallback: no sessions yet — use process CWD so plugins load immediately.
+	a.runPluginAsync(func(ctx context.Context) error {
+		return a.plugins.Refresh(ctx)
+	})
+	a.pluginState.projectDir = "." // mark as initialised to prevent re-entry
 }
 
 // syncPluginProject updates the plugin panel's project context

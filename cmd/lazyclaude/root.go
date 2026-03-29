@@ -117,7 +117,7 @@ func newRootCmd() *cobra.Command {
 
 			// Plugin manager: wraps `claude plugins` CLI (project scope only)
 			var pluginOpts []plugin.Option
-			if claudeAbs, err := exec.LookPath("claude"); err == nil {
+			if claudeAbs := findClaudeBinary(); claudeAbs != "" {
 				pluginOpts = append(pluginOpts, plugin.WithClaudePath(claudeAbs))
 			}
 			pluginCLI := plugin.NewExecCLI(pluginOpts...)
@@ -605,4 +605,30 @@ func (a *pluginAdapter) ToggleEnabled(ctx context.Context, pluginID string) erro
 
 func (a *pluginAdapter) Update(ctx context.Context, pluginID string) error {
 	return a.mgr.Update(ctx, pluginID)
+}
+
+// findClaudeBinary resolves the absolute path to the claude binary.
+// exec.LookPath alone is insufficient because tmux display-popup inherits
+// the tmux server's PATH, which typically lacks ~/.local/bin.
+func findClaudeBinary() string {
+	// 1. Try PATH first (works when launched from a normal shell).
+	if p, err := exec.LookPath("claude"); err == nil {
+		return p
+	}
+
+	// 2. Probe well-known installation directories.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	candidates := []string{
+		filepath.Join(home, ".local", "bin", "claude"),
+		"/usr/local/bin/claude",
+	}
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && !info.IsDir() {
+			return c
+		}
+	}
+	return ""
 }

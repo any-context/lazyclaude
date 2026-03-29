@@ -36,23 +36,42 @@ func (m *Manager) SetProjectDir(dir string) {
 }
 
 // Refresh reloads all plugin data from the CLI.
+// If ListAll (which includes marketplace available list) fails, it falls
+// back to ListInstalled so that installed plugins are always displayed.
+// ListMarketplaces failure is non-fatal and only logged.
 func (m *Manager) Refresh(ctx context.Context) error {
+	var installed []InstalledPlugin
+	var available []AvailablePlugin
+
 	result, err := m.cli.ListAll(ctx)
 	if err != nil {
-		return fmt.Errorf("refresh plugins: %w", err)
+		m.log.Warn("ListAll failed, falling back to ListInstalled", "error", err)
+		inst, instErr := m.cli.ListInstalled(ctx)
+		if instErr != nil {
+			return fmt.Errorf("refresh plugins: ListAll: %w; ListInstalled: %w", err, instErr)
+		}
+		installed = inst
+	} else {
+		installed = result.Installed
+		available = result.Available
 	}
 
 	markets, err := m.cli.ListMarketplaces(ctx)
 	if err != nil {
-		return fmt.Errorf("refresh marketplaces: %w", err)
+		m.log.Warn("ListMarketplaces failed", "error", err)
 	}
 
 	m.mu.Lock()
-	m.installed = result.Installed
-	m.available = result.Available
+	m.installed = installed
+	m.available = available
 	m.markets = markets
 	m.mu.Unlock()
 
+	m.log.Info("plugin refresh complete",
+		"installed", len(installed),
+		"available", len(available),
+		"markets", len(markets),
+	)
 	return nil
 }
 

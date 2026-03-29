@@ -232,6 +232,66 @@ func TestManager_ToggleEnabled_NotFound(t *testing.T) {
 	}
 }
 
+func TestManager_Refresh_FallbackToListInstalled(t *testing.T) {
+	runner := newFakeRunner()
+
+	runner.handlers["plugins list --available"] = func(_ []string) (string, error) {
+		return "", fmt.Errorf("network error")
+	}
+
+	installed := []InstalledPlugin{
+		{ID: "lua-lsp@official", Version: "1.0.0", Scope: "user", Enabled: true},
+	}
+	instData, _ := json.Marshal(installed)
+	runner.handlers["plugins list --json"] = func(_ []string) (string, error) {
+		return string(instData), nil
+	}
+
+	mkData, _ := json.Marshal([]MarketplaceInfo{})
+	runner.handlers["plugins marketplace"] = func(_ []string) (string, error) {
+		return string(mkData), nil
+	}
+
+	mgr := NewManager(NewExecCLI(WithRunner(runner)), nil)
+
+	if err := mgr.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh should succeed with fallback: %v", err)
+	}
+	if got := len(mgr.Installed()); got != 1 {
+		t.Errorf("Installed: got %d, want 1", got)
+	}
+	if got := len(mgr.Available()); got != 0 {
+		t.Errorf("Available: got %d, want 0", got)
+	}
+}
+
+func TestManager_Refresh_MarketplaceFailureNonFatal(t *testing.T) {
+	runner := newFakeRunner()
+
+	lr := ListResult{
+		Installed: []InstalledPlugin{
+			{ID: "lua-lsp@official", Version: "1.0.0", Scope: "user", Enabled: true},
+		},
+	}
+	lrData, _ := json.Marshal(lr)
+	runner.handlers["plugins list"] = func(_ []string) (string, error) {
+		return string(lrData), nil
+	}
+
+	runner.handlers["plugins marketplace"] = func(_ []string) (string, error) {
+		return "", fmt.Errorf("marketplace unavailable")
+	}
+
+	mgr := NewManager(NewExecCLI(WithRunner(runner)), nil)
+
+	if err := mgr.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh should succeed despite marketplace failure: %v", err)
+	}
+	if got := len(mgr.Installed()); got != 1 {
+		t.Errorf("Installed: got %d, want 1", got)
+	}
+}
+
 func TestManager_ConcurrentRefresh(t *testing.T) {
 	runner := newFakeRunner()
 
