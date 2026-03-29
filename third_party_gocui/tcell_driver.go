@@ -463,43 +463,54 @@ func (g *Gui) pollEvent() GocuiEvent {
 // accumulatePasteNative reads tcell events until EventPaste{End} and returns
 // the accumulated text. Called from the pollEvent goroutine when
 // EventPaste{Start} is received (tcell properly detected bracketed paste).
+//
+// Uses a goroutine to poll events asynchronously so the timeout is
+// effective even when PollEvent is blocking.
 func (g *Gui) accumulatePasteNative() string {
 	var buf strings.Builder
 	timer := time.NewTimer(pasteAccumTimeout)
 	defer timer.Stop()
 
+	// Channel for async PollEvent results.
+	evCh := make(chan tcell.Event, 1)
+
 	for {
+		// Launch async poll.
+		go func() {
+			evCh <- Screen.PollEvent()
+		}()
+
 		select {
 		case <-timer.C:
-			// Timeout: flush what we have so far.
+			// Timeout: flush what we have. The goroutine still blocked on
+			// PollEvent will eventually return and re-inject the event.
+			go func() {
+				ev := <-evCh
+				Screen.PostEventWait(ev)
+			}()
 			return buf.String()
 		case <-g.stop:
 			return buf.String()
-		default:
-		}
-
-		tev := Screen.PollEvent()
-		switch tev := tev.(type) {
-		case *tcell.EventPaste:
-			if !tev.Start() {
-				// Paste end marker — return accumulated text.
-				return buf.String()
-			}
-			// Nested paste start: ignore (shouldn't happen).
-		case *tcell.EventKey:
-			appendTcellKeyToBuilder(&buf, tev)
-			// Reset timer for each character received.
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
+		case tev := <-evCh:
+			switch tev := tev.(type) {
+			case *tcell.EventPaste:
+				if !tev.Start() {
+					return buf.String()
 				}
+			case *tcell.EventKey:
+				appendTcellKeyToBuilder(&buf, tev)
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(pasteAccumTimeout)
+			case *tcell.EventInterrupt:
+				return buf.String()
+			default:
+				// Ignore resize, mouse, focus during paste.
 			}
-			timer.Reset(pasteAccumTimeout)
-		case *tcell.EventInterrupt:
-			return buf.String()
-		default:
-			// Ignore resize, mouse, focus events during paste.
 		}
 	}
 }
@@ -508,14 +519,23 @@ func (g *Gui) accumulatePasteNative() string {
 // marker) and returns the accumulated text. Called from the pollEvent goroutine
 // when ESC[200~ is detected as raw EventKey events (tmux display-popup bug
 // where tcell doesn't receive EventPaste).
+//
+// Uses a goroutine to poll events asynchronously so the timeout is
+// effective even when PollEvent is blocking.
 func (g *Gui) accumulatePasteFromESC() string {
 	var buf strings.Builder
-	var escBuf []rune // buffered chars after Esc, checking for end marker
+	var escBuf []rune
 	inEsc := false
 	timer := time.NewTimer(pasteAccumTimeout)
 	defer timer.Stop()
 
+	evCh := make(chan tcell.Event, 1)
+
 	for {
+		go func() {
+			evCh <- Screen.PollEvent()
+		}()
+
 		select {
 		case <-timer.C:
 			if inEsc {
@@ -524,81 +544,77 @@ func (g *Gui) accumulatePasteFromESC() string {
 					buf.WriteRune(r)
 				}
 			}
+			go func() {
+				ev := <-evCh
+				Screen.PostEventWait(ev)
+			}()
 			return buf.String()
 		case <-g.stop:
 			return buf.String()
-		default:
-		}
+		case tev := <-evCh:
+			switch tev := tev.(type) {
+			case *tcell.EventKey:
+				k := tev.Key()
+				ch := tev.Rune()
 
-		tev := Screen.PollEvent()
-		switch tev := tev.(type) {
-		case *tcell.EventKey:
-			k := tev.Key()
-			ch := tev.Rune()
-
-			// Reset timer on each event.
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
 				}
-			}
-			timer.Reset(pasteAccumTimeout)
+				timer.Reset(pasteAccumTimeout)
 
-			if k == tcell.KeyEscape {
+				if k == tcell.KeyEscape {
+					if inEsc {
+						buf.WriteRune('\x1b')
+						for _, r := range escBuf {
+							buf.WriteRune(r)
+						}
+					}
+					escBuf = escBuf[:0]
+					inEsc = true
+					continue
+				}
+
 				if inEsc {
-					// Previous Esc + partial was paste content.
-					buf.WriteRune('\x1b')
-					for _, r := range escBuf {
-						buf.WriteRune(r)
+					if k == tcell.KeyRune {
+						escBuf = append(escBuf, ch)
+						seq := string(escBuf)
+						if seq == pasteEndMarker {
+							return buf.String()
+						}
+						if len(seq) < len(pasteEndMarker) && pasteEndMarker[:len(seq)] == seq {
+							continue
+						}
+						buf.WriteRune('\x1b')
+						for _, r := range escBuf {
+							buf.WriteRune(r)
+						}
+						escBuf = escBuf[:0]
+						inEsc = false
+					} else {
+						buf.WriteRune('\x1b')
+						for _, r := range escBuf {
+							buf.WriteRune(r)
+						}
+						escBuf = escBuf[:0]
+						inEsc = false
+						appendTcellKeyToBuilder(&buf, tev)
 					}
+					continue
 				}
-				escBuf = escBuf[:0]
-				inEsc = true
-				continue
-			}
 
-			if inEsc {
-				if k == tcell.KeyRune {
-					escBuf = append(escBuf, ch)
-					seq := string(escBuf)
-					if seq == pasteEndMarker {
-						return buf.String()
-					}
-					if len(seq) < len(pasteEndMarker) && pasteEndMarker[:len(seq)] == seq {
-						continue // still matching
-					}
-					// Not a match — flush Esc + buffered as content.
-					buf.WriteRune('\x1b')
-					for _, r := range escBuf {
-						buf.WriteRune(r)
-					}
-					escBuf = escBuf[:0]
-					inEsc = false
-				} else {
-					// Non-rune key breaks the pattern.
-					buf.WriteRune('\x1b')
-					for _, r := range escBuf {
-						buf.WriteRune(r)
-					}
-					escBuf = escBuf[:0]
-					inEsc = false
-					appendTcellKeyToBuilder(&buf, tev)
+				appendTcellKeyToBuilder(&buf, tev)
+
+			case *tcell.EventPaste:
+				if !tev.Start() {
+					return buf.String()
 				}
-				continue
-			}
-
-			appendTcellKeyToBuilder(&buf, tev)
-
-		case *tcell.EventPaste:
-			if !tev.Start() {
-				// tcell sent a native paste end — also valid.
+			case *tcell.EventInterrupt:
 				return buf.String()
+			default:
 			}
-		case *tcell.EventInterrupt:
-			return buf.String()
-		default:
-			// Ignore resize, mouse, focus during paste.
 		}
 	}
 }

@@ -75,7 +75,9 @@ GOEOF
         claude plugins install plugin-dev --scope project 2>/dev/null || true
         ;;
     paste_special)
-        # Bracketed paste E2E: send ESC[200~ + multiline text + ESC[201~
+        # Bracketed paste E2E: use tmux paste-buffer -p to send proper
+        # bracketed paste (ESC[200~ + text + ESC[201~) through the PTY,
+        # matching how a real Cmd+V would propagate.
         cat > /tmp/paste-text.txt << 'PASTEEOF'
 七夕
 持明院統の光厳天皇が後醍醐天皇によって廃位される（1333年）
@@ -89,16 +91,9 @@ GOEOF
 ロンドン同時爆破事件（2005年）
 PASTEEOF
         (
-            sleep 15
-            # ESC[200~ (paste start)
-            tmux send-keys -t main -H 1b 5b 32 30 30 7e
-            # Text body (multiline)
-            while IFS= read -r line; do
-                tmux send-keys -t main -l "$line"
-                tmux send-keys -t main Enter
-            done < /tmp/paste-text.txt
-            # ESC[201~ (paste end)
-            tmux send-keys -t main -H 1b 5b 32 30 31 7e
+            sleep 20
+            tmux load-buffer - < /tmp/paste-text.txt
+            tmux paste-buffer -t main -d -p
         ) &
         ;;
 esac

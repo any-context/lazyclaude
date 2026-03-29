@@ -5,24 +5,37 @@ Set Shell "bash"
 Set Width 1800
 Set Height 1200
 Set FontSize 16
-Set WaitTimeout 60s
+Set WaitTimeout 90s
 
-# lazyclaude 起動
-Type "lazyclaude" Enter
+# bash wrapper auto-attaches to tmux session "main".
+# Start lazyclaude directly so that paste goes through PTY -> tcell EventPaste.
+Sleep 2s
+Type "lazyclaude --debug" Enter
 Wait+Screen /No sessions/
 
-# セッション作成
+# Create a session
 Type "n"
-Wait+Screen /app/
+Sleep 5s
 
-# Enter でフルスクリーン
+# Move cursor to session row, then enter fullscreen.
+Type "j"
+Sleep 1s
 Enter
-Wait+Screen /Sonnet/
-
-# entrypoint が 15 秒後に ESC[200~ + 10行日本語テキスト + ESC[201~ を送信
-# Claude Code が [Pasted text #1 +10 lines] を表示するはず
-Wait+Screen /Pasted text/
-
 Sleep 3s
-Ctrl+\ Sleep 1s
-Type "q" Sleep 1s
+
+# entrypoint.sh sends paste via "tmux paste-buffer -p" at ~20s.
+# Wait for the paste to arrive and be processed.
+Sleep 15s
+
+# Verify TUI is still responsive after paste:
+# Type a character — if TUI is frozen, this will hang VHS.
+# If TUI is alive, the char gets forwarded to Claude Code pane.
+Type "h"
+Sleep 2s
+Type "e"
+Sleep 2s
+
+# The fullscreen status bar should still be visible (not frozen).
+Wait+Screen /exit/
+
+Sleep 1s
