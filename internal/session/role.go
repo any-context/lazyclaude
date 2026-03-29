@@ -46,6 +46,7 @@ func BuildPMPrompt(sessionID string, mcpPort int, authToken string, workerList s
 		portFile, ideDir, // Server Discovery section
 		portFile, ideDir, sessionID, // send curl: discovery + from field
 		portFile, ideDir, // sessions curl: discovery
+		portFile, ideDir, sessionID, // create curl: discovery + from field
 		workerList,
 	)
 }
@@ -65,5 +66,6 @@ func BuildWorkerPrompt(worktreePath, projectRoot, sessionID string, mcpPort int,
 		portFile, ideDir, // Server Discovery section
 		portFile, ideDir, sessionID, // send curl: discovery + from field
 		portFile, ideDir, // sessions curl: discovery
+		portFile, ideDir, sessionID, // create curl: discovery + from field
 	)
 }

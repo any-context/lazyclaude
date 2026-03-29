@@ -38,6 +38,21 @@ curl -s -H "X-Auth-Token: $TOKEN" \
   "http://localhost:$PORT/msg/sessions"
 ```
 
+### Spawn a new Worker session:
+```bash
+PORT=$(cat %s) && \
+TOKEN=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['authToken'])" "%s/$PORT.lock") && \
+curl -s -X POST -H "X-Auth-Token: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"from":"%s","name":"<session-name>","type":"worker","prompt":"<initial task description>"}' \
+  "http://localhost:$PORT/msg/create"
+```
+
+- `type`: `"worker"` (git worktree session) or `"local"` (plain session at project root)
+- `name`: required — worktree/branch name for worker, display name for local
+- `prompt`: optional — initial instruction sent to the new session
+- The new session is scoped to your project automatically.
+
 ### Fallback: tmux send-keys
 
 If /msg/send fails (server not running), bypass the API and paste
