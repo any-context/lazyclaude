@@ -6,8 +6,8 @@ import (
 )
 
 // PluginsPanel handles keys for the plugins view (middle-left).
-// Stateless: all state is managed by AppActions (via App).
-// Supports two tabs within the panel: Installed and Marketplace.
+// Stateless: all state (including tab index) is managed by App.
+// Tab switching ([/]) is handled by GlobalHandler as a generic panel operation.
 type PluginsPanel struct{}
 
 func (p *PluginsPanel) Name() string  { return "plugins" }
@@ -20,12 +20,6 @@ func (p *PluginsPanel) HandleKey(ev KeyEvent, actions AppActions) HandlerResult 
 		return Handled
 	case ev.Rune == 'k' || ev.Key == gocui.KeyArrowUp:
 		actions.PluginCursorUp()
-		return Handled
-	case ev.Rune == ']':
-		actions.PluginNextTab()
-		return Handled
-	case ev.Rune == '[':
-		actions.PluginPrevTab()
 		return Handled
 	case ev.Rune == 'i':
 		actions.PluginInstall()
@@ -46,8 +40,16 @@ func (p *PluginsPanel) HandleKey(ev KeyEvent, actions AppActions) HandlerResult 
 	return Unhandled
 }
 
-// InstalledOptionsBar returns the options bar when Installed tab is active.
-func (p *PluginsPanel) InstalledOptionsBar() string {
+// OptionsBarForTab returns the options bar for the given tab.
+// Tab 0 = Installed, Tab 1 = Marketplace.
+func (p *PluginsPanel) OptionsBarForTab(tabIdx int) string {
+	if tabIdx == 1 {
+		return " " +
+			presentation.StyledKey("i", "install") + "  " +
+			presentation.StyledKey("r", "refresh") + "  " +
+			presentation.StyledKey("[/]", "tab") + "  " +
+			presentation.StyledKey("q", "quit")
+	}
 	return " " +
 		presentation.StyledKey("e", "toggle") + "  " +
 		presentation.StyledKey("d", "uninstall") + "  " +
@@ -57,20 +59,5 @@ func (p *PluginsPanel) InstalledOptionsBar() string {
 		presentation.StyledKey("q", "quit")
 }
 
-// MarketplaceOptionsBar returns the options bar when Marketplace tab is active.
-func (p *PluginsPanel) MarketplaceOptionsBar() string {
-	return " " +
-		presentation.StyledKey("i", "install") + "  " +
-		presentation.StyledKey("r", "refresh") + "  " +
-		presentation.StyledKey("[/]", "tab") + "  " +
-		presentation.StyledKey("q", "quit")
-}
-
-// OptionsBar returns the default (Installed tab) options bar.
-func (p *PluginsPanel) OptionsBar() string {
-	return p.InstalledOptionsBar()
-}
-
 func (p *PluginsPanel) TabCount() int       { return 2 }
-func (p *PluginsPanel) TabIndex() int       { return 0 }
 func (p *PluginsPanel) TabLabels() []string { return []string{"Installed", "Marketplace"} }

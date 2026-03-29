@@ -47,11 +47,12 @@ func TestPanel_TabSupport(t *testing.T) {
 	if s.TabCount() != 1 {
 		t.Errorf("SessionsPanel TabCount = %d, want 1", s.TabCount())
 	}
-	if s.TabIndex() != 0 {
-		t.Errorf("SessionsPanel TabIndex = %d, want 0", s.TabIndex())
-	}
 	labels := s.TabLabels()
 	if len(labels) != 1 || labels[0] != "Sessions" {
 		t.Errorf("SessionsPanel TabLabels = %v", labels)
+	}
+	// OptionsBarForTab ignores tabIdx for single-tab panels
+	if s.OptionsBarForTab(0) == "" {
+		t.Error("OptionsBarForTab(0) should not be empty")
 	}
 }

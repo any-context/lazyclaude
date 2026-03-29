@@ -95,6 +95,7 @@ type App struct {
 	watchdogDone       chan struct{}               // signals watchdog to stop
 	watchdogStarted    bool                        // prevents multiple watchdog goroutines
 	cachedNodes        []TreeNode                   // rebuilt once per layout cycle
+	panelTabs          map[string]int               // panel name -> active tab index
 	pluginState        *PluginState                 // plugin panel UI state
 	plugins            PluginProvider               // plugin operations (nil until wired)
 }
@@ -156,6 +157,7 @@ func newApp(mode AppMode, g *gocui.Gui, enableMouse bool) (*App, error) {
 		logs:        NewLogsState(),
 		notify:      NewNotifyLoop(),
 		pluginState: NewPluginState(),
+		panelTabs:   make(map[string]int),
 	}
 	app.fullscreen = NewFullScreenState(app.preview)
 	app.initDispatcher()

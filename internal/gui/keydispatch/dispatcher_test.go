@@ -59,16 +59,16 @@ func (m *mockActions) LogsCopySelection()               { m.record("LogsCopySele
 func (m *mockActions) Quit()                            { m.record("Quit") }
 func (m *mockActions) ToggleProjectExpanded()            { m.record("ToggleProjectExpanded") }
 func (m *mockActions) CursorIsProject() bool             { return false }
+func (m *mockActions) PanelNextTab()                     { m.record("PanelNextTab") }
+func (m *mockActions) PanelPrevTab()                     { m.record("PanelPrevTab") }
+func (m *mockActions) ActivePanelTabIndex() int          { return 0 }
 func (m *mockActions) PluginCursorDown()                 { m.record("PluginCursorDown") }
 func (m *mockActions) PluginCursorUp()                   { m.record("PluginCursorUp") }
-func (m *mockActions) PluginNextTab()                    { m.record("PluginNextTab") }
-func (m *mockActions) PluginPrevTab()                    { m.record("PluginPrevTab") }
 func (m *mockActions) PluginInstall()                    { m.record("PluginInstall") }
 func (m *mockActions) PluginUninstall()                  { m.record("PluginUninstall") }
 func (m *mockActions) PluginToggleEnabled()              { m.record("PluginToggleEnabled") }
 func (m *mockActions) PluginUpdate()                     { m.record("PluginUpdate") }
 func (m *mockActions) PluginRefresh()                    { m.record("PluginRefresh") }
-func (m *mockActions) PluginTabIndex() int               { return 0 }
 
 func newDispatcher() *keydispatch.Dispatcher {
 	pm := keyhandler.NewPanelManager(&keyhandler.SessionsPanel{}, &keyhandler.LogsPanel{})

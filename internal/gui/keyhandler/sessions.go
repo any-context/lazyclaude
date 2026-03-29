@@ -63,7 +63,7 @@ func (p *SessionsPanel) HandleKey(ev KeyEvent, actions AppActions) HandlerResult
 	return Unhandled
 }
 
-func (p *SessionsPanel) OptionsBar() string {
+func (p *SessionsPanel) OptionsBarForTab(_ int) string {
 	return " " +
 		presentation.StyledKey("n", "new") + "  " +
 		presentation.StyledKey("d", "del") + "  " +
@@ -78,6 +78,5 @@ func (p *SessionsPanel) OptionsBar() string {
 		presentation.StyledKey("q", "quit")
 }
 
-func (p *SessionsPanel) TabCount() int      { return 1 }
-func (p *SessionsPanel) TabIndex() int      { return 0 }
+func (p *SessionsPanel) TabCount() int       { return 1 }
 func (p *SessionsPanel) TabLabels() []string { return []string{"Sessions"} }

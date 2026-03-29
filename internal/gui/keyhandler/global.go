@@ -45,6 +45,12 @@ func (h *GlobalHandler) HandleKey(ev KeyEvent, actions AppActions) HandlerResult
 	case ev.Rune == 'p':
 		actions.UnsuspendPopups()
 		return Handled
+	case ev.Rune == ']':
+		actions.PanelNextTab()
+		return Handled
+	case ev.Rune == '[':
+		actions.PanelPrevTab()
+		return Handled
 	}
 	return Unhandled
 }

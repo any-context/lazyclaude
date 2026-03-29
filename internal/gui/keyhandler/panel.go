@@ -3,15 +3,18 @@ package keyhandler
 // Panel represents a focusable area in the TUI.
 // Each panel manages its own key handling and options bar.
 // Panels optionally support tabs (sub-content switching within a panel).
+// Tab state is managed externally by App (panels are stateless).
 type Panel interface {
-	Name() string  // gocui view name ("sessions", "logs")
-	Label() string // active tab label (or panel name if no tabs)
+	Name() string  // gocui view name ("sessions", "logs", "plugins")
+	Label() string // display label
 	HandleKey(ev KeyEvent, actions AppActions) HandlerResult
-	OptionsBar() string
 
-	// Tab support. Panels with a single tab return fixed values.
+	// OptionsBarForTab returns the options bar text for the given tab index.
+	// Single-tab panels ignore tabIdx and return a fixed bar.
+	OptionsBarForTab(tabIdx int) string
+
+	// Tab support. TabCount returns 1 for single-tab panels.
 	TabCount() int
-	TabIndex() int
 	TabLabels() []string
 }
 

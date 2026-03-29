@@ -35,7 +35,7 @@ func (p *LogsPanel) HandleKey(ev KeyEvent, actions AppActions) HandlerResult {
 	return Unhandled
 }
 
-func (p *LogsPanel) OptionsBar() string {
+func (p *LogsPanel) OptionsBarForTab(_ int) string {
 	return " " +
 		presentation.StyledKey("j/k", "scroll") + "  " +
 		presentation.StyledKey("v", "select") + "  " +
@@ -45,5 +45,4 @@ func (p *LogsPanel) OptionsBar() string {
 }
 
 func (p *LogsPanel) TabCount() int       { return 1 }
-func (p *LogsPanel) TabIndex() int       { return 0 }
 func (p *LogsPanel) TabLabels() []string { return []string{"Logs"} }

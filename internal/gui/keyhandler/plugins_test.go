@@ -30,22 +30,6 @@ func TestPluginsPanel_Navigation(t *testing.T) {
 	}
 }
 
-func TestPluginsPanel_TabSwitching(t *testing.T) {
-	p := &keyhandler.PluginsPanel{}
-
-	a := newMockActions()
-	p.HandleKey(keyhandler.KeyEvent{Rune: ']'}, a)
-	if a.lastCall() != "PluginNextTab" {
-		t.Errorf("]: got %q, want PluginNextTab", a.lastCall())
-	}
-
-	a2 := newMockActions()
-	p.HandleKey(keyhandler.KeyEvent{Rune: '['}, a2)
-	if a2.lastCall() != "PluginPrevTab" {
-		t.Errorf("[: got %q, want PluginPrevTab", a2.lastCall())
-	}
-}
-
 func TestPluginsPanel_Operations(t *testing.T) {
 	p := &keyhandler.PluginsPanel{}
 	tests := []struct {
@@ -70,6 +54,19 @@ func TestPluginsPanel_Operations(t *testing.T) {
 	}
 }
 
+func TestPluginsPanel_TabSwitchingHandledByGlobal(t *testing.T) {
+	// [/] keys should NOT be handled by PluginsPanel — they are handled by GlobalHandler
+	p := &keyhandler.PluginsPanel{}
+	a := newMockActions()
+
+	if p.HandleKey(keyhandler.KeyEvent{Rune: '['}, a) != keyhandler.Unhandled {
+		t.Error("[ should be Unhandled by PluginsPanel")
+	}
+	if p.HandleKey(keyhandler.KeyEvent{Rune: ']'}, a) != keyhandler.Unhandled {
+		t.Error("] should be Unhandled by PluginsPanel")
+	}
+}
+
 func TestPluginsPanel_Unhandled(t *testing.T) {
 	p := &keyhandler.PluginsPanel{}
 	a := newMockActions()
@@ -78,9 +75,12 @@ func TestPluginsPanel_Unhandled(t *testing.T) {
 	}
 }
 
-func TestPluginsPanel_OptionsBars(t *testing.T) {
+func TestPluginsPanel_OptionsBarForTab(t *testing.T) {
 	p := &keyhandler.PluginsPanel{}
-	if p.InstalledOptionsBar() == p.MarketplaceOptionsBar() {
+	installed := p.OptionsBarForTab(0)
+	marketplace := p.OptionsBarForTab(1)
+
+	if installed == marketplace {
 		t.Error("installed and marketplace options bars should differ")
 	}
 }

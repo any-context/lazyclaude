@@ -384,6 +384,50 @@ func (a *App) LogsCopySelection() {
 	a.logs.ClearSelection()
 }
 
+// --- Panel tab switching (generic) ---
+
+func (a *App) PanelNextTab() {
+	panel := a.panelManager.ActivePanel()
+	if panel == nil || panel.TabCount() <= 1 {
+		return
+	}
+	name := panel.Name()
+	cur := a.panelTabs[name]
+	if cur < panel.TabCount()-1 {
+		a.panelTabs[name] = cur + 1
+		a.onPanelTabChanged(name, cur+1)
+	}
+}
+
+func (a *App) PanelPrevTab() {
+	panel := a.panelManager.ActivePanel()
+	if panel == nil || panel.TabCount() <= 1 {
+		return
+	}
+	name := panel.Name()
+	cur := a.panelTabs[name]
+	if cur > 0 {
+		a.panelTabs[name] = cur - 1
+		a.onPanelTabChanged(name, cur-1)
+	}
+}
+
+func (a *App) ActivePanelTabIndex() int {
+	panel := a.panelManager.ActivePanel()
+	if panel == nil {
+		return 0
+	}
+	return a.panelTabs[panel.Name()]
+}
+
+// onPanelTabChanged is called when a panel's tab changes.
+// Panel-specific side effects (e.g. resetting cursors) go here.
+func (a *App) onPanelTabChanged(panelName string, newTab int) {
+	if panelName == "plugins" {
+		a.pluginState.tabIdx = newTab
+	}
+}
+
 // --- Plugin panel ---
 
 func (a *App) PluginCursorDown() {
@@ -398,18 +442,6 @@ func (a *App) PluginCursorUp() {
 	cur := a.pluginState.Cursor()
 	if cur > 0 {
 		a.pluginState.SetCursor(cur - 1)
-	}
-}
-
-func (a *App) PluginNextTab() {
-	if a.pluginState.tabIdx < 1 {
-		a.pluginState.tabIdx = 1
-	}
-}
-
-func (a *App) PluginPrevTab() {
-	if a.pluginState.tabIdx > 0 {
-		a.pluginState.tabIdx = 0
 	}
 }
 
@@ -476,10 +508,6 @@ func (a *App) PluginRefresh() {
 	a.runPluginAsync(func(ctx context.Context) error {
 		return a.plugins.Refresh(ctx)
 	})
-}
-
-func (a *App) PluginTabIndex() int {
-	return a.pluginState.tabIdx
 }
 
 // runPluginAsync runs a plugin operation asynchronously with loading state management.
