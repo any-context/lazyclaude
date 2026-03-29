@@ -116,7 +116,11 @@ func newRootCmd() *cobra.Command {
 			app.SetSessions(adapter)
 
 			// Plugin manager: wraps `claude plugins` CLI (project scope only)
-			pluginCLI := plugin.NewExecCLI()
+			var pluginOpts []plugin.Option
+			if claudeAbs, err := exec.LookPath("claude"); err == nil {
+				pluginOpts = append(pluginOpts, plugin.WithClaudePath(claudeAbs))
+			}
+			pluginCLI := plugin.NewExecCLI(pluginOpts...)
 			pluginMgr := plugin.NewManager(pluginCLI, logger)
 			app.SetPlugins(&pluginAdapter{mgr: pluginMgr})
 
