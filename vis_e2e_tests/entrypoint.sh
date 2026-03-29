@@ -66,6 +66,13 @@ GOEOF
         # msg API テストは Claude Code セッション内から自律実行される
         # (人間はプロンプトを送るだけ。API は Claude Code が叩く)
         ;;
+    plugin_mode)
+        # プラグインモード E2E: claude plugins が最低限動くよう準備
+        mkdir -p /root/.claude/plugins
+        echo '{"version":2,"plugins":{}}' > /root/.claude/plugins/installed_plugins.json
+        echo '{}' > /root/.claude/plugins/known_marketplaces.json
+        echo '{"repositories":{}}' > /root/.claude/plugins/config.json
+        ;;
     paste_special)
         # Bracketed paste E2E: send ESC[200~ + multiline text + ESC[201~
         cat > /tmp/paste-text.txt << 'PASTEEOF'
