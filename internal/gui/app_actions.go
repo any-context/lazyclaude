@@ -160,7 +160,7 @@ func (a *App) syncPluginProject() {
 	if node.Kind == ProjectNode && node.Project != nil {
 		projectPath = node.Project.Path
 	} else if node.Session != nil {
-		projectPath = session.InferProjectRoot(node.Session.Path)
+		projectPath = a.configDirForSession(node.Session)
 	}
 	if projectPath == "" || projectPath == a.pluginState.projectDir {
 		return
@@ -207,6 +207,21 @@ func (a *App) currentProjectRoot() string {
 		return "."
 	}
 	return session.InferProjectRoot(abs)
+}
+
+// configDirForSession returns the directory to use for configuration lookups
+// (MCP servers, plugins, settings) for the given session.
+// Worker sessions use their worktree path directly so that configuration
+// is localized to the worktree. All other sessions use InferProjectRoot
+// to resolve back to the parent project root.
+func (a *App) configDirForSession(s *SessionItem) string {
+	if s == nil || s.Path == "" {
+		return ""
+	}
+	if s.Role == "worker" && session.IsWorktreePath(s.Path) {
+		return s.Path
+	}
+	return session.InferProjectRoot(s.Path)
 }
 
 // --- Session operations ---
