@@ -45,7 +45,7 @@ func (m *Manager) Refresh(ctx context.Context) error {
 
 	result, err := m.cli.ListAll(ctx)
 	if err != nil {
-		m.log.Warn("ListAll failed, falling back to ListInstalled", "error", err)
+		// Fallback: at minimum, show installed plugins.
 		inst, instErr := m.cli.ListInstalled(ctx)
 		if instErr != nil {
 			return fmt.Errorf("refresh plugins: ListAll: %w; ListInstalled: %w", err, instErr)
@@ -56,9 +56,10 @@ func (m *Manager) Refresh(ctx context.Context) error {
 		available = result.Available
 	}
 
-	markets, err := m.cli.ListMarketplaces(ctx)
-	if err != nil {
-		m.log.Warn("ListMarketplaces failed", "error", err)
+	markets, mErr := m.cli.ListMarketplaces(ctx)
+	if mErr != nil {
+		// Non-fatal: marketplace data is optional for displaying installed plugins.
+		markets = nil
 	}
 
 	m.mu.Lock()
@@ -67,11 +68,6 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	m.markets = markets
 	m.mu.Unlock()
 
-	m.log.Info("plugin refresh complete",
-		"installed", len(installed),
-		"available", len(available),
-		"markets", len(markets),
-	)
 	return nil
 }
 
