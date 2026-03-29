@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -353,8 +354,20 @@ func (a *sessionAdapter) CapturePreview(id string, width, height int) (gui.Previ
 		lines = lines[:height]
 	}
 
+	// Fetch cursor position from tmux pane
+	var cursorX, cursorY int
+	if pos, err := a.tmux.ShowMessage(ctx, target, "#{cursor_x},#{cursor_y}"); err == nil {
+		parts := strings.SplitN(strings.TrimSpace(pos), ",", 2)
+		if len(parts) == 2 {
+			cursorX, _ = strconv.Atoi(parts[0])
+			cursorY, _ = strconv.Atoi(parts[1])
+		}
+	}
+
 	return gui.PreviewResult{
 		Content: strings.Join(lines, "\n"),
+		CursorX: cursorX,
+		CursorY: cursorY,
 	}, nil
 }
 

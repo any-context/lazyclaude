@@ -287,6 +287,7 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 		presentation.FgDimGray+presentation.IconSep+presentation.Reset,
 		presentation.Dim+"Ctrl+\\:exit"+presentation.Reset)
 
+	g.Cursor = true
 	if _, err := g.SetCurrentView("main"); err != nil && !isUnknownView(err) {
 		return err
 	}
@@ -350,6 +351,8 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 	a.preview.Lock()
 	cache := a.preview.Content()
 	cachedCursor := a.preview.Cursor()
+	paneCursorX := a.preview.CursorX()
+	paneCursorY := a.preview.CursorY()
 	stale := a.preview.Stale(500 * time.Millisecond)
 	// Only fetch if: not busy, AND (cursor changed OR cache is stale).
 	// Do NOT use cache=="" as a trigger — empty capture results
@@ -378,6 +381,7 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 
 	if cache != "" && cachedCursor == a.cursor {
 		fmt.Fprint(v, cache)
+		v.SetCursor(paneCursorX, paneCursorY)
 		return
 	}
 
