@@ -65,16 +65,6 @@ type MarketplaceInfo struct {
 	InstallLocation string `json:"installLocation"`
 }
 
-// PluginName extracts the plugin name (before @) from a full plugin ID.
-func PluginName(id string) string {
-	for i, c := range id {
-		if c == '@' {
-			return id[:i]
-		}
-	}
-	return id
-}
-
 // MarketplaceName extracts the marketplace name (after @) from a full plugin ID.
 func MarketplaceName(id string) string {
 	for i, c := range id {

@@ -80,20 +80,3 @@ func ReadAll(runtimeDir string) ([]*model.ToolNotification, error) {
 	return result, nil
 }
 
-// PendingCount returns the number of queued notification files without consuming them.
-func PendingCount(runtimeDir string) (int, error) {
-	entries, err := os.ReadDir(runtimeDir)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	count := 0
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), queuePrefix) && strings.HasSuffix(e.Name(), ".json") {
-			count++
-		}
-	}
-	return count, nil
-}

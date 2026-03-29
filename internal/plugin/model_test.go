@@ -5,26 +5,6 @@ import (
 	"testing"
 )
 
-func TestPluginName(t *testing.T) {
-	tests := []struct {
-		id   string
-		want string
-	}{
-		{"lua-lsp@claude-plugins-official", "lua-lsp"},
-		{"code-review@claude-plugins-official", "code-review"},
-		{"my-plugin@custom-marketplace", "my-plugin"},
-		{"no-marketplace", "no-marketplace"},
-		{"", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.id, func(t *testing.T) {
-			if got := PluginName(tt.id); got != tt.want {
-				t.Errorf("PluginName(%q) = %q, want %q", tt.id, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestMarketplaceName(t *testing.T) {
 	tests := []struct {
 		id   string
