@@ -769,11 +769,11 @@ func (g *Gui) MainLoop() error {
 	// Stage 1: poll tcell events into rawEvents.
 	go func() {
 		for {
+			ev := g.pollEvent() // blocks until next tcell event
 			select {
 			case <-g.stop:
 				return
-			default:
-				g.rawEvents <- g.pollEvent()
+			case g.rawEvents <- ev:
 			}
 		}
 	}()

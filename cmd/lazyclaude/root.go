@@ -241,18 +241,29 @@ type sessionAdapter struct {
 	lastResizeID string // session ID of last resize
 	lastResizeW  int
 	lastResizeH  int
+
+	// cachedPending is refreshed once per layout cycle via RefreshPending,
+	// then reused by Sessions() and Projects() to avoid redundant ReadAll
+	// calls (each of which does an os.ReadDir + file I/O).
+	cachedPending map[string]bool
+}
+
+// RefreshPendingFrom caches the given notifications for badge rendering.
+// Called from the ticker goroutine after ReadAll, before the files are
+// consumed, so that Sessions() and Projects() can display badges without
+// a redundant (and destructive) ReadAll call.
+func (a *sessionAdapter) RefreshPendingFrom(notifications []*model.ToolNotification) {
+	a.cachedPending = pendingWindowSet(notifications)
 }
 
 func (a *sessionAdapter) Sessions() []gui.SessionItem {
 	sessions := a.mgr.Sessions()
-	pending := pendingWindowSet(a.PendingNotifications())
-	return buildSessionItems(sessions, pending)
+	return buildSessionItems(sessions, a.cachedPending)
 }
 
 func (a *sessionAdapter) Projects() []gui.ProjectItem {
 	projects := a.mgr.Projects()
-	pending := pendingWindowSet(a.PendingNotifications())
-	return buildProjectItems(projects, pending)
+	return buildProjectItems(projects, a.cachedPending)
 }
 
 func (a *sessionAdapter) ToggleProjectExpanded(projectID string) {
@@ -513,6 +524,16 @@ func (m *controlManager) ensureConnected() {
 	if needReconnect {
 		m.tryConnect()
 	}
+}
+
+// Client returns the active control client, or nil if not connected.
+func (m *controlManager) Client() *tmux.ControlClient {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.client != nil && !m.client.Closed() {
+		return m.client
+	}
+	return nil
 }
 
 func (m *controlManager) close() {

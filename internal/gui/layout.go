@@ -188,8 +188,7 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 	setRoundedFrame(v2)
 	v2.Title = " Logs "
 	v2.Wrap = true
-	v2.Clear()
-	renderServerLog(v2, a.logs, focusedName == "logs")
+	a.renderServerLog(v2, a.logs, focusedName == "logs")
 
 	// Main panel (right side) — content depends on focused panel
 	v3, err := g.SetView("main", l.Main.X0, l.Main.Y0, l.Main.X1, l.Main.Y1, 0)

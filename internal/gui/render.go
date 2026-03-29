@@ -93,8 +93,40 @@ func renderWorktreeChooser(v *gocui.View, items []WorktreeInfo, cursor int) {
 	v.SetCursor(0, cursor)
 }
 
+// logFileCache caches readLogLines results, only re-reading when the
+// file's modification time changes.  This prevents expensive os.ReadFile
+// calls on every layout cycle.
+// All access is from the gocui event loop goroutine only.
+type logFileCache struct {
+	modTime int64
+	lines   []string
+}
+
+// logRenderCache tracks the last rendered state so that
+// renderServerLog can skip the expensive v.Clear() + Write cycle
+// when nothing has changed.
+// All access is from the gocui event loop goroutine only.
+type logRenderCache struct {
+	modTime  int64
+	focused  bool
+	cursorY  int
+	selStart int
+	selEnd   int
+	width    int
+}
+
 // readLogLines returns all log lines in reverse order (newest first).
-func readLogLines() []string {
+// Results are cached and only refreshed when the file changes.
+// Must be called from the gocui event loop goroutine only.
+func (a *App) readLogLines() []string {
+	info, err := os.Stat(serverLogPath)
+	if err != nil {
+		return nil
+	}
+	mt := info.ModTime().UnixNano()
+	if mt == a.logCache.modTime {
+		return a.logCache.lines
+	}
 	data, err := os.ReadFile(serverLogPath)
 	if err != nil {
 		return nil
@@ -104,13 +136,20 @@ func readLogLines() []string {
 	for i, b := range raw {
 		lines[len(raw)-1-i] = string(b)
 	}
+	a.logCache.modTime = mt
+	a.logCache.lines = lines
 	return lines
 }
 
 // renderServerLog writes log lines with cursor/selection highlighting.
-func renderServerLog(v *gocui.View, logs *LogsState, focused bool) {
-	lines := readLogLines()
+// It skips the expensive v.Clear() + Write cycle when the render state
+// (log content, focus, cursor, selection, width) has not changed.
+// Must be called from the gocui event loop goroutine only.
+func (a *App) renderServerLog(v *gocui.View, logs *LogsState, focused bool) {
+	lines := a.readLogLines()
 	if len(lines) == 0 {
+		// Always re-render the empty state (cheap).
+		v.Clear()
 		fmt.Fprintln(v, presentation.Dim+"  MCP: no log"+presentation.Reset)
 		logs.SetLineCount(0)
 		return
@@ -120,8 +159,27 @@ func renderServerLog(v *gocui.View, logs *LogsState, focused bool) {
 
 	selStart, selEnd := logs.SelectionRange()
 	cursorY := logs.CursorY()
-	selecting := logs.IsSelecting()
 	w := v.InnerWidth()
+
+	// Skip re-render if nothing changed since last time.
+	rc := &a.logRender
+	if rc.modTime == a.logCache.modTime &&
+		rc.focused == focused &&
+		rc.cursorY == cursorY &&
+		rc.selStart == selStart &&
+		rc.selEnd == selEnd &&
+		rc.width == w {
+		return
+	}
+	rc.modTime = a.logCache.modTime
+	rc.focused = focused
+	rc.cursorY = cursorY
+	rc.selStart = selStart
+	rc.selEnd = selEnd
+	rc.width = w
+
+	v.Clear()
+	selecting := logs.IsSelecting()
 
 	for i, raw := range lines {
 		line := " " + raw

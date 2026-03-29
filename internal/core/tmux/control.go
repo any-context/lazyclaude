@@ -53,6 +53,17 @@ func ParseControlLine(line string) ControlEvent {
 	return ControlEvent{Type: EventOther, Data: line}
 }
 
+// pendingQuery is an in-flight control mode command awaiting its
+// %begin/%end response block.
+type pendingQuery struct {
+	ch chan queryResult // response is delivered here
+}
+
+type queryResult struct {
+	lines []string
+	err   bool // true if %error instead of %end
+}
+
 // ControlClient maintains a tmux control mode connection.
 // It receives %output events and can send commands through the connection.
 type ControlClient struct {
@@ -65,8 +76,12 @@ type ControlClient struct {
 
 	mu       sync.Mutex
 	onOutput func(paneID string) // callback when pane has new output
-	done     chan struct{}
-	closed   bool
+	// queryQueue is a FIFO of pending Query calls. Control mode is
+	// sequential: commands are processed in order, so the next %begin
+	// always belongs to the oldest pending query.
+	queryQueue []pendingQuery
+	done       chan struct{}
+	closed     bool
 }
 
 // NewControlClient creates and starts a control mode connection.
@@ -236,18 +251,130 @@ func (c *ControlClient) readLoop() {
 	defer func() {
 		c.mu.Lock()
 		c.closed = true
+		// Drain any pending queries so callers don't hang.
+		for _, pq := range c.queryQueue {
+			close(pq.ch)
+		}
+		c.queryQueue = nil
 		c.mu.Unlock()
 	}()
+
+	var (
+		inBlock  bool
+		blockNum string
+		blockBuf []string
+		blockPQ  *pendingQuery // the query this block belongs to
+		isError  bool
+	)
+
 	for c.scanner.Scan() {
 		line := c.scanner.Text()
+
+		// Inside a %begin/%end response block: accumulate lines.
+		if inBlock {
+			ev := ParseControlLine(line)
+			if (ev.Type == EventEnd || ev.Type == EventError) && extractNum(ev.Data) == blockNum {
+				if blockPQ != nil {
+					blockPQ.ch <- queryResult{lines: blockBuf, err: isError || ev.Type == EventError}
+				}
+				inBlock = false
+				blockPQ = nil
+				blockBuf = nil
+				continue
+			}
+			blockBuf = append(blockBuf, line)
+			continue
+		}
+
 		ev := ParseControlLine(line)
-		if ev.Type == EventOutput {
+		switch ev.Type {
+		case EventOutput:
 			c.mu.Lock()
 			fn := c.onOutput
 			c.mu.Unlock()
 			if fn != nil {
 				fn(ev.PaneID)
 			}
+		case EventBegin:
+			blockNum = extractNum(ev.Data)
+			inBlock = true
+			isError = false
+			blockBuf = nil
+			// Pop the oldest pending query (FIFO — control mode is sequential).
+			c.mu.Lock()
+			if len(c.queryQueue) > 0 {
+				pq := c.queryQueue[0]
+				c.queryQueue = c.queryQueue[1:]
+				blockPQ = &pq
+			} else {
+				blockPQ = nil // unsolicited response (e.g. from attach)
+			}
+			c.mu.Unlock()
+		default:
+			// Ignore other notifications.
 		}
+	}
+}
+
+// extractNum extracts the command number from a %begin/%end data string.
+// Format: "<time> <num> <flags>"
+func extractNum(data string) string {
+	parts := strings.Fields(data)
+	if len(parts) >= 2 {
+		return parts[1]
+	}
+	return ""
+}
+
+// Query sends a tmux command through the control mode connection and
+// returns the response lines. This avoids spawning a subprocess.
+// Control mode processes commands sequentially, so concurrent Query
+// calls are serialized by the mutex on write and the FIFO on read.
+func (c *ControlClient) Query(ctx context.Context, command string) (string, error) {
+	ch := make(chan queryResult, 1)
+
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return "", fmt.Errorf("control client closed")
+	}
+	// Enqueue before writing to guarantee readLoop sees our entry
+	// before the %begin arrives.
+	c.queryQueue = append(c.queryQueue, pendingQuery{ch: ch})
+	_, err := fmt.Fprintf(c.stdin, "%s\n", command)
+	if err != nil {
+		// Remove the entry we just added.
+		c.queryQueue = c.queryQueue[:len(c.queryQueue)-1]
+		c.mu.Unlock()
+		return "", fmt.Errorf("write command: %w", err)
+	}
+	c.mu.Unlock()
+
+	select {
+	case res, ok := <-ch:
+		if !ok {
+			return "", fmt.Errorf("control client closed during query")
+		}
+		if res.err {
+			return "", fmt.Errorf("tmux error: %s", strings.Join(res.lines, "\n"))
+		}
+		return strings.Join(res.lines, "\n"), nil
+	case <-ctx.Done():
+		// Remove our entry from the queue to prevent FIFO misalignment.
+		// If readLoop already popped it, the channel is buffered-1 so
+		// we drain it to avoid a leaked goroutine.
+		c.mu.Lock()
+		for i, pq := range c.queryQueue {
+			if pq.ch == ch {
+				c.queryQueue = append(c.queryQueue[:i], c.queryQueue[i+1:]...)
+				break
+			}
+		}
+		c.mu.Unlock()
+		select {
+		case <-ch:
+		default:
+		}
+		return "", ctx.Err()
 	}
 }

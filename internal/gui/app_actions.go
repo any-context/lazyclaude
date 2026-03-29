@@ -438,7 +438,7 @@ func (a *App) LogsCursorToTop()   { a.logs.ToTop() }
 func (a *App) LogsToggleSelect()  { a.logs.ToggleSelect() }
 
 func (a *App) LogsCopySelection() {
-	text := a.logs.CopyText(readLogLines())
+	text := a.logs.CopyText(a.readLogLines())
 	if text != "" {
 		copyToClipboard(text)
 	}
