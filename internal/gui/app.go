@@ -105,6 +105,8 @@ type App struct {
 	panelTabs          map[string]int               // panel name -> active tab index
 	pluginState        *PluginState                 // plugin panel UI state
 	plugins            PluginProvider               // plugin operations (nil until wired)
+	mcpState           *MCPState                    // MCP tab UI state
+	mcpServers         MCPProvider                  // MCP operations (nil until wired)
 	logCache           logFileCache                 // cached server log file content
 	logRender          logRenderCache               // tracks last rendered log state
 }
@@ -121,6 +123,7 @@ func newApp(mode AppMode, g *gocui.Gui, enableMouse bool) (*App, error) {
 		logs:        NewLogsState(),
 		notify:      NewNotifyLoop(),
 		pluginState: NewPluginState(),
+		mcpState:    NewMCPState(),
 		panelTabs:   make(map[string]int),
 	}
 	app.fullscreen = NewFullScreenState(app.preview)
@@ -292,6 +295,11 @@ func (a *App) SetSessions(sp SessionProvider) {
 // SetPlugins sets the plugin provider for the plugins panel.
 func (a *App) SetPlugins(pp PluginProvider) {
 	a.plugins = pp
+}
+
+// SetMCP sets the MCP provider for the MCP tab.
+func (a *App) SetMCP(mp MCPProvider) {
+	a.mcpServers = mp
 }
 
 // SetInputForwarder sets the input forwarder for full-screen mode.

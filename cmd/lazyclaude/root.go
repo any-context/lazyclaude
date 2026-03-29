@@ -20,6 +20,7 @@ import (
 	"github.com/KEMSHlM/lazyclaude/internal/core/model"
 	"github.com/KEMSHlM/lazyclaude/internal/core/tmux"
 	"github.com/KEMSHlM/lazyclaude/internal/gui"
+	"github.com/KEMSHlM/lazyclaude/internal/mcp"
 	"github.com/KEMSHlM/lazyclaude/internal/notify"
 	"github.com/KEMSHlM/lazyclaude/internal/plugin"
 	"github.com/KEMSHlM/lazyclaude/internal/server"
@@ -123,6 +124,12 @@ func newRootCmd() *cobra.Command {
 			pluginCLI := plugin.NewExecCLI(pluginOpts...)
 			pluginMgr := plugin.NewManager(pluginCLI, logger)
 			app.SetPlugins(&pluginAdapter{mgr: pluginMgr})
+
+			// MCP manager: reads ~/.claude.json + project deny lists
+			home, _ := os.UserHomeDir()
+			userClaudeJSON := filepath.Join(home, ".claude.json")
+			mcpMgr := mcp.NewManager(userClaudeJSON)
+			app.SetMCP(&mcpAdapter{mgr: mcpMgr})
 
 			// Wire the notify broker (nil-safe: falls back to file polling only).
 			app.SetNotifyBroker(notifyBroker)
@@ -605,6 +612,40 @@ func (a *pluginAdapter) ToggleEnabled(ctx context.Context, pluginID string) erro
 
 func (a *pluginAdapter) Update(ctx context.Context, pluginID string) error {
 	return a.mgr.Update(ctx, pluginID)
+}
+
+// mcpAdapter converts between mcp.Manager types and gui types.
+type mcpAdapter struct {
+	mgr *mcp.Manager
+}
+
+func (a *mcpAdapter) SetProjectDir(dir string) {
+	a.mgr.SetProjectDir(dir)
+}
+
+func (a *mcpAdapter) Refresh(ctx context.Context) error {
+	return a.mgr.Refresh(ctx)
+}
+
+func (a *mcpAdapter) Servers() []gui.MCPItem {
+	servers := a.mgr.Servers()
+	items := make([]gui.MCPItem, len(servers))
+	for i, s := range servers {
+		items[i] = gui.MCPItem{
+			Name:    s.Name,
+			Type:    s.Config.EffectiveType(),
+			Scope:   s.Scope,
+			Denied:  s.Denied,
+			Command: s.Config.Command,
+			Args:    s.Config.Args,
+			URL:     s.Config.URL,
+		}
+	}
+	return items
+}
+
+func (a *mcpAdapter) ToggleDenied(ctx context.Context, name string) error {
+	return a.mgr.ToggleDenied(ctx, name)
 }
 
 // findClaudeBinary resolves the absolute path to the claude binary.

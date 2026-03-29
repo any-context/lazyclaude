@@ -78,6 +78,14 @@ const (
 	ActionPluginRefresh      KeyAction = "plugin_refresh"
 )
 
+// --- MCP panel actions ---
+const (
+	ActionMCPCursorDown   KeyAction = "mcp_cursor_down"
+	ActionMCPCursorUp     KeyAction = "mcp_cursor_up"
+	ActionMCPToggleDenied KeyAction = "mcp_toggle_denied"
+	ActionMCPRefresh      KeyAction = "mcp_refresh"
+)
+
 // --- Log panel actions ---
 const (
 	ActionLogsCursorDown    KeyAction = "logs_cursor_down"

@@ -135,6 +135,13 @@ func (a *App) syncPluginProjectOnce() {
 	a.runPluginAsync(func(ctx context.Context) error {
 		return a.plugins.Refresh(ctx)
 	})
+	if a.mcpServers != nil {
+		cwd, _ := filepath.Abs(".")
+		a.mcpServers.SetProjectDir(cwd)
+		a.runMCPAsync(func(ctx context.Context) error {
+			return a.mcpServers.Refresh(ctx)
+		})
+	}
 	a.pluginState.projectDir = "." // mark as initialised to prevent re-entry
 }
 
@@ -164,6 +171,14 @@ func (a *App) syncPluginProject() {
 	a.runPluginAsync(func(ctx context.Context) error {
 		return a.plugins.Refresh(ctx)
 	})
+
+	if a.mcpServers != nil {
+		a.mcpState.cursor = 0
+		a.mcpServers.SetProjectDir(projectPath)
+		a.runMCPAsync(func(ctx context.Context) error {
+			return a.mcpServers.Refresh(ctx)
+		})
+	}
 }
 
 // --- Path helpers ---
@@ -548,7 +563,7 @@ func (a *App) PluginCursorUp() {
 }
 
 func (a *App) PluginInstall() {
-	if a.plugins == nil || a.pluginState.tabIdx != 1 {
+	if a.plugins == nil || a.pluginState.tabIdx != 2 {
 		return
 	}
 	avail := a.plugins.Available()
@@ -562,7 +577,7 @@ func (a *App) PluginInstall() {
 }
 
 func (a *App) PluginUninstall() {
-	if a.plugins == nil || a.pluginState.tabIdx != 0 {
+	if a.plugins == nil || a.pluginState.tabIdx != 1 {
 		return
 	}
 	installed := a.plugins.Installed()
@@ -576,7 +591,7 @@ func (a *App) PluginUninstall() {
 }
 
 func (a *App) PluginToggleEnabled() {
-	if a.plugins == nil || a.pluginState.tabIdx != 0 {
+	if a.plugins == nil || a.pluginState.tabIdx != 1 {
 		return
 	}
 	installed := a.plugins.Installed()
@@ -590,7 +605,7 @@ func (a *App) PluginToggleEnabled() {
 }
 
 func (a *App) PluginUpdate() {
-	if a.plugins == nil || a.pluginState.tabIdx != 0 {
+	if a.plugins == nil || a.pluginState.tabIdx != 1 {
 		return
 	}
 	installed := a.plugins.Installed()
@@ -633,10 +648,70 @@ func (a *App) pluginItemCount() int {
 	if a.plugins == nil {
 		return 0
 	}
-	if a.pluginState.tabIdx == 0 {
+	if a.pluginState.tabIdx == 1 {
 		return len(a.plugins.Installed())
 	}
 	return len(a.plugins.Available())
+}
+
+// --- MCP panel ---
+
+func (a *App) MCPCursorDown() {
+	max := a.mcpItemCount() - 1
+	if a.mcpState.cursor < max {
+		a.mcpState.cursor++
+	}
+}
+
+func (a *App) MCPCursorUp() {
+	if a.mcpState.cursor > 0 {
+		a.mcpState.cursor--
+	}
+}
+
+func (a *App) MCPToggleDenied() {
+	if a.mcpServers == nil || a.pluginState.tabIdx != 0 {
+		return
+	}
+	servers := a.mcpServers.Servers()
+	if a.mcpState.cursor >= len(servers) {
+		return
+	}
+	name := servers[a.mcpState.cursor].Name
+	a.runMCPAsync(func(ctx context.Context) error {
+		return a.mcpServers.ToggleDenied(ctx, name)
+	})
+}
+
+func (a *App) MCPRefresh() {
+	if a.mcpServers == nil {
+		return
+	}
+	a.runMCPAsync(func(ctx context.Context) error {
+		return a.mcpServers.Refresh(ctx)
+	})
+}
+
+func (a *App) runMCPAsync(fn func(ctx context.Context) error) {
+	a.mcpState.loading = true
+	a.mcpState.errMsg = ""
+	go func() {
+		err := fn(context.Background())
+		a.gui.Update(func(g *gocui.Gui) error {
+			a.mcpState.loading = false
+			if err != nil {
+				a.mcpState.errMsg = err.Error()
+			}
+			return nil
+		})
+	}()
+}
+
+func (a *App) mcpItemCount() int {
+	if a.mcpServers == nil {
+		return 0
+	}
+	return len(a.mcpServers.Servers())
 }
 
 // --- Application ---

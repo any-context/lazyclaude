@@ -12,10 +12,24 @@ import (
 func (a *App) renderPluginPanel(v *gocui.View, maxWidth int) {
 	// Use gocui native Tabs API for consistent tab rendering.
 	// TitlePrefix renders before tabs: "╭─ Plugins ─ Installed - Marketplace ──╮"
-	v.Tabs = []string{"Plugins", "Marketplace"}
+	v.Tabs = []string{"MCP", "Plugins", "Marketplace"}
 	v.TabIndex = a.pluginState.tabIdx
 	v.SelFgColor = gocui.ColorWhite
 
+	focused := a.panelManager.ActivePanel().Name() == "plugins"
+
+	switch a.pluginState.tabIdx {
+	case 0: // MCP
+		a.renderMCPList(v, maxWidth, focused)
+		return
+	case 1: // Plugins
+		// fall through to plugin rendering below
+	case 2: // Marketplace
+		a.renderAvailableList(v, maxWidth, focused)
+		return
+	}
+
+	// Tab 1: Plugins (installed)
 	if a.pluginState.loading {
 		fmt.Fprintln(v, "")
 		fmt.Fprintln(v, presentation.Dim+"  Loading..."+presentation.Reset)
@@ -34,13 +48,7 @@ func (a *App) renderPluginPanel(v *gocui.View, maxWidth int) {
 		return
 	}
 
-	focused := a.panelManager.ActivePanel().Name() == "plugins"
-
-	if a.pluginState.tabIdx == 0 {
-		a.renderInstalledList(v, maxWidth, focused)
-	} else {
-		a.renderAvailableList(v, maxWidth, focused)
-	}
+	a.renderInstalledList(v, maxWidth, focused)
 }
 
 func (a *App) renderInstalledList(v *gocui.View, maxWidth int, focused bool) {
@@ -87,12 +95,15 @@ func (a *App) renderAvailableList(v *gocui.View, maxWidth int, focused bool) {
 
 // renderPluginPreview renders the right panel when plugins panel is focused.
 func (a *App) renderPluginPreview(v *gocui.View) {
-	if a.plugins == nil || a.pluginState.loading {
-		v.Title = " Preview "
+	switch a.pluginState.tabIdx {
+	case 0: // MCP
+		a.renderMCPPreview(v)
 		return
-	}
-
-	if a.pluginState.tabIdx == 0 {
+	case 1: // Plugins
+		if a.plugins == nil || a.pluginState.loading {
+			v.Title = " Preview "
+			return
+		}
 		installed := a.plugins.Installed()
 		if a.pluginState.installedCursor < len(installed) {
 			p := installed[a.pluginState.installedCursor]
@@ -100,7 +111,11 @@ func (a *App) renderPluginPreview(v *gocui.View) {
 			fmt.Fprint(v, presentation.FormatPluginPreview(p.ID, p.Version, p.Scope, p.InstalledAt, p.Enabled))
 			return
 		}
-	} else {
+	case 2: // Marketplace
+		if a.plugins == nil || a.pluginState.loading {
+			v.Title = " Preview "
+			return
+		}
 		available := a.plugins.Available()
 		if a.pluginState.marketCursor < len(available) {
 			p := available[a.pluginState.marketCursor]
@@ -112,7 +127,7 @@ func (a *App) renderPluginPreview(v *gocui.View) {
 
 	v.Title = " Preview "
 	fmt.Fprintln(v, "")
-	fmt.Fprintln(v, presentation.Dim+"  Select a plugin to view details"+presentation.Reset)
+	fmt.Fprintln(v, presentation.Dim+"  Select an item to view details"+presentation.Reset)
 }
 
 func pluginDisplayName(id string) string {

@@ -8,7 +8,53 @@ import (
 	"github.com/jesseduffield/gocui"
 )
 
-func TestPluginsPanel_Navigation(t *testing.T) {
+func TestPluginsPanel_MCPTab_Navigation(t *testing.T) {
+	reg := keymap.Default()
+	p := keyhandler.NewPluginsPanel(reg)
+	tests := []struct {
+		ev   keyhandler.KeyEvent
+		want string
+	}{
+		{keyhandler.KeyEvent{Rune: 'j'}, "MCPCursorDown"},
+		{keyhandler.KeyEvent{Key: gocui.KeyArrowDown}, "MCPCursorDown"},
+		{keyhandler.KeyEvent{Rune: 'k'}, "MCPCursorUp"},
+		{keyhandler.KeyEvent{Key: gocui.KeyArrowUp}, "MCPCursorUp"},
+	}
+	for _, tt := range tests {
+		a := &mockActions{tabIndex: 0} // MCP tab
+		r := p.HandleKey(tt.ev, a)
+		if r != keyhandler.Handled {
+			t.Errorf("key %v: want Handled", tt.ev)
+		}
+		if a.lastCall() != tt.want {
+			t.Errorf("key %v: got %q, want %q", tt.ev, a.lastCall(), tt.want)
+		}
+	}
+}
+
+func TestPluginsPanel_MCPTab_Operations(t *testing.T) {
+	reg := keymap.Default()
+	p := keyhandler.NewPluginsPanel(reg)
+	tests := []struct {
+		ev   keyhandler.KeyEvent
+		want string
+	}{
+		{keyhandler.KeyEvent{Rune: 'e'}, "MCPToggleDenied"},
+		{keyhandler.KeyEvent{Rune: 'r'}, "MCPRefresh"},
+	}
+	for _, tt := range tests {
+		a := &mockActions{tabIndex: 0} // MCP tab
+		r := p.HandleKey(tt.ev, a)
+		if r != keyhandler.Handled {
+			t.Errorf("key %v: want Handled", tt.ev)
+		}
+		if a.lastCall() != tt.want {
+			t.Errorf("key %v: got %q, want %q", tt.ev, a.lastCall(), tt.want)
+		}
+	}
+}
+
+func TestPluginsPanel_PluginsTab_Navigation(t *testing.T) {
 	reg := keymap.Default()
 	p := keyhandler.NewPluginsPanel(reg)
 	tests := []struct {
@@ -21,7 +67,7 @@ func TestPluginsPanel_Navigation(t *testing.T) {
 		{keyhandler.KeyEvent{Key: gocui.KeyArrowUp}, "PluginCursorUp"},
 	}
 	for _, tt := range tests {
-		a := newMockActions()
+		a := &mockActions{tabIndex: 1} // Plugins tab
 		r := p.HandleKey(tt.ev, a)
 		if r != keyhandler.Handled {
 			t.Errorf("key %v: want Handled", tt.ev)
@@ -32,7 +78,7 @@ func TestPluginsPanel_Navigation(t *testing.T) {
 	}
 }
 
-func TestPluginsPanel_InstalledTabOperations(t *testing.T) {
+func TestPluginsPanel_PluginsTab_Operations(t *testing.T) {
 	reg := keymap.Default()
 	p := keyhandler.NewPluginsPanel(reg)
 	tests := []struct {
@@ -45,7 +91,7 @@ func TestPluginsPanel_InstalledTabOperations(t *testing.T) {
 		{keyhandler.KeyEvent{Rune: 'r'}, "PluginRefresh"},
 	}
 	for _, tt := range tests {
-		a := newMockActions() // tabIndex=0 (Installed)
+		a := &mockActions{tabIndex: 1} // Plugins tab
 		r := p.HandleKey(tt.ev, a)
 		if r != keyhandler.Handled {
 			t.Errorf("key %v: want Handled", tt.ev)
@@ -56,7 +102,7 @@ func TestPluginsPanel_InstalledTabOperations(t *testing.T) {
 	}
 }
 
-func TestPluginsPanel_MarketplaceTabOperations(t *testing.T) {
+func TestPluginsPanel_MarketplaceTab_Operations(t *testing.T) {
 	reg := keymap.Default()
 	p := keyhandler.NewPluginsPanel(reg)
 	tests := []struct {
@@ -67,7 +113,7 @@ func TestPluginsPanel_MarketplaceTabOperations(t *testing.T) {
 		{keyhandler.KeyEvent{Rune: 'r'}, "PluginRefresh"},
 	}
 	for _, tt := range tests {
-		a := &mockActions{tabIndex: 1} // Marketplace tab
+		a := &mockActions{tabIndex: 2} // Marketplace tab
 		r := p.HandleKey(tt.ev, a)
 		if r != keyhandler.Handled {
 			t.Errorf("key %v: want Handled", tt.ev)
@@ -78,18 +124,16 @@ func TestPluginsPanel_MarketplaceTabOperations(t *testing.T) {
 	}
 }
 
-func TestPluginsPanel_InstalledTab_RejectsMarketplaceKeys(t *testing.T) {
+func TestPluginsPanel_PluginsTab_RejectsMarketplaceKeys(t *testing.T) {
 	reg := keymap.Default()
 	p := keyhandler.NewPluginsPanel(reg)
-	a := newMockActions() // tabIndex=0 (Installed)
-	// 'i' (install) is Marketplace-only
+	a := &mockActions{tabIndex: 1} // Plugins tab
 	if p.HandleKey(keyhandler.KeyEvent{Rune: 'i'}, a) != keyhandler.Unhandled {
-		t.Error("'i' should be Unhandled on Installed tab")
+		t.Error("'i' should be Unhandled on Plugins tab")
 	}
 }
 
 func TestPluginsPanel_TabSwitchingHandledByGlobal(t *testing.T) {
-	// [/] keys should NOT be handled by PluginsPanel — they are handled by GlobalHandler
 	reg := keymap.Default()
 	p := keyhandler.NewPluginsPanel(reg)
 	a := newMockActions()
@@ -114,11 +158,15 @@ func TestPluginsPanel_Unhandled(t *testing.T) {
 func TestPluginsPanel_OptionsBarForTab(t *testing.T) {
 	reg := keymap.Default()
 	p := keyhandler.NewPluginsPanel(reg)
-	installed := p.OptionsBarForTab(0)
-	marketplace := p.OptionsBarForTab(1)
+	mcpBar := p.OptionsBarForTab(0)
+	pluginsBar := p.OptionsBarForTab(1)
+	marketBar := p.OptionsBarForTab(2)
 
-	if installed == marketplace {
-		t.Error("installed and marketplace options bars should differ")
+	if mcpBar == pluginsBar {
+		t.Error("MCP and plugins options bars should differ")
+	}
+	if pluginsBar == marketBar {
+		t.Error("plugins and marketplace options bars should differ")
 	}
 }
 
@@ -128,7 +176,11 @@ func TestPluginsPanel_Name(t *testing.T) {
 	if p.Name() != "plugins" {
 		t.Errorf("Name = %q", p.Name())
 	}
-	if p.TabCount() != 2 {
+	if p.TabCount() != 3 {
 		t.Errorf("TabCount = %d", p.TabCount())
+	}
+	labels := p.TabLabels()
+	if len(labels) != 3 || labels[0] != "MCP" || labels[1] != "Plugins" || labels[2] != "Marketplace" {
+		t.Errorf("TabLabels = %v", labels)
 	}
 }

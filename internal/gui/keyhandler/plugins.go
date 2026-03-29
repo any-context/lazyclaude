@@ -28,6 +28,14 @@ func (p *PluginsPanel) HandleKey(ev KeyEvent, actions AppActions) HandlerResult 
 	}
 
 	switch def.Action {
+	case keymap.ActionMCPCursorDown:
+		actions.MCPCursorDown()
+	case keymap.ActionMCPCursorUp:
+		actions.MCPCursorUp()
+	case keymap.ActionMCPToggleDenied:
+		actions.MCPToggleDenied()
+	case keymap.ActionMCPRefresh:
+		actions.MCPRefresh()
 	case keymap.ActionPluginCursorDown:
 		actions.PluginCursorDown()
 	case keymap.ActionPluginCursorUp:
@@ -62,5 +70,5 @@ func (p *PluginsPanel) OptionsBarForTab(tabIdx int) string {
 	return presentation.BuildOptionsBar(defs)
 }
 
-func (p *PluginsPanel) TabCount() int       { return 2 }
-func (p *PluginsPanel) TabLabels() []string { return []string{"Installed", "Marketplace"} }
+func (p *PluginsPanel) TabCount() int       { return 3 }
+func (p *PluginsPanel) TabLabels() []string { return []string{"MCP", "Plugins", "Marketplace"} }

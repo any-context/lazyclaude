@@ -72,6 +72,12 @@ type AppActions interface {
 	PluginUpdate()
 	PluginRefresh()
 
+	// MCP panel
+	MCPCursorDown()
+	MCPCursorUp()
+	MCPToggleDenied()
+	MCPRefresh()
+
 	// Application
 	Quit()
 }

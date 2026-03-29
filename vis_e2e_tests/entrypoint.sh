@@ -66,6 +66,31 @@ GOEOF
         # msg API テストは Claude Code セッション内から自律実行される
         # (人間はプロンプトを送るだけ。API は Claude Code が叩く)
         ;;
+    mcp_toggle)
+        # MCP トグル E2E: MCP タブの表示・on/off 切替を実演
+        cat > /root/.claude.json << 'MCPEOF'
+{
+  "hasCompletedOnboarding": true,
+  "numStartups": 10,
+  "projects": {"/": {"hasTrustDialogAccepted": true, "allowedTools": []}},
+  "mcpServers": {
+    "github": {
+      "command": "echo",
+      "args": ["github-mcp"]
+    },
+    "memory": {
+      "command": "echo",
+      "args": ["memory-mcp"]
+    },
+    "vercel": {
+      "type": "http",
+      "url": "https://mcp.vercel.com"
+    }
+  }
+}
+MCPEOF
+        mkdir -p /app/.claude
+        ;;
     plugin_mode)
         # プラグインモード E2E: プラグインの install/toggle/uninstall を実演
         # 1. 公式マーケットプレイスを追加

@@ -272,53 +272,101 @@ func Default() *Registry {
 	})
 
 	// --- Plugins panel ---
-	// Tab: TabAll = both tabs, 0 = Installed only, 1 = Marketplace only
+	// Tab layout: 0 = MCP, 1 = Plugins, 2 = Marketplace
+	// MCP tab (0): cursor, toggle denied, refresh
 	r.Register(ActionDef{
-		Action:   ActionPluginCursorDown,
+		Action:   ActionMCPCursorDown,
 		Bindings: []KeyBinding{{Rune: 'j'}, {Key: gocui.KeyArrowDown}},
 		Scope:    ScopePlugins,
-		Tab:      TabAll,
+		Tab:      0,
 	})
 	r.Register(ActionDef{
-		Action:   ActionPluginCursorUp,
+		Action:   ActionMCPCursorUp,
 		Bindings: []KeyBinding{{Rune: 'k'}, {Key: gocui.KeyArrowUp}},
 		Scope:    ScopePlugins,
-		Tab:      TabAll,
+		Tab:      0,
 	})
 	r.Register(ActionDef{
-		Action:    ActionPluginToggleEnabled,
+		Action:    ActionMCPToggleDenied,
 		Bindings:  []KeyBinding{{Rune: 'e'}},
 		Scope:     ScopePlugins,
 		Tab:       0,
 		HintLabel: "toggle",
 	})
 	r.Register(ActionDef{
+		Action:    ActionMCPRefresh,
+		Bindings:  []KeyBinding{{Rune: 'r'}},
+		Scope:     ScopePlugins,
+		Tab:       0,
+		HintLabel: "refresh",
+	})
+	// Plugins tab (1): cursor, toggle, uninstall, update, refresh
+	r.Register(ActionDef{
+		Action:   ActionPluginCursorDown,
+		Bindings: []KeyBinding{{Rune: 'j'}, {Key: gocui.KeyArrowDown}},
+		Scope:    ScopePlugins,
+		Tab:      1,
+	})
+	r.Register(ActionDef{
+		Action:   ActionPluginCursorUp,
+		Bindings: []KeyBinding{{Rune: 'k'}, {Key: gocui.KeyArrowUp}},
+		Scope:    ScopePlugins,
+		Tab:      1,
+	})
+	r.Register(ActionDef{
+		Action:    ActionPluginToggleEnabled,
+		Bindings:  []KeyBinding{{Rune: 'e'}},
+		Scope:     ScopePlugins,
+		Tab:       1,
+		HintLabel: "toggle",
+	})
+	r.Register(ActionDef{
 		Action:    ActionPluginUninstall,
 		Bindings:  []KeyBinding{{Rune: 'd'}},
 		Scope:     ScopePlugins,
-		Tab:       0,
+		Tab:       1,
 		HintLabel: "uninstall",
 	})
 	r.Register(ActionDef{
 		Action:    ActionPluginUpdate,
 		Bindings:  []KeyBinding{{Rune: 'u'}},
 		Scope:     ScopePlugins,
-		Tab:       0,
+		Tab:       1,
 		HintLabel: "update",
 	})
 	r.Register(ActionDef{
 		Action:    ActionPluginRefresh,
 		Bindings:  []KeyBinding{{Rune: 'r'}},
 		Scope:     ScopePlugins,
-		Tab:       TabAll,
+		Tab:       1,
 		HintLabel: "refresh",
+	})
+	// Marketplace tab (2): cursor, install, refresh
+	r.Register(ActionDef{
+		Action:   ActionPluginCursorDown,
+		Bindings: []KeyBinding{{Rune: 'j'}, {Key: gocui.KeyArrowDown}},
+		Scope:    ScopePlugins,
+		Tab:      2,
+	})
+	r.Register(ActionDef{
+		Action:   ActionPluginCursorUp,
+		Bindings: []KeyBinding{{Rune: 'k'}, {Key: gocui.KeyArrowUp}},
+		Scope:    ScopePlugins,
+		Tab:      2,
 	})
 	r.Register(ActionDef{
 		Action:    ActionPluginInstall,
 		Bindings:  []KeyBinding{{Rune: 'i'}},
 		Scope:     ScopePlugins,
-		Tab:       1,
+		Tab:       2,
 		HintLabel: "install",
+	})
+	r.Register(ActionDef{
+		Action:    ActionPluginRefresh,
+		Bindings:  []KeyBinding{{Rune: 'r'}},
+		Scope:     ScopePlugins,
+		Tab:       2,
+		HintLabel: "refresh",
 	})
 
 	// --- Logs panel ---

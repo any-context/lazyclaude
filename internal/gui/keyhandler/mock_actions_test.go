@@ -73,3 +73,7 @@ func (m *mockActions) PluginUninstall()                  { m.record("PluginUnins
 func (m *mockActions) PluginToggleEnabled()              { m.record("PluginToggleEnabled") }
 func (m *mockActions) PluginUpdate()                     { m.record("PluginUpdate") }
 func (m *mockActions) PluginRefresh()                    { m.record("PluginRefresh") }
+func (m *mockActions) MCPCursorDown()                    { m.record("MCPCursorDown") }
+func (m *mockActions) MCPCursorUp()                      { m.record("MCPCursorUp") }
+func (m *mockActions) MCPToggleDenied()                  { m.record("MCPToggleDenied") }
+func (m *mockActions) MCPRefresh()                       { m.record("MCPRefresh") }
