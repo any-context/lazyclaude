@@ -86,6 +86,19 @@ InnerHeight = Height - 2  (常に)
 同じバイト (0x1B)。gocui/tcell で区別不可能。
 lazyclaude は **Ctrl+\\** を normal mode 切替に使用。
 
+### ペースト処理
+
+- pollEvent レベルで bracketed paste を集約し、単一の `eventPasteContent` として gEvents に送る
+- gEvents チャネルのオーバーフロー（容量20）を構造的に防止
+- ESC[200~ フォールバック検出: tmux display-popup で tcell が EventPaste を送れない場合の対策
+- inputEditor はペースト状態マシンを持たない。`OnPasteContent` callback 経由で `forwardPaste` を呼ぶだけ
+
+### third_party_gocui / third_party_tcell
+
+- `third_party_gocui`: jesseduffield/gocui のフォーク。paste 集約、rawEvents パイプライン等を追加
+- `third_party_tcell`: gdamore/tcell/v2 のフォーク。最小限のビルドファイルのみ。パッチ内容は `LAZYCLAUDE_PATCHES.md` に記録
+- `go.mod` の `replace` directive でローカル参照
+
 ## tmux アーキテクチャ
 
 ### 2つの tmux サーバー
@@ -103,6 +116,8 @@ attach 中: キー → lazyclaude tmux の root table → マッチなら実行
 
 ### display-popup の動作 (tmux 3.4+)
 
+- TUI の起動のみに使用 (`lazyclaude-launch.sh` → `display-popup`)
+- 通知ポップアップは gocui overlay で表示 (display-popup 通知モードは #18 で削除済み)
 - popup 内から `display-popup` を呼ぶと既存 popup を **変更** できる (ネストではない)
 - `-b rounded` / `-B` で枠線を動的に切り替え可能
 - popup 内のプロセスが終了すると変更も消える
@@ -113,9 +128,11 @@ attach 中: キー → lazyclaude tmux の root table → マッチなら実行
 
 ### MCP サーバー
 
-- `lazyclaude setup` で起動される常駐デーモン
-- サーバーログ: `/tmp/lazyclaude-server.log`
+- TUI 起動時に in-process で起動 (`tryStartInProcessServer`)。既存 daemon は `StopDaemon` で停止してから起動
+- `lazyclaude setup` は daemon を起動するが、TUI 起動時に in-process に切り替わる
+- サーバーログ: `/tmp/lazyclaude/server.log` (prefix: `lazyclaude-srv:`)
 - 重複起動防止: `server.IsAlive()` で port file + TCP dial チェック
+- gocui TUI プロセス内で `slog.Default()` を使うとターミナル描画が破壊される。エラーは `fmt.Errorf` で返却し GUI 層で表示する
 
 ### パフォーマンス
 
