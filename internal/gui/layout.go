@@ -146,7 +146,11 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 		return err
 	}
 	setRoundedFrame(v)
-	v.Title = " Sessions "
+	if q := a.effectiveQuery("sessions"); q != "" {
+		v.Title = fmt.Sprintf(" Sessions [/%s] ", q)
+	} else {
+		v.Title = " Sessions "
+	}
 	v.Highlight = true
 	v.SelBgColor = gocui.Get256Color(24)
 	v.SelFgColor = gocui.ColorWhite
@@ -187,7 +191,11 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 		return err
 	}
 	setRoundedFrame(v2)
-	v2.Title = " Logs "
+	if q := a.effectiveQuery("logs"); q != "" {
+		v2.Title = fmt.Sprintf(" Logs [/%s] ", q)
+	} else {
+		v2.Title = " Logs "
+	}
 	v2.Wrap = true
 	a.renderServerLog(v2, a.logs, focusedName == "logs")
 

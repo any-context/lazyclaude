@@ -15,26 +15,34 @@ func TestFilterTreeNodes_EmptyQuery(t *testing.T) {
 	assert.Equal(t, nodes, got)
 }
 
-func TestFilterTreeNodes_MatchProject(t *testing.T) {
+func TestFilterTreeNodes_MatchProject_IncludesAllSessions(t *testing.T) {
 	nodes := []TreeNode{
-		{Kind: ProjectNode, Project: &ProjectItem{Name: "my-project"}},
-		{Kind: SessionNode, Session: &SessionItem{Name: "sess-alpha"}},
-		{Kind: ProjectNode, Project: &ProjectItem{Name: "other"}},
+		{Kind: ProjectNode, ProjectID: "p1", Project: &ProjectItem{ID: "p1", Name: "my-project"}},
+		{Kind: SessionNode, ProjectID: "p1", Session: &SessionItem{Name: "sess-alpha"}},
+		{Kind: SessionNode, ProjectID: "p1", Session: &SessionItem{Name: "sess-beta"}},
+		{Kind: ProjectNode, ProjectID: "p2", Project: &ProjectItem{ID: "p2", Name: "other"}},
 	}
 	got := filterTreeNodes(nodes, "my-proj")
-	assert.Len(t, got, 1)
+	// Project name matches -> include project + all its sessions.
+	assert.Len(t, got, 3)
 	assert.Equal(t, "my-project", got[0].Project.Name)
+	assert.Equal(t, "sess-alpha", got[1].Session.Name)
+	assert.Equal(t, "sess-beta", got[2].Session.Name)
 }
 
-func TestFilterTreeNodes_MatchSession(t *testing.T) {
+func TestFilterTreeNodes_MatchSession_IncludesParentProject(t *testing.T) {
 	nodes := []TreeNode{
-		{Kind: ProjectNode, Project: &ProjectItem{Name: "proj"}},
-		{Kind: SessionNode, Session: &SessionItem{Name: "sess-alpha"}},
-		{Kind: SessionNode, Session: &SessionItem{Name: "sess-beta"}},
+		{Kind: ProjectNode, ProjectID: "p1", Project: &ProjectItem{ID: "p1", Name: "proj"}},
+		{Kind: SessionNode, ProjectID: "p1", Session: &SessionItem{Name: "sess-alpha"}},
+		{Kind: SessionNode, ProjectID: "p1", Session: &SessionItem{Name: "sess-beta"}},
 	}
 	got := filterTreeNodes(nodes, "alpha")
-	assert.Len(t, got, 1)
-	assert.Equal(t, "sess-alpha", got[0].Session.Name)
+	// Should include parent project header + matching session.
+	assert.Len(t, got, 2)
+	assert.Equal(t, ProjectNode, got[0].Kind)
+	assert.Equal(t, "proj", got[0].Project.Name)
+	assert.Equal(t, SessionNode, got[1].Kind)
+	assert.Equal(t, "sess-alpha", got[1].Session.Name)
 }
 
 func TestFilterTreeNodes_CaseInsensitive(t *testing.T) {
@@ -47,8 +55,8 @@ func TestFilterTreeNodes_CaseInsensitive(t *testing.T) {
 
 func TestFilterTreeNodes_NoMatch(t *testing.T) {
 	nodes := []TreeNode{
-		{Kind: ProjectNode, Project: &ProjectItem{Name: "proj"}},
-		{Kind: SessionNode, Session: &SessionItem{Name: "sess"}},
+		{Kind: ProjectNode, ProjectID: "p1", Project: &ProjectItem{ID: "p1", Name: "proj"}},
+		{Kind: SessionNode, ProjectID: "p1", Session: &SessionItem{Name: "sess"}},
 	}
 	got := filterTreeNodes(nodes, "nonexistent")
 	assert.Len(t, got, 0)

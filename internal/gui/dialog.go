@@ -33,9 +33,13 @@ type DialogState struct {
 	HelpScrollY  int                // doc preview scroll offset
 
 	// Search state (inline "/" filter on active panel)
-	SearchQuery     string // current search query
+	SearchQuery     string // current search query (live, updated on each keystroke)
 	SearchPanel     string // panel name when search started ("sessions", "plugins", "logs")
 	SearchPreCursor int    // cursor position before search (restore on Esc)
+
+	// Active filter (persisted after Enter confirms a search)
+	ActiveFilter      string // confirmed filter query (empty = no filter)
+	ActiveFilterPanel string // panel the filter applies to
 }
 
 // HasActiveDialog returns true if any input dialog is open.

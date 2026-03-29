@@ -44,7 +44,8 @@ func (a *App) layoutSearchInput(g *gocui.Gui, panelRect Rect) error {
 }
 
 // closeSearch removes the search input view and restores state.
-// If cancel is true, restores the pre-search cursor position.
+// If cancel is true, restores the pre-search cursor position and clears filter.
+// If cancel is false (Enter), persists the filter so items stay filtered.
 func (a *App) closeSearch(g *gocui.Gui, cancel bool) {
 	if cancel {
 		// Restore cursor positions from before search.
@@ -55,6 +56,19 @@ func (a *App) closeSearch(g *gocui.Gui, cancel bool) {
 			a.pluginState.SetCursor(a.dialog.SearchPreCursor)
 		case "logs":
 			a.logs.cursorY = a.dialog.SearchPreCursor
+		}
+		// Clear any active filter for this panel.
+		a.dialog.ActiveFilter = ""
+		a.dialog.ActiveFilterPanel = ""
+	} else {
+		// Enter: persist the filter so items stay filtered after dialog closes.
+		if a.dialog.SearchQuery != "" {
+			a.dialog.ActiveFilter = a.dialog.SearchQuery
+			a.dialog.ActiveFilterPanel = a.dialog.SearchPanel
+		} else {
+			// Empty query = clear filter.
+			a.dialog.ActiveFilter = ""
+			a.dialog.ActiveFilterPanel = ""
 		}
 	}
 
@@ -69,6 +83,14 @@ func (a *App) closeSearch(g *gocui.Gui, cancel bool) {
 	panelName := a.panelManager.ActivePanel().Name()
 	if _, err := g.SetCurrentView(panelName); err != nil && !isUnknownView(err) {
 		_ = err
+	}
+}
+
+// clearActiveFilter clears the persisted filter for the given panel.
+func (a *App) clearActiveFilter(panel string) {
+	if a.dialog.ActiveFilterPanel == panel {
+		a.dialog.ActiveFilter = ""
+		a.dialog.ActiveFilterPanel = ""
 	}
 }
 
@@ -117,30 +139,81 @@ func (a *App) applySearchFilter() {
 	}
 }
 
+// effectiveQuery returns the active filter query for the given panel.
+// During a live search (DialogSearch), returns the live query.
+// After Enter confirmation, returns the persisted ActiveFilter.
+// Returns "" if no filter is active for this panel.
+func (a *App) effectiveQuery(panel string) string {
+	if a.dialog.Kind == DialogSearch && a.dialog.SearchPanel == panel {
+		return a.dialog.SearchQuery
+	}
+	if a.dialog.ActiveFilterPanel == panel {
+		return a.dialog.ActiveFilter
+	}
+	return ""
+}
+
 // filteredTreeNodes returns tree nodes filtered by the search query.
 // If no search is active, returns all nodes.
 func (a *App) filteredTreeNodes() []TreeNode {
 	nodes := a.cachedNodes
-	if a.dialog.Kind != DialogSearch || a.dialog.SearchPanel != "sessions" || a.dialog.SearchQuery == "" {
+	q := a.effectiveQuery("sessions")
+	if q == "" {
 		return nodes
 	}
-	return filterTreeNodes(nodes, a.dialog.SearchQuery)
+	return filterTreeNodes(nodes, q)
 }
 
 // filterTreeNodes filters tree nodes by case-insensitive substring match
-// on project name or session name. Project nodes are included if any of
-// their children match, or if the project name itself matches.
+// on project name or session name. Uses a two-pass approach:
+//  1. Identify which projects have matching children or match themselves.
+//  2. Include matching project headers and their matching sessions.
+//
+// This ensures session nodes are never shown without their parent project header.
 func filterTreeNodes(nodes []TreeNode, query string) []TreeNode {
 	q := strings.ToLower(query)
-	var result []TreeNode
+
+	// Pass 1: collect project IDs that should be included, and track
+	// whether the project itself matched (vs only its children matching).
+	type projectMatch struct {
+		included    bool // project should appear in results
+		nameMatched bool // project name itself matched the query
+	}
+	projects := make(map[string]*projectMatch)
 	for _, node := range nodes {
 		switch node.Kind {
 		case ProjectNode:
 			if node.Project != nil && strings.Contains(strings.ToLower(node.Project.Name), q) {
-				result = append(result, node)
+				projects[node.ProjectID] = &projectMatch{included: true, nameMatched: true}
 			}
 		case SessionNode:
 			if node.Session != nil && strings.Contains(strings.ToLower(node.Session.Name), q) {
+				pm := projects[node.ProjectID]
+				if pm == nil {
+					pm = &projectMatch{}
+					projects[node.ProjectID] = pm
+				}
+				pm.included = true
+			}
+		}
+	}
+
+	// Pass 2: build result with project headers and matching sessions.
+	var result []TreeNode
+	for _, node := range nodes {
+		pm := projects[node.ProjectID]
+		if pm == nil || !pm.included {
+			continue
+		}
+		switch node.Kind {
+		case ProjectNode:
+			result = append(result, node)
+		case SessionNode:
+			// If the project name matched, include all its sessions.
+			// Otherwise, only include sessions whose name matches.
+			if pm.nameMatched {
+				result = append(result, node)
+			} else if node.Session != nil && strings.Contains(strings.ToLower(node.Session.Name), q) {
 				result = append(result, node)
 			}
 		}
@@ -166,10 +239,11 @@ func filterLogLines(lines []string, query string) []string {
 // filteredLogLines returns log lines filtered by search query.
 func (a *App) filteredLogLines() []string {
 	lines := a.readLogLines()
-	if a.dialog.Kind != DialogSearch || a.dialog.SearchPanel != "logs" || a.dialog.SearchQuery == "" {
+	q := a.effectiveQuery("logs")
+	if q == "" {
 		return lines
 	}
-	return filterLogLines(lines, a.dialog.SearchQuery)
+	return filterLogLines(lines, q)
 }
 
 // filteredInstalledPlugins returns installed plugins filtered by search query.
@@ -178,10 +252,11 @@ func (a *App) filteredInstalledPlugins() []PluginItem {
 		return nil
 	}
 	installed := a.plugins.Installed()
-	if a.dialog.Kind != DialogSearch || a.dialog.SearchPanel != "plugins" || a.dialog.SearchQuery == "" {
+	q := a.effectiveQuery("plugins")
+	if q == "" {
 		return installed
 	}
-	return filterPluginItems(installed, a.dialog.SearchQuery)
+	return filterPluginItems(installed, q)
 }
 
 // filterPluginItems filters installed plugins by case-insensitive substring match on ID.
@@ -202,10 +277,11 @@ func (a *App) filteredAvailablePlugins() []AvailablePluginItem {
 		return nil
 	}
 	available := a.plugins.Available()
-	if a.dialog.Kind != DialogSearch || a.dialog.SearchPanel != "plugins" || a.dialog.SearchQuery == "" {
+	q := a.effectiveQuery("plugins")
+	if q == "" {
 		return available
 	}
-	return filterAvailablePlugins(available, a.dialog.SearchQuery)
+	return filterAvailablePlugins(available, q)
 }
 
 // filterAvailablePlugins filters marketplace plugins by case-insensitive
@@ -228,10 +304,11 @@ func (a *App) filteredMCPServers() []MCPItem {
 		return nil
 	}
 	servers := a.mcpServers.Servers()
-	if a.dialog.Kind != DialogSearch || a.dialog.SearchPanel != "plugins" || a.dialog.SearchQuery == "" {
+	q := a.effectiveQuery("plugins")
+	if q == "" {
 		return servers
 	}
-	return filterMCPItems(servers, a.dialog.SearchQuery)
+	return filterMCPItems(servers, q)
 }
 
 // filterMCPItems filters MCP items by case-insensitive substring match on Name.

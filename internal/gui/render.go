@@ -163,7 +163,7 @@ func (a *App) renderServerLog(v *gocui.View, logs *LogsState, focused bool) {
 	selStart, selEnd := logs.SelectionRange()
 	cursorY := logs.CursorY()
 	w := v.InnerWidth()
-	searchQ := a.dialog.SearchQuery
+	searchQ := a.effectiveQuery("logs")
 
 	// Skip re-render if nothing changed since last time.
 	rc := &a.logRender

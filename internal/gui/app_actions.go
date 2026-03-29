@@ -659,15 +659,20 @@ func (a *App) runPluginAsync(fn func(ctx context.Context) error) {
 	}()
 }
 
-// pluginItemCount returns the number of items in the active plugin tab.
+// pluginItemCount returns the number of items in the active plugin tab,
+// respecting any active search filter.
 func (a *App) pluginItemCount() int {
 	if a.plugins == nil {
 		return 0
 	}
-	if a.pluginState.tabIdx == keymap.PluginTabMarketplace {
-		return len(a.plugins.Available())
+	switch a.pluginState.tabIdx {
+	case keymap.PluginTabMCP:
+		return len(a.filteredMCPServers())
+	case keymap.PluginTabMarketplace:
+		return len(a.filteredAvailablePlugins())
+	default:
+		return len(a.filteredInstalledPlugins())
 	}
-	return len(a.plugins.Installed())
 }
 
 // --- MCP panel ---
@@ -727,7 +732,7 @@ func (a *App) mcpItemCount() int {
 	if a.mcpServers == nil {
 		return 0
 	}
-	return len(a.mcpServers.Servers())
+	return len(a.filteredMCPServers())
 }
 
 // --- Help ---
@@ -789,6 +794,10 @@ func (a *App) StartSearch() {
 	default:
 		return
 	}
+
+	// Clear any previous active filter for this panel so the user
+	// starts fresh. The previous filter's results are discarded.
+	a.clearActiveFilter(panelName)
 
 	a.dialog.Kind = DialogSearch
 	a.dialog.SearchQuery = ""
