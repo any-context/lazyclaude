@@ -339,3 +339,120 @@ func TestHintsForScopeTab(t *testing.T) {
 	assert.Equal(t, "install", hints1[0].HintLabel)
 	assert.Equal(t, "refresh", hints1[1].HintLabel)
 }
+
+func TestRegistry_Runes(t *testing.T) {
+	t.Parallel()
+	r := keymap.NewRegistry()
+	r.Register(keymap.ActionDef{
+		Action:   keymap.ActionQuit,
+		Bindings: []keymap.KeyBinding{{Rune: 'q'}},
+		Scope:    keymap.ScopeGlobal,
+	})
+	r.Register(keymap.ActionDef{
+		Action:   keymap.ActionCursorDown,
+		Bindings: []keymap.KeyBinding{{Rune: 'j'}, {Key: gocui.KeyArrowDown}},
+		Scope:    keymap.ScopeSession,
+	})
+	r.Register(keymap.ActionDef{
+		Action:   keymap.ActionPopupScrollDown,
+		Bindings: []keymap.KeyBinding{{Rune: 'j'}},
+		Scope:    keymap.ScopePopup,
+	})
+
+	runes := r.Runes()
+	assert.Contains(t, runes, 'q')
+	assert.Contains(t, runes, 'j')
+	assert.Len(t, runes, 2, "duplicate rune 'j' should be deduplicated")
+}
+
+func TestRegistry_SpecialKeys(t *testing.T) {
+	t.Parallel()
+	r := keymap.NewRegistry()
+	r.Register(keymap.ActionDef{
+		Action:   keymap.ActionCursorDown,
+		Bindings: []keymap.KeyBinding{{Rune: 'j'}, {Key: gocui.KeyArrowDown}},
+		Scope:    keymap.ScopeSession,
+	})
+	r.Register(keymap.ActionDef{
+		Action:   keymap.ActionFocusNextPanel,
+		Bindings: []keymap.KeyBinding{{Key: gocui.KeyTab}},
+		Scope:    keymap.ScopeGlobal,
+	})
+
+	keys := r.SpecialKeys()
+	assert.Contains(t, keys, gocui.KeyArrowDown)
+	assert.Contains(t, keys, gocui.KeyTab)
+	assert.Len(t, keys, 2, "rune-only bindings should not appear in special keys")
+}
+
+func TestRegistry_RunesForScope(t *testing.T) {
+	t.Parallel()
+	r := keymap.NewRegistry()
+	r.Register(keymap.ActionDef{
+		Action:   keymap.ActionQuit,
+		Bindings: []keymap.KeyBinding{{Rune: 'q'}},
+		Scope:    keymap.ScopeGlobal,
+	})
+	r.Register(keymap.ActionDef{
+		Action:   keymap.ActionPopupScrollDown,
+		Bindings: []keymap.KeyBinding{{Rune: 'j'}},
+		Scope:    keymap.ScopePopup,
+	})
+	r.Register(keymap.ActionDef{
+		Action:   keymap.ActionPopupAccept,
+		Bindings: []keymap.KeyBinding{{Key: gocui.KeyCtrlY}, {Rune: '1'}},
+		Scope:    keymap.ScopePopup,
+	})
+
+	popupRunes := r.RunesForScope(keymap.ScopePopup)
+	assert.Contains(t, popupRunes, 'j')
+	assert.Contains(t, popupRunes, '1')
+	assert.NotContains(t, popupRunes, 'q', "global runes should not appear in popup scope")
+	assert.Len(t, popupRunes, 2)
+}
+
+func TestRegistry_SpecialKeysForScope(t *testing.T) {
+	t.Parallel()
+	r := keymap.NewRegistry()
+	r.Register(keymap.ActionDef{
+		Action:   keymap.ActionPopupAccept,
+		Bindings: []keymap.KeyBinding{{Key: gocui.KeyCtrlY}, {Rune: '1'}},
+		Scope:    keymap.ScopePopup,
+	})
+	r.Register(keymap.ActionDef{
+		Action:   keymap.ActionPopupSuspend,
+		Bindings: []keymap.KeyBinding{{Key: gocui.KeyEsc}},
+		Scope:    keymap.ScopePopup,
+	})
+	r.Register(keymap.ActionDef{
+		Action:   keymap.ActionFocusNextPanel,
+		Bindings: []keymap.KeyBinding{{Key: gocui.KeyTab}},
+		Scope:    keymap.ScopeGlobal,
+	})
+
+	popupKeys := r.SpecialKeysForScope(keymap.ScopePopup)
+	assert.Contains(t, popupKeys, gocui.KeyCtrlY)
+	assert.Contains(t, popupKeys, gocui.KeyEsc)
+	assert.NotContains(t, popupKeys, gocui.KeyTab, "global keys should not appear in popup scope")
+	assert.Len(t, popupKeys, 2)
+}
+
+func TestDefault_Runes_MatchAllScopes(t *testing.T) {
+	t.Parallel()
+	r := keymap.Default()
+	runes := r.Runes()
+
+	// Verify that runes from all non-fullscreen scopes are included.
+	// FullScreen scope has no rune bindings in the default registry.
+	runeSet := make(map[rune]bool)
+	for _, ch := range runes {
+		runeSet[ch] = true
+	}
+
+	// Spot-check representative runes from each scope
+	assert.True(t, runeSet['q'], "global: quit")
+	assert.True(t, runeSet['n'], "session: new")
+	assert.True(t, runeSet['e'], "plugins: toggle")
+	assert.True(t, runeSet['G'], "log: cursor to end")
+	assert.True(t, runeSet['Y'], "popup: accept all")
+}

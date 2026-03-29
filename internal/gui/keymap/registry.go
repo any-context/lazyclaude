@@ -107,6 +107,73 @@ func (r *Registry) BindingsForScope(scope Scope) []ActionDef {
 	return result
 }
 
+// Runes returns all unique rune keys registered across all scopes.
+// Used by the GUI layer to register gocui keybindings without manual lists.
+func (r *Registry) Runes() []rune {
+	seen := make(map[rune]bool)
+	var result []rune
+	for _, def := range r.defs {
+		for _, b := range def.Bindings {
+			if b.Rune != 0 && !seen[b.Rune] {
+				seen[b.Rune] = true
+				result = append(result, b.Rune)
+			}
+		}
+	}
+	return result
+}
+
+// SpecialKeys returns all unique special (non-rune) keys registered across all scopes.
+func (r *Registry) SpecialKeys() []gocui.Key {
+	seen := make(map[gocui.Key]bool)
+	var result []gocui.Key
+	for _, def := range r.defs {
+		for _, b := range def.Bindings {
+			if b.Rune == 0 && !seen[b.Key] {
+				seen[b.Key] = true
+				result = append(result, b.Key)
+			}
+		}
+	}
+	return result
+}
+
+// RunesForScope returns all unique rune keys registered under the given scope.
+func (r *Registry) RunesForScope(scope Scope) []rune {
+	seen := make(map[rune]bool)
+	var result []rune
+	for _, def := range r.defs {
+		if def.Scope != scope {
+			continue
+		}
+		for _, b := range def.Bindings {
+			if b.Rune != 0 && !seen[b.Rune] {
+				seen[b.Rune] = true
+				result = append(result, b.Rune)
+			}
+		}
+	}
+	return result
+}
+
+// SpecialKeysForScope returns all unique special keys registered under the given scope.
+func (r *Registry) SpecialKeysForScope(scope Scope) []gocui.Key {
+	seen := make(map[gocui.Key]bool)
+	var result []gocui.Key
+	for _, def := range r.defs {
+		if def.Scope != scope {
+			continue
+		}
+		for _, b := range def.Bindings {
+			if b.Rune == 0 && !seen[b.Key] {
+				seen[b.Key] = true
+				result = append(result, b.Key)
+			}
+		}
+	}
+	return result
+}
+
 // AllActions returns all registered actions in registration order.
 func (r *Registry) AllActions() []ActionDef {
 	result := make([]ActionDef, len(r.defs))

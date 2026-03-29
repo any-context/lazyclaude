@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/KEMSHlM/lazyclaude/internal/gui/keyhandler"
+	"github.com/KEMSHlM/lazyclaude/internal/gui/keymap"
 	"github.com/KEMSHlM/lazyclaude/internal/session"
 	"github.com/jesseduffield/gocui"
 )
@@ -38,22 +39,15 @@ func (a *App) dispatchKey(key gocui.Key) func(*gocui.Gui, *gocui.View) error {
 
 // setupGlobalKeybindings registers physical keys and delegates to the Dispatcher.
 func (a *App) setupGlobalKeybindings() error {
-	// 1. Rune keys dispatched through the chain
-	runes := []rune{'h', 'j', 'k', 'l', 'n', 'N', 'd', 'e', 'i', 'r', 'u', 'R', 'D', 'P', 'q', 'p', 'y', 'a', 'Y', 'g', 'G', 'v', 'w', 'W', '[', ']', '1', '2', '3', '?', '/'}
-	for _, ch := range runes {
+	// 1. Rune keys dispatched through the chain (auto-generated from registry)
+	for _, ch := range a.keyRegistry.Runes() {
 		if err := a.gui.SetKeybinding("", ch, gocui.ModNone, a.dispatchRune(ch)); err != nil {
 			return err
 		}
 	}
 
-	// 2. Special keys dispatched through the chain
-	specials := []gocui.Key{
-		gocui.KeyEnter, gocui.KeyEsc, gocui.KeyCtrlC, gocui.KeyCtrlD,
-		gocui.KeyCtrlBackslash, gocui.KeyTab, gocui.KeyBacktab,
-		gocui.KeyArrowUp, gocui.KeyArrowDown, gocui.KeyArrowLeft, gocui.KeyArrowRight,
-		gocui.KeyCtrlY, gocui.KeyCtrlA, gocui.KeyCtrlN,
-	}
-	for _, key := range specials {
+	// 2. Special keys dispatched through the chain (auto-generated from registry)
+	for _, key := range a.keyRegistry.SpecialKeys() {
 		if err := a.gui.SetKeybinding("", key, gocui.ModNone, a.dispatchKey(key)); err != nil {
 			return err
 		}
@@ -61,15 +55,13 @@ func (a *App) setupGlobalKeybindings() error {
 
 
 
-	// 3. Popup view bindings (gocui may skip global bindings when popup has focus)
-	popupRunes := []rune{'j', 'k', 'y', 'a', 'n', 'Y', '1', '2', '3'}
-	for _, ch := range popupRunes {
+	// 3. Popup view bindings (gocui may skip global rune bindings when popup has focus)
+	for _, ch := range a.keyRegistry.RunesForScope(keymap.ScopePopup) {
 		if err := a.gui.SetKeybinding(popupViewName, ch, gocui.ModNone, a.dispatchRune(ch)); err != nil {
 			return err
 		}
 	}
-	popupSpecials := []gocui.Key{gocui.KeyArrowUp, gocui.KeyArrowDown, gocui.KeyEsc, gocui.KeyCtrlY, gocui.KeyCtrlA, gocui.KeyCtrlN}
-	for _, key := range popupSpecials {
+	for _, key := range a.keyRegistry.SpecialKeysForScope(keymap.ScopePopup) {
 		if err := a.gui.SetKeybinding(popupViewName, key, gocui.ModNone, a.dispatchKey(key)); err != nil {
 			return err
 		}
