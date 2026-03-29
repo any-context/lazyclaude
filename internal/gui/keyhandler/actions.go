@@ -81,6 +81,9 @@ type AppActions interface {
 	// Help
 	ShowKeybindHelp()
 
+	// Search
+	StartSearch()
+
 	// Application
 	Quit()
 }

@@ -52,7 +52,7 @@ func (a *App) renderPluginPanel(v *gocui.View, maxWidth int) {
 }
 
 func (a *App) renderInstalledList(v *gocui.View, maxWidth int, focused bool) {
-	installed := a.plugins.Installed()
+	installed := a.filteredInstalledPlugins()
 	if len(installed) == 0 {
 		fmt.Fprintln(v, "")
 		fmt.Fprintln(v, presentation.Dim+"  No plugins installed"+presentation.Reset)
@@ -72,7 +72,7 @@ func (a *App) renderInstalledList(v *gocui.View, maxWidth int, focused bool) {
 }
 
 func (a *App) renderAvailableList(v *gocui.View, maxWidth int, focused bool) {
-	available := a.plugins.Available()
+	available := a.filteredAvailablePlugins()
 	if len(available) == 0 {
 		fmt.Fprintln(v, "")
 		fmt.Fprintln(v, presentation.Dim+"  No plugins available"+presentation.Reset)

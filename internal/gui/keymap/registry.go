@@ -522,6 +522,33 @@ func Default() *Registry {
 		DocSection:  "logs_copy",
 	})
 
+	// --- Search (per-panel) ---
+	r.Register(ActionDef{
+		Action:      ActionStartSearch,
+		Bindings:    []KeyBinding{{Rune: '/'}},
+		Scope:       ScopeSession,
+		HintLabel:   "search",
+		Description: "Filter sessions by name",
+		DocSection:  "search",
+	})
+	r.Register(ActionDef{
+		Action:      ActionStartSearch,
+		Bindings:    []KeyBinding{{Rune: '/'}},
+		Scope:       ScopePlugins,
+		Tab:         TabAll,
+		HintLabel:   "search",
+		Description: "Filter items by name",
+		DocSection:  "search",
+	})
+	r.Register(ActionDef{
+		Action:      ActionStartSearch,
+		Bindings:    []KeyBinding{{Rune: '/'}},
+		Scope:       ScopeLog,
+		HintLabel:   "search",
+		Description: "Filter log lines",
+		DocSection:  "search",
+	})
+
 	// --- Popup ---
 	r.Register(ActionDef{
 		Action:      ActionPopupAccept,

@@ -37,6 +37,8 @@ func (p *LogsPanel) HandleKey(ev KeyEvent, actions AppActions) HandlerResult {
 		actions.LogsToggleSelect()
 	case keymap.ActionLogsCopySelection:
 		actions.LogsCopySelection()
+	case keymap.ActionStartSearch:
+		actions.StartSearch()
 	default:
 		return Unhandled
 	}

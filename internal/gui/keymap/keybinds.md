@@ -194,3 +194,11 @@ Exit full-screen mode and return to the session list.
 Keys forwarded directly to the Claude Code session in full-screen mode.
 Enter, Esc, and arrow keys are passed through to Claude Code.
 All other keys (including typed text) are also forwarded via the input editor.
+
+## search
+
+Filter the current panel's items by name.
+`/` opens an inline search bar at the bottom of the active panel.
+Type to filter items in real time (case-insensitive substring match).
+`Enter` confirms the filter and keeps the filtered view.
+`Esc` cancels the search and restores the original list.

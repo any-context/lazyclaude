@@ -146,7 +146,11 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 		return err
 	}
 	setRoundedFrame(v)
-	v.Title = " Sessions "
+	if q := a.effectiveQuery("sessions"); q != "" {
+		v.Title = fmt.Sprintf(" Sessions [/%s] ", q)
+	} else {
+		v.Title = " Sessions "
+	}
 	v.Highlight = true
 	v.SelBgColor = gocui.Get256Color(24)
 	v.SelFgColor = gocui.ColorWhite
@@ -155,7 +159,7 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 	v.Clear()
 	var nodes []TreeNode
 	if a.sessions != nil {
-		nodes = a.treeNodes()
+		nodes = a.filteredTreeNodes()
 	}
 	if len(nodes) > 0 {
 		if a.cursor >= len(nodes) {
@@ -187,7 +191,11 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 		return err
 	}
 	setRoundedFrame(v2)
-	v2.Title = " Logs "
+	if q := a.effectiveQuery("logs"); q != "" {
+		v2.Title = fmt.Sprintf(" Logs [/%s] ", q)
+	} else {
+		v2.Title = " Logs "
+	}
 	v2.Wrap = true
 	a.renderServerLog(v2, a.logs, focusedName == "logs")
 
@@ -235,6 +243,24 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 		g.DeleteView(helpPreviewView)
 		g.DeleteView(helpHintView)
 		g.DeleteView(helpBorderView)
+	}
+
+	// Search input overlay (inline at bottom of active panel).
+	if a.dialog.Kind == DialogSearch {
+		var panelRect Rect
+		switch a.dialog.SearchPanel {
+		case "sessions":
+			panelRect = l.Sessions
+		case "plugins":
+			panelRect = l.Plugins
+		case "logs":
+			panelRect = l.Server
+		}
+		if err := a.layoutSearchInput(g, panelRect); err != nil {
+			return err
+		}
+	} else {
+		g.DeleteView(searchInputView)
 	}
 
 	// Focus priority: popup > dialog > panel.

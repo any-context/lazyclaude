@@ -39,7 +39,7 @@ func (a *App) dispatchKey(key gocui.Key) func(*gocui.Gui, *gocui.View) error {
 // setupGlobalKeybindings registers physical keys and delegates to the Dispatcher.
 func (a *App) setupGlobalKeybindings() error {
 	// 1. Rune keys dispatched through the chain
-	runes := []rune{'h', 'j', 'k', 'l', 'n', 'N', 'd', 'e', 'i', 'r', 'u', 'R', 'D', 'P', 'q', 'p', 'y', 'a', 'Y', 'g', 'G', 'v', 'w', 'W', '[', ']', '1', '2', '3', '?'}
+	runes := []rune{'h', 'j', 'k', 'l', 'n', 'N', 'd', 'e', 'i', 'r', 'u', 'R', 'D', 'P', 'q', 'p', 'y', 'a', 'Y', 'g', 'G', 'v', 'w', 'W', '[', ']', '1', '2', '3', '?', '/'}
 	for _, ch := range runes {
 		if err := a.gui.SetKeybinding("", ch, gocui.ModNone, a.dispatchRune(ch)); err != nil {
 			return err
@@ -317,7 +317,21 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// 9. Keybind help overlay bindings
+	// 9. Search input bindings (Enter to confirm, Esc to cancel)
+	if err := a.gui.SetKeybinding(searchInputView, gocui.KeyEnter, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.closeSearch(g, false)
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := a.gui.SetKeybinding(searchInputView, gocui.KeyEsc, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.closeSearch(g, true)
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// 10. Keybind help overlay bindings
 	// Esc: close help
 	for _, viewName := range []string{helpInputView, helpListView} {
 		if err := a.gui.SetKeybinding(viewName, gocui.KeyEsc, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {

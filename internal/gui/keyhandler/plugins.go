@@ -50,6 +50,8 @@ func (p *PluginsPanel) HandleKey(ev KeyEvent, actions AppActions) HandlerResult 
 		actions.PluginUpdate()
 	case keymap.ActionPluginRefresh:
 		actions.PluginRefresh()
+	case keymap.ActionStartSearch:
+		actions.StartSearch()
 	default:
 		return Unhandled
 	}

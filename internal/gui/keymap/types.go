@@ -114,6 +114,11 @@ const (
 	ActionShowKeybindHelp KeyAction = "show_keybind_help"
 )
 
+// --- Search actions ---
+const (
+	ActionStartSearch KeyAction = "start_search"
+)
+
 // --- FullScreen actions ---
 const (
 	ActionExitFull          KeyAction = "exit_fullscreen"

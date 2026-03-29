@@ -109,12 +109,13 @@ type logFileCache struct {
 // when nothing has changed.
 // All access is from the gocui event loop goroutine only.
 type logRenderCache struct {
-	modTime  int64
-	focused  bool
-	cursorY  int
-	selStart int
-	selEnd   int
-	width    int
+	modTime     int64
+	focused     bool
+	cursorY     int
+	selStart    int
+	selEnd      int
+	width       int
+	searchQuery string
 }
 
 // readLogLines returns all log lines in reverse order (newest first).
@@ -148,7 +149,7 @@ func (a *App) readLogLines() []string {
 // (log content, focus, cursor, selection, width) has not changed.
 // Must be called from the gocui event loop goroutine only.
 func (a *App) renderServerLog(v *gocui.View, logs *LogsState, focused bool) {
-	lines := a.readLogLines()
+	lines := a.filteredLogLines()
 	if len(lines) == 0 {
 		// Always re-render the empty state (cheap).
 		v.Clear()
@@ -162,6 +163,7 @@ func (a *App) renderServerLog(v *gocui.View, logs *LogsState, focused bool) {
 	selStart, selEnd := logs.SelectionRange()
 	cursorY := logs.CursorY()
 	w := v.InnerWidth()
+	searchQ := a.effectiveQuery("logs")
 
 	// Skip re-render if nothing changed since last time.
 	rc := &a.logRender
@@ -170,7 +172,8 @@ func (a *App) renderServerLog(v *gocui.View, logs *LogsState, focused bool) {
 		rc.cursorY == cursorY &&
 		rc.selStart == selStart &&
 		rc.selEnd == selEnd &&
-		rc.width == w {
+		rc.width == w &&
+		rc.searchQuery == searchQ {
 		return
 	}
 	rc.modTime = a.logCache.modTime
@@ -179,6 +182,7 @@ func (a *App) renderServerLog(v *gocui.View, logs *LogsState, focused bool) {
 	rc.selStart = selStart
 	rc.selEnd = selEnd
 	rc.width = w
+	rc.searchQuery = searchQ
 
 	v.Clear()
 	selecting := logs.IsSelecting()

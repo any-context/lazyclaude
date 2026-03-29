@@ -12,6 +12,7 @@ const (
 	DialogWorktreeChooser                  // worktree-chooser (select existing)
 	DialogWorktreeResume                   // worktree-resume-prompt (prompt only for existing)
 	DialogKeybindHelp                      // keybind-help overlay (Telescope style)
+	DialogSearch                           // inline "/" search on active panel
 )
 
 // DialogState groups all input dialog state into a single struct,
@@ -30,6 +31,15 @@ type DialogState struct {
 	HelpCursor   int                // selected index in filtered list
 	HelpFilter   string             // current fzf query
 	HelpScrollY  int                // doc preview scroll offset
+
+	// Search state (inline "/" filter on active panel)
+	SearchQuery     string // current search query (live, updated on each keystroke)
+	SearchPanel     string // panel name when search started ("sessions", "plugins", "logs")
+	SearchPreCursor int    // cursor position before search (restore on Esc)
+
+	// Active filter (persisted after Enter confirms a search)
+	ActiveFilter      string // confirmed filter query (empty = no filter)
+	ActiveFilterPanel string // panel the filter applies to
 }
 
 // HasActiveDialog returns true if any input dialog is open.
@@ -60,6 +70,8 @@ func (a *App) dialogFocusView() string {
 		return "worktree-resume-prompt"
 	case DialogKeybindHelp:
 		return "keybind-help-input"
+	case DialogSearch:
+		return "search-input"
 	default:
 		return ""
 	}

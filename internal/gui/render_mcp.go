@@ -27,10 +27,14 @@ func (a *App) renderMCPList(v *gocui.View, maxWidth int, focused bool) {
 		return
 	}
 
-	servers := a.mcpServers.Servers()
+	servers := a.filteredMCPServers()
 	if len(servers) == 0 {
 		fmt.Fprintln(v, "")
-		fmt.Fprintln(v, presentation.Dim+"  No MCP servers configured"+presentation.Reset)
+		if a.dialog.Kind == DialogSearch && a.dialog.SearchQuery != "" {
+			fmt.Fprintln(v, presentation.Dim+"  No matches"+presentation.Reset)
+		} else {
+			fmt.Fprintln(v, presentation.Dim+"  No MCP servers configured"+presentation.Reset)
+		}
 		return
 	}
 

@@ -67,6 +67,8 @@ func (p *SessionsPanel) HandleKey(ev KeyEvent, actions AppActions) HandlerResult
 		actions.SendKeyToPane("2")
 	case keymap.ActionSendKey3:
 		actions.SendKeyToPane("3")
+	case keymap.ActionStartSearch:
+		actions.StartSearch()
 	default:
 		return Unhandled
 	}
