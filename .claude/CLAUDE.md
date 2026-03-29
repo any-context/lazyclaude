@@ -126,4 +126,5 @@ attach 中: キー → lazyclaude tmux の root table → マッチなら実行
 
 - リモートコマンドは plain bash スクリプトとしてファイルに書き出し、base64 でエンコード
 - ネストクォート禁止。`shell.Quote` を SSH コマンド文字列内で使わない
-- `scripts/lazyclaude-launch.sh` が唯一のエントリポイント (tmux plugin + standalone)
+- `scripts/lazyclaude-launch.sh` は tmux plugin (`Ctrl+\`) 専用のエントリポイント (display-popup 経由)
+- standalone 実行は Go バイナリ (`bin/lazyclaude`) を直接起動
