@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/KEMSHlM/lazyclaude/internal/gui/keymap"
 	"github.com/KEMSHlM/lazyclaude/internal/gui/presentation"
 	"github.com/jesseduffield/gocui"
 )
@@ -11,20 +12,19 @@ import (
 // renderPluginPanel renders the plugins list view with tab header.
 func (a *App) renderPluginPanel(v *gocui.View, maxWidth int) {
 	// Use gocui native Tabs API for consistent tab rendering.
-	// TitlePrefix renders before tabs: "╭─ Plugins ─ Installed - Marketplace ──╮"
-	v.Tabs = []string{"MCP", "Plugins", "Marketplace"}
+	v.Tabs = keymap.PluginTabLabels()
 	v.TabIndex = a.pluginState.tabIdx
 	v.SelFgColor = gocui.ColorWhite
 
 	focused := a.panelManager.ActivePanel().Name() == "plugins"
 
 	switch a.pluginState.tabIdx {
-	case 0: // MCP
+	case keymap.PluginTabMCP:
 		a.renderMCPList(v, maxWidth, focused)
 		return
-	case 1: // Plugins
+	case keymap.PluginTabPlugins:
 		// fall through to plugin rendering below
-	case 2: // Marketplace
+	case keymap.PluginTabMarketplace:
 		a.renderAvailableList(v, maxWidth, focused)
 		return
 	}
@@ -96,10 +96,10 @@ func (a *App) renderAvailableList(v *gocui.View, maxWidth int, focused bool) {
 // renderPluginPreview renders the right panel when plugins panel is focused.
 func (a *App) renderPluginPreview(v *gocui.View) {
 	switch a.pluginState.tabIdx {
-	case 0: // MCP
+	case keymap.PluginTabMCP:
 		a.renderMCPPreview(v)
 		return
-	case 1: // Plugins
+	case keymap.PluginTabPlugins:
 		if a.plugins == nil || a.pluginState.loading {
 			v.Title = " Preview "
 			return
@@ -111,7 +111,7 @@ func (a *App) renderPluginPreview(v *gocui.View) {
 			fmt.Fprint(v, presentation.FormatPluginPreview(p.ID, p.Version, p.Scope, p.InstalledAt, p.Enabled))
 			return
 		}
-	case 2: // Marketplace
+	case keymap.PluginTabMarketplace:
 		if a.plugins == nil || a.pluginState.loading {
 			v.Title = " Preview "
 			return

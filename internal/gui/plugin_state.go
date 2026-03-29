@@ -1,6 +1,10 @@
 package gui
 
-import "context"
+import (
+	"context"
+
+	"github.com/KEMSHlM/lazyclaude/internal/gui/keymap"
+)
 
 // PluginItem is a read-only view of an installed plugin for display.
 type PluginItem struct {
@@ -36,7 +40,7 @@ type PluginProvider interface {
 
 // PluginState holds the UI state for the plugins panel.
 type PluginState struct {
-	tabIdx          int    // 0=MCP, 1=Plugins, 2=Marketplace
+	tabIdx          int // one of keymap.PluginTab* constants
 	installedCursor int
 	marketCursor    int
 	loading         bool
@@ -51,7 +55,7 @@ func NewPluginState() *PluginState {
 
 // Cursor returns the cursor for the active tab.
 func (ps *PluginState) Cursor() int {
-	if ps.tabIdx == 2 {
+	if ps.tabIdx == keymap.PluginTabMarketplace {
 		return ps.marketCursor
 	}
 	return ps.installedCursor
@@ -59,7 +63,7 @@ func (ps *PluginState) Cursor() int {
 
 // SetCursor sets the cursor for the active tab.
 func (ps *PluginState) SetCursor(n int) {
-	if ps.tabIdx == 2 {
+	if ps.tabIdx == keymap.PluginTabMarketplace {
 		ps.marketCursor = n
 	} else {
 		ps.installedCursor = n

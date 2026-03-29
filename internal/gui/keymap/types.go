@@ -126,6 +126,19 @@ const (
 // TabAll means the action is active on all tabs within a panel.
 const TabAll = -1
 
+// --- Plugin panel tab indices ---
+const (
+	PluginTabMCP         = 0
+	PluginTabPlugins     = 1
+	PluginTabMarketplace = 2
+)
+
+// PluginTabLabels returns the ordered label list for plugin panel tabs.
+// This is the single source of truth — TabCount and TabLabels derive from it.
+func PluginTabLabels() []string {
+	return []string{"MCP", "Plugins", "Marketplace"}
+}
+
 // ActionDef defines a logical action with its key bindings, scope, and hint.
 type ActionDef struct {
 	Action      KeyAction

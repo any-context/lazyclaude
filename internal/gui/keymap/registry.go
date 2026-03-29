@@ -351,13 +351,12 @@ func Default() *Registry {
 	})
 
 	// --- Plugins panel ---
-	// Tab layout: 0 = MCP, 1 = Plugins, 2 = Marketplace
-	// MCP tab (0): cursor, toggle denied, refresh
+	// MCP tab: cursor, toggle denied, refresh
 	r.Register(ActionDef{
 		Action:      ActionMCPCursorDown,
 		Bindings:    []KeyBinding{{Rune: 'j'}, {Key: gocui.KeyArrowDown}},
 		Scope:       ScopePlugins,
-		Tab:         0,
+		Tab:         PluginTabMCP,
 		Description: "Move cursor down",
 		DocSection:  "cursor_move",
 	})
@@ -365,7 +364,7 @@ func Default() *Registry {
 		Action:      ActionMCPCursorUp,
 		Bindings:    []KeyBinding{{Rune: 'k'}, {Key: gocui.KeyArrowUp}},
 		Scope:       ScopePlugins,
-		Tab:         0,
+		Tab:         PluginTabMCP,
 		Description: "Move cursor up",
 		DocSection:  "cursor_move",
 	})
@@ -373,7 +372,7 @@ func Default() *Registry {
 		Action:      ActionMCPToggleDenied,
 		Bindings:    []KeyBinding{{Rune: 'e'}},
 		Scope:       ScopePlugins,
-		Tab:         0,
+		Tab:         PluginTabMCP,
 		HintLabel:   "toggle",
 		Description: "Toggle MCP server enabled/disabled",
 		DocSection:  "mcp_toggle",
@@ -382,17 +381,17 @@ func Default() *Registry {
 		Action:      ActionMCPRefresh,
 		Bindings:    []KeyBinding{{Rune: 'r'}},
 		Scope:       ScopePlugins,
-		Tab:         0,
+		Tab:         PluginTabMCP,
 		HintLabel:   "refresh",
 		Description: "Refresh MCP server list",
 		DocSection:  "mcp_refresh",
 	})
-	// Plugins tab (1): cursor, toggle, uninstall, update, refresh
+	// Plugins tab: cursor, toggle, uninstall, update, refresh
 	r.Register(ActionDef{
 		Action:      ActionPluginCursorDown,
 		Bindings:    []KeyBinding{{Rune: 'j'}, {Key: gocui.KeyArrowDown}},
 		Scope:       ScopePlugins,
-		Tab:         1,
+		Tab:         PluginTabPlugins,
 		Description: "Move cursor down",
 		DocSection:  "cursor_move",
 	})
@@ -400,7 +399,7 @@ func Default() *Registry {
 		Action:      ActionPluginCursorUp,
 		Bindings:    []KeyBinding{{Rune: 'k'}, {Key: gocui.KeyArrowUp}},
 		Scope:       ScopePlugins,
-		Tab:         1,
+		Tab:         PluginTabPlugins,
 		Description: "Move cursor up",
 		DocSection:  "cursor_move",
 	})
@@ -408,7 +407,7 @@ func Default() *Registry {
 		Action:      ActionPluginToggleEnabled,
 		Bindings:    []KeyBinding{{Rune: 'e'}},
 		Scope:       ScopePlugins,
-		Tab:         1,
+		Tab:         PluginTabPlugins,
 		HintLabel:   "toggle",
 		Description: "Toggle plugin enabled/disabled",
 		DocSection:  "plugin_toggle",
@@ -417,7 +416,7 @@ func Default() *Registry {
 		Action:      ActionPluginUninstall,
 		Bindings:    []KeyBinding{{Rune: 'd'}},
 		Scope:       ScopePlugins,
-		Tab:         1,
+		Tab:         PluginTabPlugins,
 		HintLabel:   "uninstall",
 		Description: "Uninstall selected plugin",
 		DocSection:  "plugin_uninstall",
@@ -426,7 +425,7 @@ func Default() *Registry {
 		Action:      ActionPluginUpdate,
 		Bindings:    []KeyBinding{{Rune: 'u'}},
 		Scope:       ScopePlugins,
-		Tab:         1,
+		Tab:         PluginTabPlugins,
 		HintLabel:   "update",
 		Description: "Update selected plugin",
 		DocSection:  "plugin_update",
@@ -435,17 +434,17 @@ func Default() *Registry {
 		Action:      ActionPluginRefresh,
 		Bindings:    []KeyBinding{{Rune: 'r'}},
 		Scope:       ScopePlugins,
-		Tab:         1,
+		Tab:         PluginTabPlugins,
 		HintLabel:   "refresh",
 		Description: "Refresh plugin list",
 		DocSection:  "plugin_refresh",
 	})
-	// Marketplace tab (2): cursor, install, refresh
+	// Marketplace tab: cursor, install, refresh
 	r.Register(ActionDef{
 		Action:      ActionPluginCursorDown,
 		Bindings:    []KeyBinding{{Rune: 'j'}, {Key: gocui.KeyArrowDown}},
 		Scope:       ScopePlugins,
-		Tab:         2,
+		Tab:         PluginTabMarketplace,
 		Description: "Move cursor down",
 		DocSection:  "cursor_move",
 	})
@@ -453,7 +452,7 @@ func Default() *Registry {
 		Action:      ActionPluginCursorUp,
 		Bindings:    []KeyBinding{{Rune: 'k'}, {Key: gocui.KeyArrowUp}},
 		Scope:       ScopePlugins,
-		Tab:         2,
+		Tab:         PluginTabMarketplace,
 		Description: "Move cursor up",
 		DocSection:  "cursor_move",
 	})
@@ -461,7 +460,7 @@ func Default() *Registry {
 		Action:      ActionPluginInstall,
 		Bindings:    []KeyBinding{{Rune: 'i'}},
 		Scope:       ScopePlugins,
-		Tab:         2,
+		Tab:         PluginTabMarketplace,
 		HintLabel:   "install",
 		Description: "Install selected plugin",
 		DocSection:  "plugin_install",
@@ -470,7 +469,7 @@ func Default() *Registry {
 		Action:      ActionPluginRefresh,
 		Bindings:    []KeyBinding{{Rune: 'r'}},
 		Scope:       ScopePlugins,
-		Tab:         2,
+		Tab:         PluginTabMarketplace,
 		HintLabel:   "refresh",
 		Description: "Refresh marketplace",
 		DocSection:  "plugin_refresh",

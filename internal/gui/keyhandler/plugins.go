@@ -57,7 +57,6 @@ func (p *PluginsPanel) HandleKey(ev KeyEvent, actions AppActions) HandlerResult 
 }
 
 // OptionsBarForTab returns the options bar for the given tab.
-// Tab 0 = MCP, Tab 1 = Plugins, Tab 2 = Marketplace.
 func (p *PluginsPanel) OptionsBarForTab(tabIdx int) string {
 	hints := p.reg.HintsForScopeTab(keymap.ScopePlugins, tabIdx)
 	defs := make([]presentation.HintDef, 0, len(hints))
@@ -70,5 +69,5 @@ func (p *PluginsPanel) OptionsBarForTab(tabIdx int) string {
 	return presentation.BuildOptionsBar(defs)
 }
 
-func (p *PluginsPanel) TabCount() int       { return 3 }
-func (p *PluginsPanel) TabLabels() []string { return []string{"MCP", "Plugins", "Marketplace"} }
+func (p *PluginsPanel) TabCount() int       { return len(keymap.PluginTabLabels()) }
+func (p *PluginsPanel) TabLabels() []string { return keymap.PluginTabLabels() }
