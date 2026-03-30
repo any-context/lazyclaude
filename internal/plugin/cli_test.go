@@ -120,7 +120,7 @@ func TestExecCLI_Uninstall(t *testing.T) {
 	runner := &mockRunner{output: ""}
 	cli := NewExecCLI(WithRunner(runner))
 
-	err := cli.Uninstall(context.Background(), "lua-lsp@claude-plugins-official")
+	err := cli.Uninstall(context.Background(), "lua-lsp@claude-plugins-official", "project")
 	if err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}
@@ -128,6 +128,8 @@ func TestExecCLI_Uninstall(t *testing.T) {
 	args := runner.called[0]
 	assertContains(t, args, "uninstall")
 	assertContains(t, args, "lua-lsp@claude-plugins-official")
+	assertContains(t, args, "--scope")
+	assertContains(t, args, "project")
 }
 
 func TestExecCLI_Enable(t *testing.T) {

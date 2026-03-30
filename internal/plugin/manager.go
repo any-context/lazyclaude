@@ -110,8 +110,8 @@ func (m *Manager) Install(ctx context.Context, pluginID string, scope string) er
 }
 
 // Uninstall removes a plugin and refreshes the cache.
-func (m *Manager) Uninstall(ctx context.Context, pluginID string) error {
-	if err := m.cli.Uninstall(ctx, pluginID); err != nil {
+func (m *Manager) Uninstall(ctx context.Context, pluginID string, scope string) error {
+	if err := m.cli.Uninstall(ctx, pluginID, scope); err != nil {
 		return err
 	}
 	return m.Refresh(ctx)

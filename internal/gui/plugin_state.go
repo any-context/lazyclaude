@@ -33,7 +33,7 @@ type PluginProvider interface {
 	Installed() []PluginItem
 	Available() []AvailablePluginItem
 	Install(ctx context.Context, pluginID string) error
-	Uninstall(ctx context.Context, pluginID string) error
+	Uninstall(ctx context.Context, pluginID string, scope string) error
 	ToggleEnabled(ctx context.Context, pluginID string) error
 	Update(ctx context.Context, pluginID string) error
 }

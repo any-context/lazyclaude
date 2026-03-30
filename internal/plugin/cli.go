@@ -129,9 +129,9 @@ func (c *ExecCLI) Install(ctx context.Context, pluginID string, scope string) er
 	return nil
 }
 
-// Uninstall removes a plugin via `claude plugins uninstall <plugin>`.
-func (c *ExecCLI) Uninstall(ctx context.Context, pluginID string) error {
-	_, err := c.runner.Run(ctx, c.projectDir, "plugins", "uninstall", pluginID)
+// Uninstall removes a plugin via `claude plugins uninstall <plugin> --scope <scope>`.
+func (c *ExecCLI) Uninstall(ctx context.Context, pluginID string, scope string) error {
+	_, err := c.runner.Run(ctx, c.projectDir, "plugins", "uninstall", pluginID, "--scope", scope)
 	if err != nil {
 		return fmt.Errorf("uninstall %s: %w", pluginID, err)
 	}

@@ -600,9 +600,9 @@ func (a *App) PluginUninstall() {
 	if a.pluginState.installedCursor >= len(installed) {
 		return
 	}
-	pluginID := installed[a.pluginState.installedCursor].ID
+	p := installed[a.pluginState.installedCursor]
 	a.runPluginAsync(func(ctx context.Context) error {
-		return a.plugins.Uninstall(ctx, pluginID)
+		return a.plugins.Uninstall(ctx, p.ID, p.Scope)
 	})
 }
 

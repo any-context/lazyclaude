@@ -147,7 +147,7 @@ func TestManager_Uninstall(t *testing.T) {
 
 	mgr := NewManager(NewExecCLI(WithRunner(runner)), nil)
 
-	err := mgr.Uninstall(context.Background(), "lua-lsp@official")
+	err := mgr.Uninstall(context.Background(), "lua-lsp@official", "project")
 	if err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}
