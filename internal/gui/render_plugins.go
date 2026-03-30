@@ -60,7 +60,7 @@ func (a *App) renderInstalledList(v *gocui.View, maxWidth int, focused bool) {
 	}
 
 	for _, p := range installed {
-		line := presentation.FormatInstalledLine(p.ID, p.Version, p.Enabled, maxWidth)
+		line := presentation.FormatInstalledLine(p.ID, p.Version, p.Scope, p.Enabled, maxWidth)
 		fmt.Fprintln(v, line)
 	}
 

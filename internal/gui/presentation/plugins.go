@@ -8,7 +8,8 @@ import (
 )
 
 // FormatInstalledLine renders a line for an installed plugin.
-func FormatInstalledLine(id, version string, enabled bool, maxWidth int) string {
+// Layout: icon(3) + " " + name + "  " + version + "  " + scope
+func FormatInstalledLine(id, version, scope string, enabled bool, maxWidth int) string {
 	var icon string
 	if enabled {
 		icon = FgGreen + "[E]" + Reset
@@ -16,8 +17,8 @@ func FormatInstalledLine(id, version string, enabled bool, maxWidth int) string 
 		icon = FgYellow + "[D]" + Reset
 	}
 
-	right := Dim + version + Reset
-	rightWidth := ansi.StringWidth(version)
+	rightStr := Dim + version + Reset + "  " + Dim + scope + Reset
+	rightWidth := ansi.StringWidth(version) + 2 + ansi.StringWidth(scope)
 
 	nameWidth := maxWidth - 4 - rightWidth - 2
 	if nameWidth < 8 {
@@ -33,7 +34,7 @@ func FormatInstalledLine(id, version string, enabled bool, maxWidth int) string 
 		pad = 0
 	}
 
-	return fmt.Sprintf("%s %s%s  %s", icon, displayName, strings.Repeat(" ", pad), right)
+	return fmt.Sprintf("%s %s%s  %s", icon, displayName, strings.Repeat(" ", pad), rightStr)
 }
 
 // FormatAvailableLine renders a line for a marketplace plugin.

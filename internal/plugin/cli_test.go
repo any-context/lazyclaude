@@ -136,7 +136,7 @@ func TestExecCLI_Enable(t *testing.T) {
 	runner := &mockRunner{output: ""}
 	cli := NewExecCLI(WithRunner(runner))
 
-	err := cli.Enable(context.Background(), "lua-lsp@claude-plugins-official")
+	err := cli.Enable(context.Background(), "lua-lsp@claude-plugins-official", "project")
 	if err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
@@ -144,13 +144,15 @@ func TestExecCLI_Enable(t *testing.T) {
 	args := runner.called[0]
 	assertContains(t, args, "enable")
 	assertContains(t, args, "lua-lsp@claude-plugins-official")
+	assertContains(t, args, "--scope")
+	assertContains(t, args, "project")
 }
 
 func TestExecCLI_Disable(t *testing.T) {
 	runner := &mockRunner{output: ""}
 	cli := NewExecCLI(WithRunner(runner))
 
-	err := cli.Disable(context.Background(), "lua-lsp@claude-plugins-official")
+	err := cli.Disable(context.Background(), "lua-lsp@claude-plugins-official", "user")
 	if err != nil {
 		t.Fatalf("Disable: %v", err)
 	}
@@ -158,6 +160,8 @@ func TestExecCLI_Disable(t *testing.T) {
 	args := runner.called[0]
 	assertContains(t, args, "disable")
 	assertContains(t, args, "lua-lsp@claude-plugins-official")
+	assertContains(t, args, "--scope")
+	assertContains(t, args, "user")
 }
 
 func TestExecCLI_RunnerError(t *testing.T) {

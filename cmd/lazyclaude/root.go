@@ -666,8 +666,8 @@ func (a *pluginAdapter) Uninstall(ctx context.Context, pluginID string, scope st
 	return a.mgr.Uninstall(ctx, pluginID, scope)
 }
 
-func (a *pluginAdapter) ToggleEnabled(ctx context.Context, pluginID string) error {
-	return a.mgr.ToggleEnabled(ctx, pluginID)
+func (a *pluginAdapter) ToggleEnabled(ctx context.Context, pluginID string, scope string) error {
+	return a.mgr.ToggleEnabled(ctx, pluginID, scope)
 }
 
 func (a *pluginAdapter) Update(ctx context.Context, pluginID string) error {

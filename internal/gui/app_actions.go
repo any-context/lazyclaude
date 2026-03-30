@@ -601,6 +601,10 @@ func (a *App) PluginUninstall() {
 		return
 	}
 	p := installed[a.pluginState.installedCursor]
+	if p.Scope != "project" {
+		a.pluginState.errMsg = "only project-scoped plugins can be uninstalled"
+		return
+	}
 	a.runPluginAsync(func(ctx context.Context) error {
 		return a.plugins.Uninstall(ctx, p.ID, p.Scope)
 	})
@@ -614,9 +618,9 @@ func (a *App) PluginToggleEnabled() {
 	if a.pluginState.installedCursor >= len(installed) {
 		return
 	}
-	pluginID := installed[a.pluginState.installedCursor].ID
+	p := installed[a.pluginState.installedCursor]
 	a.runPluginAsync(func(ctx context.Context) error {
-		return a.plugins.ToggleEnabled(ctx, pluginID)
+		return a.plugins.ToggleEnabled(ctx, p.ID, p.Scope)
 	})
 }
 

@@ -138,18 +138,18 @@ func (c *ExecCLI) Uninstall(ctx context.Context, pluginID string, scope string) 
 	return nil
 }
 
-// Enable activates a disabled plugin via `claude plugins enable <plugin> --scope project`.
-func (c *ExecCLI) Enable(ctx context.Context, pluginID string) error {
-	_, err := c.runner.Run(ctx, c.projectDir, "plugins", "enable", pluginID, "--scope", "project")
+// Enable activates a disabled plugin via `claude plugins enable <plugin> --scope <scope>`.
+func (c *ExecCLI) Enable(ctx context.Context, pluginID string, scope string) error {
+	_, err := c.runner.Run(ctx, c.projectDir, "plugins", "enable", pluginID, "--scope", scope)
 	if err != nil {
 		return fmt.Errorf("enable %s: %w", pluginID, err)
 	}
 	return nil
 }
 
-// Disable deactivates a plugin via `claude plugins disable <plugin> --scope project`.
-func (c *ExecCLI) Disable(ctx context.Context, pluginID string) error {
-	_, err := c.runner.Run(ctx, c.projectDir, "plugins", "disable", pluginID, "--scope", "project")
+// Disable deactivates a plugin via `claude plugins disable <plugin> --scope <scope>`.
+func (c *ExecCLI) Disable(ctx context.Context, pluginID string, scope string) error {
+	_, err := c.runner.Run(ctx, c.projectDir, "plugins", "disable", pluginID, "--scope", scope)
 	if err != nil {
 		return fmt.Errorf("disable %s: %w", pluginID, err)
 	}
