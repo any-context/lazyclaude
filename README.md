@@ -182,6 +182,10 @@ make lint          # golangci-lint
 make readme-gif    # Regenerate docs/images/hero.gif (Docker required)
 ```
 
+## Known Issues
+
+- **Paste in fullscreen mode** -- Pasting text (Cmd+V / Ctrl+Shift+V) in fullscreen mode does not work reliably. This is a limitation of how tmux `display-popup` interacts with bracketed paste sequences. Workaround: use `a` to attach directly to the session, then paste.
+
 ## Contributing
 
 We welcome contributions! Whether it's bug reports, feature requests, or pull requests -- all are appreciated. See [Issues](https://github.com/any-context/lazyclaude/issues) for current tasks or open a new one.

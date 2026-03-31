@@ -182,6 +182,10 @@ make lint          # golangci-lint
 make readme-gif    # docs/images/hero.gif を再生成（Docker 必須）
 ```
 
+## 既知の問題
+
+- **フルスクリーンモードでのペースト** -- フルスクリーンモードでのテキストペースト（Cmd+V / Ctrl+Shift+V）が正常に動作しない場合があります。tmux の `display-popup` と bracketed paste シーケンスの相互作用に起因する制限です。回避策: `a` でセッションに直接アタッチしてからペーストしてください。
+
 ## コントリビューション
 
 コントリビューションを歓迎します！ バグ報告、機能リクエスト、プルリクエスト -- すべて大歓迎です。現在のタスクは [Issues](https://github.com/any-context/lazyclaude/issues) をご覧ください。
