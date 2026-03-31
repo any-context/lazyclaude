@@ -228,6 +228,37 @@ func TestBuildHooksSettingsJSON_SessionStartHookPostsToSessionStartEndpoint(t *t
 	assert.True(t, strings.Contains(jsonStr, "/session-start"), "SessionStart hook should POST to /session-start endpoint")
 }
 
+func TestWriteHooksSettingsFile(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	path, err := config.WriteHooksSettingsFile(tmp)
+	require.NoError(t, err)
+	assert.NotEmpty(t, path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	content := string(data)
+
+	// Must not contain Go's HTML-safe unicode escapes — node can't parse them.
+	assert.False(t, strings.Contains(content, `\u003e`), "must not contain \\u003e (escaped >)")
+	assert.False(t, strings.Contains(content, `\u0026`), "must not contain \\u0026 (escaped &)")
+
+	// Must contain literal JS operators that Go would normally escape.
+	assert.True(t, strings.Contains(content, `=>`), "must contain literal => (arrow functions)")
+	assert.True(t, strings.Contains(content, `&&`), "must contain literal && (logical AND)")
+
+	// Valid JSON
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(data, &parsed))
+	hooks, ok := parsed["hooks"].(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, hooks, "PreToolUse")
+	assert.Contains(t, hooks, "Notification")
+	assert.Contains(t, hooks, "Stop")
+	assert.Contains(t, hooks, "SessionStart")
+}
+
 func TestBuildHooksSettingsJSON_UsesEnvVarResolution(t *testing.T) {
 	t.Parallel()
 	jsonStr, err := config.BuildHooksSettingsJSON()

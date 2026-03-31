@@ -342,7 +342,7 @@ func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userP
 		systemPrompt = BuildWorktreePrompt(wtPath, projectRoot)
 	}
 
-	launcher, err := writeWorktreeLauncher(systemPrompt, userPrompt)
+	launcher, err := writeWorktreeLauncher(systemPrompt, userPrompt, m.paths.RuntimeDir)
 	if err != nil {
 		return nil, fmt.Errorf("write launcher: %w", err)
 	}
@@ -417,7 +417,7 @@ func createGitWorktree(ctx context.Context, projectRoot, wtPath, branch string) 
 // writeWorktreeLauncher writes a shell script that launches claude with
 // --append-system-prompt and an optional user prompt as positional argument.
 // Returns the script path. The script self-deletes after execution.
-func writeWorktreeLauncher(systemPrompt, userPrompt string) (string, error) {
+func writeWorktreeLauncher(systemPrompt, userPrompt, runtimeDir string) (string, error) {
 	f, err := os.CreateTemp("", "lazyclaude-wt-*.sh")
 	if err != nil {
 		return "", fmt.Errorf("create temp script: %w", err)
@@ -429,10 +429,11 @@ func writeWorktreeLauncher(systemPrompt, userPrompt string) (string, error) {
 	sb.WriteString("rm -f \"$0\"\n")
 	sb.WriteString("exec claude")
 
-	// Inject hooks via --settings so ~/.claude/settings.json stays untouched.
-	if hooksJSON, err := config.BuildHooksSettingsJSON(); err == nil {
+	// Inject hooks via --settings file so ~/.claude/settings.json stays untouched.
+	// Using a file avoids shell quoting issues with nested single quotes in hook commands.
+	if settingsFile, err := config.WriteHooksSettingsFile(runtimeDir); err == nil {
 		sb.WriteString(" --settings ")
-		sb.WriteString(shell.Quote(hooksJSON))
+		sb.WriteString(shell.Quote(settingsFile))
 	}
 
 	sb.WriteString(" --append-system-prompt ")
@@ -546,9 +547,13 @@ func (m *Manager) readMCPInfo() (int, string, error) {
 func (m *Manager) buildClaudeCommand(sess Session) string {
 	claudeArgs := "claude"
 
-	// Inject hooks via --settings so ~/.claude/settings.json stays untouched.
-	if hooksJSON, err := config.BuildHooksSettingsJSON(); err == nil {
-		claudeArgs += " --settings " + shell.Quote(hooksJSON)
+	// Inject hooks via --settings file so ~/.claude/settings.json stays untouched.
+	// The path is NOT wrapped in shell.Quote because the entire claudeArgs string
+	// is already inside single quotes in the final command. Nesting single quotes
+	// would break the shell parsing. Runtime dir paths (/tmp, /var/folders/...)
+	// never contain spaces or special characters.
+	if settingsFile, err := config.WriteHooksSettingsFile(m.paths.RuntimeDir); err == nil {
+		claudeArgs += " --settings " + settingsFile
 	}
 
 	for _, f := range sess.Flags {
@@ -649,7 +654,7 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot string) (*Ses
 	id := uuid.New().String()
 	systemPrompt := BuildPMPrompt(id, mcpPort, token, workerList, m.paths.PortFile(), m.paths.IDEDir)
 
-	launcher, err := writeWorktreeLauncher(systemPrompt, "")
+	launcher, err := writeWorktreeLauncher(systemPrompt, "", m.paths.RuntimeDir)
 	if err != nil {
 		return nil, fmt.Errorf("write launcher: %w", err)
 	}

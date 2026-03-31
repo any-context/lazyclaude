@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -167,6 +168,37 @@ func BuildHooksSettingsJSON() (string, error) {
 		return "", fmt.Errorf("marshal hooks settings: %w", err)
 	}
 	return string(data), nil
+}
+
+// WriteHooksSettingsFile writes the hooks settings JSON to a file and returns the path.
+// The file is placed in the lazyclaude runtime directory so it persists for the
+// process lifetime. Using a file avoids shell quoting issues with --settings flag.
+func WriteHooksSettingsFile(runtimeDir string) (string, error) {
+	settings := map[string]any{
+		"hooks": buildHooksMap(),
+	}
+
+	// Use json.Encoder with SetEscapeHTML(false) to prevent Go's default
+	// HTML-safe escaping of >, <, & to \u003e, \u003c, \u0026.
+	// Hook commands contain => (arrow functions) and && (logical AND) which
+	// must remain literal for node to parse them correctly.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(settings); err != nil {
+		return "", fmt.Errorf("marshal hooks settings: %w", err)
+	}
+
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		return "", fmt.Errorf("create runtime dir: %w", err)
+	}
+
+	path := runtimeDir + "/hooks-settings.json"
+	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+		return "", fmt.Errorf("write hooks settings file: %w", err)
+	}
+	return path, nil
 }
 
 // buildHooksMap returns the hooks structure with all lazyclaude hook types.
