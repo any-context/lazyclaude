@@ -348,6 +348,7 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 	previewH := l.Main.Height() - 1
 
 	if a.scroll.IsActive() {
+		v.Editable = false
 		a.renderScrollContent(v)
 	} else {
 		a.renderPreview(v, items, previewW, previewH)
