@@ -418,6 +418,12 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 	}
 
 	item := *node.Session
+
+	// Clear stop/start activity badge when the user views this session.
+	if item.Activity == "finished" || item.Activity == "error" {
+		a.clearWindowActivity(item.TmuxWindow)
+	}
+
 	if session.IsWorktreePath(item.Path) {
 		v.Title = fmt.Sprintf(" [worktree] %s ", item.Name)
 	} else {

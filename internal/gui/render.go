@@ -24,6 +24,10 @@ func sessionStatusIcon(item *SessionItem) string {
 		return " " + presentation.IconOrphan
 	case item.Activity == "pending":
 		return " " + presentation.IconPending
+	case item.Activity == "finished":
+		return " " + presentation.IconFinished
+	case item.Activity == "error":
+		return " " + presentation.IconError
 	case item.Status == "Running":
 		return " " + presentation.IconRunning
 	case item.Status == "Detached":

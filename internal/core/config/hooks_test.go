@@ -175,6 +175,83 @@ func TestHookCommand_ValidatesLockPID(t *testing.T) {
 	}
 }
 
+func TestBuildHooksSettingsJSON(t *testing.T) {
+	t.Parallel()
+	jsonStr, err := config.BuildHooksSettingsJSON()
+	require.NoError(t, err)
+	assert.NotEmpty(t, jsonStr)
+
+	var settings map[string]any
+	require.NoError(t, json.Unmarshal([]byte(jsonStr), &settings))
+
+	hooks, ok := settings["hooks"].(map[string]any)
+	require.True(t, ok, "should have hooks key")
+
+	for _, hookType := range []string{"PreToolUse", "Notification", "Stop", "SessionStart"} {
+		assert.Contains(t, hooks, hookType, "should contain %s hook", hookType)
+		entries, ok := hooks[hookType].([]any)
+		require.True(t, ok, "%s should be an array", hookType)
+		require.Len(t, entries, 1, "%s should have one entry", hookType)
+
+		entry := entries[0].(map[string]any)
+		assert.Equal(t, "*", entry["matcher"])
+		hookList := entry["hooks"].([]any)
+		require.Len(t, hookList, 1)
+		hook := hookList[0].(map[string]any)
+		assert.Equal(t, "command", hook["type"])
+		assert.NotEmpty(t, hook["command"])
+	}
+}
+
+func TestBuildHooksSettingsJSON_ContainsPIDValidation(t *testing.T) {
+	t.Parallel()
+	jsonStr, err := config.BuildHooksSettingsJSON()
+	require.NoError(t, err)
+
+	// All hooks should validate lock PID liveness
+	assert.True(t, strings.Contains(jsonStr, "process.kill"), "hooks should validate PID liveness")
+}
+
+func TestBuildHooksSettingsJSON_StopHookPostsToStopEndpoint(t *testing.T) {
+	t.Parallel()
+	jsonStr, err := config.BuildHooksSettingsJSON()
+	require.NoError(t, err)
+
+	assert.True(t, strings.Contains(jsonStr, "/stop"), "Stop hook should POST to /stop endpoint")
+}
+
+func TestBuildHooksSettingsJSON_SessionStartHookPostsToSessionStartEndpoint(t *testing.T) {
+	t.Parallel()
+	jsonStr, err := config.BuildHooksSettingsJSON()
+	require.NoError(t, err)
+
+	assert.True(t, strings.Contains(jsonStr, "/session-start"), "SessionStart hook should POST to /session-start endpoint")
+}
+
+func TestBuildHooksSettingsJSON_UsesEnvVarResolution(t *testing.T) {
+	t.Parallel()
+	jsonStr, err := config.BuildHooksSettingsJSON()
+	require.NoError(t, err)
+
+	// Hooks should use LAZYCLAUDE_SERVER_PORT env var for fast path resolution
+	assert.True(t, strings.Contains(jsonStr, "LAZYCLAUDE_SERVER_PORT"),
+		"hooks should reference LAZYCLAUDE_SERVER_PORT for env-first resolution")
+	assert.True(t, strings.Contains(jsonStr, "LAZYCLAUDE_SERVER_TOKEN"),
+		"hooks should reference LAZYCLAUDE_SERVER_TOKEN for env-first resolution")
+}
+
+func TestBuildHooksSettingsJSON_RetainsLockFileFallback(t *testing.T) {
+	t.Parallel()
+	jsonStr, err := config.BuildHooksSettingsJSON()
+	require.NoError(t, err)
+
+	// Lock file scanning must remain as fallback when env vars are not set
+	assert.True(t, strings.Contains(jsonStr, "process.kill"),
+		"hooks should retain lock file fallback with PID liveness check")
+	assert.True(t, strings.Contains(jsonStr, ".lock"),
+		"hooks should retain lock file scanning as fallback")
+}
+
 func TestSetLazyClaudeHooks_Roundtrip(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()

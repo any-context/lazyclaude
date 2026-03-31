@@ -115,6 +115,7 @@ func newRootCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("init TUI: %w", err)
 			}
+			adapter.windowActivityFn = app.WindowActivityMap
 			app.SetSessions(adapter)
 
 			// Plugin manager: wraps `claude plugins` CLI (project scope only)
@@ -317,6 +318,10 @@ type sessionAdapter struct {
 	// then reused by Sessions() and Projects() to avoid redundant ReadAll
 	// calls (each of which does an os.ReadDir + file I/O).
 	cachedPending map[string]bool
+
+	// windowActivity provides window->activity mapping from the App layer.
+	// Set via SetWindowActivitySource after the App is wired.
+	windowActivityFn func() map[string]string
 }
 
 // RefreshPendingFrom caches the given notifications for badge rendering.
@@ -329,12 +334,19 @@ func (a *sessionAdapter) RefreshPendingFrom(notifications []*model.ToolNotificat
 
 func (a *sessionAdapter) Sessions() []gui.SessionItem {
 	sessions := a.mgr.Sessions()
-	return buildSessionItems(sessions, a.cachedPending)
+	return buildSessionItems(sessions, a.cachedPending, a.getWindowActivity())
 }
 
 func (a *sessionAdapter) Projects() []gui.ProjectItem {
 	projects := a.mgr.Projects()
-	return buildProjectItems(projects, a.cachedPending)
+	return buildProjectItems(projects, a.cachedPending, a.getWindowActivity())
+}
+
+func (a *sessionAdapter) getWindowActivity() map[string]string {
+	if a.windowActivityFn != nil {
+		return a.windowActivityFn()
+	}
+	return nil
 }
 
 func (a *sessionAdapter) ToggleProjectExpanded(projectID string) {
@@ -351,17 +363,17 @@ func pendingWindowSet(notifications []*model.ToolNotification) map[string]bool {
 }
 
 // buildProjectItems converts session.Project slice to gui.ProjectItem slice.
-func buildProjectItems(projects []session.Project, pending map[string]bool) []gui.ProjectItem {
+func buildProjectItems(projects []session.Project, pending map[string]bool, windowActivity map[string]string) []gui.ProjectItem {
 	items := make([]gui.ProjectItem, len(projects))
 	for i, p := range projects {
 		var pm *gui.SessionItem
 		if p.PM != nil {
-			si := sessionToItem(*p.PM, pending)
+			si := sessionToItem(*p.PM, pending, windowActivity)
 			pm = &si
 		}
 		sessions := make([]gui.SessionItem, len(p.Sessions))
 		for j, s := range p.Sessions {
-			sessions[j] = sessionToItem(s, pending)
+			sessions[j] = sessionToItem(s, pending, windowActivity)
 		}
 		items[i] = gui.ProjectItem{
 			ID:       p.ID,
@@ -376,10 +388,16 @@ func buildProjectItems(projects []session.Project, pending map[string]bool) []gu
 }
 
 // sessionToItem converts a single session.Session to gui.SessionItem.
-func sessionToItem(s session.Session, pending map[string]bool) gui.SessionItem {
+func sessionToItem(s session.Session, pending map[string]bool, windowActivity map[string]string) gui.SessionItem {
 	activity := ""
 	if s.Status == session.StatusRunning && pending[s.TmuxWindow] {
 		activity = "pending"
+	}
+	// Stop/SessionStart lifecycle activity (lower priority than pending).
+	if activity == "" && s.Status == session.StatusRunning {
+		if wa := windowActivity[s.TmuxWindow]; wa != "" {
+			activity = wa
+		}
 	}
 	return gui.SessionItem{
 		ID:         s.ID,
@@ -395,10 +413,10 @@ func sessionToItem(s session.Session, pending map[string]bool) gui.SessionItem {
 }
 
 // buildSessionItems converts session.Session slice to gui.SessionItem slice.
-func buildSessionItems(sessions []session.Session, pending map[string]bool) []gui.SessionItem {
+func buildSessionItems(sessions []session.Session, pending map[string]bool, windowActivity map[string]string) []gui.SessionItem {
 	items := make([]gui.SessionItem, len(sessions))
 	for i, s := range sessions {
-		items[i] = sessionToItem(s, pending)
+		items[i] = sessionToItem(s, pending, windowActivity)
 	}
 	return items
 }

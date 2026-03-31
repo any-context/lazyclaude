@@ -71,7 +71,7 @@ type SessionItem struct {
 	Status     string
 	Flags      []string
 	TmuxWindow string
-	Activity   string // "pending" or "" (empty = normal)
+	Activity   string // "pending", "finished", "error", or "" (empty = normal)
 	Role       string // "pm", "worker", or "" (empty = regular session)
 }
 
@@ -110,6 +110,10 @@ type App struct {
 	logCache           logFileCache                 // cached server log file content
 	logRender          logRenderCache               // tracks last rendered log state
 	previewByScope     map[keymap.Scope]func(*gocui.View, int, int) // scope -> preview renderer
+	// windowActivity tracks lifecycle state per tmux window ("finished", "error").
+	// All reads/writes happen on the gocui event loop goroutine (gui.Update callbacks
+	// and layout), so no mutex is needed.
+	windowActivity     map[string]string
 }
 
 
@@ -125,7 +129,8 @@ func newApp(mode AppMode, g *gocui.Gui, enableMouse bool) (*App, error) {
 		notify:      NewNotifyLoop(),
 		pluginState: NewPluginState(),
 		mcpState:    NewMCPState(),
-		panelTabs:   make(map[string]int),
+		panelTabs:      make(map[string]int),
+		windowActivity: make(map[string]string),
 	}
 	app.fullscreen = NewFullScreenState(app.preview)
 	app.initDispatcher()
@@ -242,6 +247,20 @@ func (a *App) Run() error {
 						return nil
 					})
 				}
+				if ev.StopNotification != nil {
+					n := ev.StopNotification
+					a.gui.Update(func(g *gocui.Gui) error {
+						a.setWindowActivity(n.Window, stopReasonToActivity(n.StopReason))
+						return nil
+					})
+				}
+				if ev.SessionStartNotification != nil {
+					n := ev.SessionStartNotification
+					a.gui.Update(func(g *gocui.Gui) error {
+						a.clearWindowActivity(n.Window)
+						return nil
+					})
+				}
 			case <-ticker.C:
 				if outputPending {
 					a.preview.Lock()
@@ -339,6 +358,51 @@ type keyCmd struct {
 // Called from the control mode callback. Non-blocking.
 func (a *App) NotifyOutput() {
 	a.notify.NotifyOutput()
+}
+
+// WindowActivity returns the activity string for a tmux window.
+// Returns "" if no activity is set.
+func (a *App) WindowActivity(window string) string {
+	return a.windowActivity[window]
+}
+
+// WindowActivityMap returns a shallow copy of the window activity map.
+// Used by the session adapter to merge lifecycle state into SessionItem.Activity.
+func (a *App) WindowActivityMap() map[string]string {
+	if len(a.windowActivity) == 0 {
+		return nil
+	}
+	cp := make(map[string]string, len(a.windowActivity))
+	for k, v := range a.windowActivity {
+		cp[k] = v
+	}
+	return cp
+}
+
+// setWindowActivity records a lifecycle activity for a tmux window.
+// Called from the broker event handler on the gocui goroutine.
+func (a *App) setWindowActivity(window, activity string) {
+	if window == "" {
+		return
+	}
+	a.windowActivity[window] = activity
+}
+
+// clearWindowActivity removes the lifecycle activity for a tmux window.
+// Called when a new session starts (the previous stop state is stale).
+func (a *App) clearWindowActivity(window string) {
+	if window == "" {
+		return
+	}
+	delete(a.windowActivity, window)
+}
+
+// stopReasonToActivity converts a Claude Code stop_reason to an activity string.
+func stopReasonToActivity(reason string) string {
+	if reason == "error" {
+		return "error"
+	}
+	return "finished"
 }
 
 // Gui returns the underlying gocui.Gui (for testing).

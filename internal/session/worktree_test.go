@@ -195,11 +195,20 @@ func TestWriteWorktreeLauncher_EmptyUserPrompt(t *testing.T) {
 	if !strings.Contains(content, "--append-system-prompt") {
 		t.Error("should use --append-system-prompt")
 	}
-	// Should NOT have a trailing positional argument
+	// Should NOT have a trailing positional argument after --append-system-prompt.
+	// The last line should end with the system prompt quote, not an extra argument.
 	lines := strings.Split(strings.TrimSpace(content), "\n")
 	lastLine := lines[len(lines)-1]
-	if strings.Count(lastLine, "'") > 2 {
-		// More than one single-quoted argument means user prompt was included
+	// Find the position of --append-system-prompt and check nothing follows the system prompt
+	idx := strings.Index(lastLine, "--append-system-prompt")
+	if idx < 0 {
+		t.Fatal("expected --append-system-prompt in last line")
+	}
+	afterAppend := lastLine[idx+len("--append-system-prompt"):]
+	// afterAppend should be: " 'system only'\n" — exactly one quoted arg
+	// Count quoted segments after --append-system-prompt
+	quotedArgs := strings.Count(afterAppend, "'") / 2 // pairs of quotes
+	if quotedArgs > 1 {
 		t.Error("should not include user prompt argument when empty")
 	}
 }

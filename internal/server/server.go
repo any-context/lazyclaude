@@ -70,6 +70,8 @@ func New(cfg Config, tmuxClient tmux.Client, logger *log.Logger) *Server {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/notify", s.handleNotify)
+	mux.HandleFunc("/stop", s.handleStop)
+	mux.HandleFunc("/session-start", s.handleSessionStart)
 	mux.HandleFunc("/msg/send", s.handleMsgSend)
 	mux.HandleFunc("/msg/create", s.handleMsgCreate)
 	mux.HandleFunc("/msg/sessions", s.handleMsgSessions)
@@ -442,4 +444,90 @@ func (s *Server) writePortFile(port int) error {
 		return nil
 	}
 	return os.WriteFile(s.config.PortFile, []byte(strconv.Itoa(port)), 0o600)
+}
+
+type stopRequest struct {
+	PID        int    `json:"pid"`
+	StopReason string `json:"stop_reason"`
+	SessionID  string `json:"session_id"`
+}
+
+func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := extractAuthToken(r)
+	if subtle.ConstantTimeCompare([]byte(token), []byte(s.config.Token)) != 1 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req stopRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	window := s.resolveNotifyWindow(r.Context(), req.PID)
+	if window == "" {
+		window = s.state.LastPendingWindow()
+	}
+
+	s.log.Printf("stop: pid=%d window=%s reason=%s", req.PID, window, req.StopReason)
+
+	n := model.StopNotification{
+		Window:     window,
+		StopReason: req.StopReason,
+		SessionID:  req.SessionID,
+		Timestamp:  time.Now(),
+	}
+	s.notifyBroker.Publish(model.Event{StopNotification: &n})
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"}) //nolint:errcheck
+}
+
+type sessionStartRequest struct {
+	PID       int    `json:"pid"`
+	SessionID string `json:"session_id"`
+}
+
+func (s *Server) handleSessionStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := extractAuthToken(r)
+	if subtle.ConstantTimeCompare([]byte(token), []byte(s.config.Token)) != 1 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req sessionStartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	window := s.resolveNotifyWindow(r.Context(), req.PID)
+	if window == "" {
+		window = s.state.LastPendingWindow()
+	}
+
+	s.log.Printf("session-start: pid=%d window=%s", req.PID, window)
+
+	n := model.SessionStartNotification{
+		Window:    window,
+		SessionID: req.SessionID,
+		Timestamp: time.Now(),
+	}
+	s.notifyBroker.Publish(model.Event{SessionStartNotification: &n})
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"}) //nolint:errcheck
 }

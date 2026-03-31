@@ -77,7 +77,7 @@ func TestBuildSessionItems_RunningWithPending(t *testing.T) {
 	}
 	pending := map[string]bool{"@1": true}
 
-	items := buildSessionItems(sessions, pending)
+	items := buildSessionItems(sessions, pending, nil)
 	assert.Len(t, items, 1)
 	assert.Equal(t, "pending", items[0].Activity)
 }
@@ -90,7 +90,7 @@ func TestBuildSessionItems_RunningWithoutPending(t *testing.T) {
 	}
 	pending := map[string]bool{"@1": true}
 
-	items := buildSessionItems(sessions, pending)
+	items := buildSessionItems(sessions, pending, nil)
 	assert.Len(t, items, 1)
 	assert.Equal(t, "", items[0].Activity, "non-pending running session should have empty Activity")
 }
@@ -103,7 +103,7 @@ func TestBuildSessionItems_DeadSession_NoPendingActivity(t *testing.T) {
 	}
 	pending := map[string]bool{"@1": true}
 
-	items := buildSessionItems(sessions, pending)
+	items := buildSessionItems(sessions, pending, nil)
 	assert.Len(t, items, 1)
 	// Dead sessions should NOT be marked pending even if window matches
 	assert.Equal(t, "", items[0].Activity, "dead session should not be marked pending")
@@ -117,7 +117,7 @@ func TestBuildSessionItems_OrphanSession_NoPendingActivity(t *testing.T) {
 	}
 	pending := map[string]bool{"@1": true}
 
-	items := buildSessionItems(sessions, pending)
+	items := buildSessionItems(sessions, pending, nil)
 	assert.Len(t, items, 1)
 	assert.Equal(t, "", items[0].Activity, "orphan session should not be marked pending")
 }
@@ -132,7 +132,7 @@ func TestBuildSessionItems_MixedSessions(t *testing.T) {
 	}
 	pending := map[string]bool{"@1": true, "@3": true}
 
-	items := buildSessionItems(sessions, pending)
+	items := buildSessionItems(sessions, pending, nil)
 	assert.Len(t, items, 3)
 	assert.Equal(t, "pending", items[0].Activity, "s1 running + window in pending set")
 	assert.Equal(t, "", items[1].Activity, "s2 running but window not in pending set")
@@ -142,7 +142,7 @@ func TestBuildSessionItems_MixedSessions(t *testing.T) {
 // TestBuildSessionItems_EmptySessions returns empty slice
 func TestBuildSessionItems_EmptySessions(t *testing.T) {
 	t.Parallel()
-	items := buildSessionItems(nil, nil)
+	items := buildSessionItems(nil, nil, nil)
 	assert.Empty(t, items)
 }
 
@@ -160,7 +160,7 @@ func TestBuildSessionItems_PreservesExistingFields(t *testing.T) {
 			TmuxWindow: "@5",
 		},
 	}
-	items := buildSessionItems(sessions, map[string]bool{})
+	items := buildSessionItems(sessions, map[string]bool{}, nil)
 
 	assert.Equal(t, "abc123", items[0].ID)
 	assert.Equal(t, "my-app", items[0].Name)
@@ -177,7 +177,7 @@ func TestBuildSessionItems_NilPendingMap(t *testing.T) {
 	sessions := []session.Session{
 		{ID: "s1", Name: "app", Status: session.StatusRunning, TmuxWindow: "@1"},
 	}
-	items := buildSessionItems(sessions, nil)
+	items := buildSessionItems(sessions, nil, nil)
 	assert.Equal(t, "", items[0].Activity, "nil pending map should mean no session is pending")
 }
 
@@ -197,7 +197,7 @@ func TestBuildSessionItems_PMRole_IsPreserved(t *testing.T) {
 	sessions := []session.Session{
 		{ID: "s1", Name: "pm-session", Status: session.StatusRunning, Role: session.RolePM},
 	}
-	items := buildSessionItems(sessions, map[string]bool{})
+	items := buildSessionItems(sessions, map[string]bool{}, nil)
 
 	assert.Len(t, items, 1)
 	assert.Equal(t, "pm", items[0].Role, "PM role session should have Role='pm'")
@@ -209,7 +209,7 @@ func TestBuildSessionItems_WorkerRole_IsPreserved(t *testing.T) {
 	sessions := []session.Session{
 		{ID: "s1", Name: "worker-session", Status: session.StatusRunning, Role: session.RoleWorker},
 	}
-	items := buildSessionItems(sessions, map[string]bool{})
+	items := buildSessionItems(sessions, map[string]bool{}, nil)
 
 	assert.Len(t, items, 1)
 	assert.Equal(t, "worker", items[0].Role, "Worker role session should have Role='worker'")
@@ -221,7 +221,7 @@ func TestBuildSessionItems_NoRole_IsEmpty(t *testing.T) {
 	sessions := []session.Session{
 		{ID: "s1", Name: "regular", Status: session.StatusRunning, Role: session.RoleNone},
 	}
-	items := buildSessionItems(sessions, map[string]bool{})
+	items := buildSessionItems(sessions, map[string]bool{}, nil)
 
 	assert.Len(t, items, 1)
 	assert.Equal(t, "", items[0].Role, "RoleNone should map to empty string")
@@ -235,7 +235,7 @@ func TestBuildSessionItems_MixedRoles(t *testing.T) {
 		{ID: "s2", Name: "worker", Status: session.StatusRunning, Role: session.RoleWorker},
 		{ID: "s3", Name: "regular", Status: session.StatusRunning, Role: session.RoleNone},
 	}
-	items := buildSessionItems(sessions, map[string]bool{})
+	items := buildSessionItems(sessions, map[string]bool{}, nil)
 
 	assert.Len(t, items, 3)
 	assert.Equal(t, "pm", items[0].Role)
@@ -407,4 +407,57 @@ func TestSessionInfo_HasStatusField(t *testing.T) {
 	t.Parallel()
 	info := server.SessionInfo{Status: "Running"}
 	assert.Equal(t, "Running", info.Status)
+}
+
+// TestBuildSessionItems_WindowActivity_Finished sets Activity to "finished"
+func TestBuildSessionItems_WindowActivity_Finished(t *testing.T) {
+	t.Parallel()
+	sessions := []session.Session{
+		{ID: "s1", Name: "done", Status: session.StatusRunning, TmuxWindow: "@1"},
+	}
+	windowActivity := map[string]string{"@1": "finished"}
+
+	items := buildSessionItems(sessions, nil, windowActivity)
+	require.Len(t, items, 1)
+	assert.Equal(t, "finished", items[0].Activity)
+}
+
+// TestBuildSessionItems_WindowActivity_Error sets Activity to "error"
+func TestBuildSessionItems_WindowActivity_Error(t *testing.T) {
+	t.Parallel()
+	sessions := []session.Session{
+		{ID: "s1", Name: "err", Status: session.StatusRunning, TmuxWindow: "@2"},
+	}
+	windowActivity := map[string]string{"@2": "error"}
+
+	items := buildSessionItems(sessions, nil, windowActivity)
+	require.Len(t, items, 1)
+	assert.Equal(t, "error", items[0].Activity)
+}
+
+// TestBuildSessionItems_PendingOverridesWindowActivity
+func TestBuildSessionItems_PendingOverridesWindowActivity(t *testing.T) {
+	t.Parallel()
+	sessions := []session.Session{
+		{ID: "s1", Name: "both", Status: session.StatusRunning, TmuxWindow: "@3"},
+	}
+	pending := map[string]bool{"@3": true}
+	windowActivity := map[string]string{"@3": "finished"}
+
+	items := buildSessionItems(sessions, pending, windowActivity)
+	require.Len(t, items, 1)
+	assert.Equal(t, "pending", items[0].Activity, "pending should take priority over windowActivity")
+}
+
+// TestBuildSessionItems_DeadSessionIgnoresWindowActivity
+func TestBuildSessionItems_DeadSessionIgnoresWindowActivity(t *testing.T) {
+	t.Parallel()
+	sessions := []session.Session{
+		{ID: "s1", Name: "dead", Status: session.StatusDead, TmuxWindow: "@4"},
+	}
+	windowActivity := map[string]string{"@4": "finished"}
+
+	items := buildSessionItems(sessions, nil, windowActivity)
+	require.Len(t, items, 1)
+	assert.Equal(t, "", items[0].Activity, "dead session should not show windowActivity")
 }

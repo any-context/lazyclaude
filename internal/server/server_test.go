@@ -376,3 +376,153 @@ func TestServer_LockFile_CreatedAndRemoved(t *testing.T) {
 	err := srv.Stop(context.Background())
 	require.NoError(t, err)
 }
+
+func postEndpoint(t *testing.T, port int, path string, body []byte) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("http://127.0.0.1:%d%s", port, path),
+		bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Auth-Token", "test-token")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	return resp
+}
+
+func TestServer_Stop_POST(t *testing.T) {
+	t.Parallel()
+	srv, port, _ := startTestServer(t)
+
+	srv.State().SetConn("c1", &server.ConnState{PID: 1234, Window: "@2"})
+
+	body, _ := json.Marshal(map[string]any{
+		"pid":         1234,
+		"stop_reason": "end_turn",
+		"session_id":  "sess-abc",
+	})
+	resp := postEndpoint(t, port, "/stop", body)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Equal(t, "ok", result["status"])
+}
+
+func TestServer_Stop_Unauthorized(t *testing.T) {
+	t.Parallel()
+	_, port, _ := startTestServer(t)
+
+	body, _ := json.Marshal(map[string]any{"pid": 1234})
+	req, _ := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("http://127.0.0.1:%d/stop", port),
+		bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Auth-Token", "wrong-token")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestServer_Stop_MethodNotAllowed(t *testing.T) {
+	t.Parallel()
+	_, port, _ := startTestServer(t)
+
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/stop", port))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+}
+
+func TestServer_SessionStart_POST(t *testing.T) {
+	t.Parallel()
+	srv, port, _ := startTestServer(t)
+
+	srv.State().SetConn("c1", &server.ConnState{PID: 5678, Window: "@4"})
+
+	body, _ := json.Marshal(map[string]any{
+		"pid":        5678,
+		"session_id": "sess-xyz",
+	})
+	resp := postEndpoint(t, port, "/session-start", body)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Equal(t, "ok", result["status"])
+}
+
+func TestServer_SessionStart_Unauthorized(t *testing.T) {
+	t.Parallel()
+	_, port, _ := startTestServer(t)
+
+	body, _ := json.Marshal(map[string]any{"pid": 5678})
+	req, _ := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("http://127.0.0.1:%d/session-start", port),
+		bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Auth-Token", "wrong-token")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestServer_Stop_PublishesBrokerEvent(t *testing.T) {
+	t.Parallel()
+	srv, port, _ := startTestServer(t)
+
+	srv.State().SetConn("c1", &server.ConnState{PID: 3333, Window: "@6"})
+
+	sub := srv.NotifyBroker().Subscribe(8)
+	defer sub.Cancel()
+
+	body, _ := json.Marshal(map[string]any{
+		"pid":         3333,
+		"stop_reason": "error",
+		"session_id":  "sess-err",
+	})
+	resp := postEndpoint(t, port, "/stop", body)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	select {
+	case ev := <-sub.Ch():
+		require.NotNil(t, ev.StopNotification)
+		assert.Equal(t, "@6", ev.StopNotification.Window)
+		assert.Equal(t, "error", ev.StopNotification.StopReason)
+		assert.Equal(t, "sess-err", ev.StopNotification.SessionID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected stop event on broker")
+	}
+}
+
+func TestServer_SessionStart_PublishesBrokerEvent(t *testing.T) {
+	t.Parallel()
+	srv, port, _ := startTestServer(t)
+
+	srv.State().SetConn("c1", &server.ConnState{PID: 4444, Window: "@8"})
+
+	sub := srv.NotifyBroker().Subscribe(8)
+	defer sub.Cancel()
+
+	body, _ := json.Marshal(map[string]any{
+		"pid":        4444,
+		"session_id": "sess-start",
+	})
+	resp := postEndpoint(t, port, "/session-start", body)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	select {
+	case ev := <-sub.Ch():
+		require.NotNil(t, ev.SessionStartNotification)
+		assert.Equal(t, "@8", ev.SessionStartNotification.Window)
+		assert.Equal(t, "sess-start", ev.SessionStartNotification.SessionID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected session-start event on broker")
+	}
+}

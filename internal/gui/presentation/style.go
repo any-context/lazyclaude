@@ -27,6 +27,8 @@ const (
 	IconOrphan   = "\x1b[33m○\x1b[0m" // yellow empty circle
 	IconDetached = "\x1b[90m◆\x1b[0m" // gray diamond
 	IconPending  = "\x1b[35m◆\x1b[0m" // magenta diamond (choice waiting)
+	IconFinished = "\x1b[36m●\x1b[0m" // cyan filled circle (turn completed)
+	IconError    = "\x1b[31m!\x1b[0m" // red exclamation (error stop)
 	IconUnknown  = "\x1b[90m?\x1b[0m" // gray question mark
 	IconSep      = "│"
 	IconWorktree        = "\x1b[38;5;214m[W]\x1b[0m"  // orange [W] for worktree sessions

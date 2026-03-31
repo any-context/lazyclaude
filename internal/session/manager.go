@@ -169,14 +169,16 @@ func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, e
 		UpdatedAt: time.Now(),
 	}
 
+	// Read MCP info for environment variable injection.
+	mcpPort, mcpToken, mcpErr := m.readMCPInfo()
+
 	var claudeCmd string
 	if host != "" {
-		mcpPort, token, mcpErr := m.readMCPInfo()
 		if mcpErr != nil {
 			return nil, fmt.Errorf("read MCP server info for SSH session: %w", mcpErr)
 		}
 		var sshErr error
-		claudeCmd, sshErr = buildSSHCommand(sess, mcpPort, token)
+		claudeCmd, sshErr = buildSSHCommand(sess, mcpPort, mcpToken)
 		if sshErr != nil {
 			return nil, fmt.Errorf("build SSH command: %w", sshErr)
 		}
@@ -196,7 +198,8 @@ func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, e
 		return nil, fmt.Errorf("resolve path %q: %w", sess.Path, err)
 	}
 
-	return m.launchSession(ctx, sess, claudeCmd, absPath)
+	env := claudeEnv(id, mcpPort, mcpToken)
+	return m.launchSession(ctx, sess, claudeCmd, absPath, env)
 }
 
 // worktreeOpts configures how a worktree session is created.
@@ -278,7 +281,7 @@ func (m *Manager) ResumeWorktree(ctx context.Context, worktreePath, userPrompt, 
 
 // launchSession creates a tmux window for sess using claudeCmd and persists the
 // session to the store. Caller must hold m.mu.
-func (m *Manager) launchSession(ctx context.Context, sess Session, claudeCmd, startDir string) (*Session, error) {
+func (m *Manager) launchSession(ctx context.Context, sess Session, claudeCmd, startDir string, env map[string]string) (*Session, error) {
 	windowName := sess.WindowName()
 
 	exists, err := m.tmux.HasSession(ctx, tmuxSessionName)
@@ -286,7 +289,6 @@ func (m *Manager) launchSession(ctx context.Context, sess Session, claudeCmd, st
 		return nil, fmt.Errorf("check session: %w", err)
 	}
 
-	env := claudeEnv()
 	width, height := termSize()
 
 	if !exists {
@@ -365,7 +367,8 @@ func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userP
 	claudeCmd := fmt.Sprintf("exec \"$SHELL\" -lic 'exec sh %s'", shell.Quote(launcher))
 	m.log.Info("launchWorktree", "name", name, "id", id[:8], "path", wtPath, "role", role)
 
-	result, err := m.launchSession(ctx, sess, claudeCmd, wtPath)
+	env := claudeEnv(id, mcpPort, mcpToken)
+	result, err := m.launchSession(ctx, sess, claudeCmd, wtPath, env)
 	if err != nil {
 		return nil, err
 	}
@@ -425,6 +428,13 @@ func writeWorktreeLauncher(systemPrompt, userPrompt string) (string, error) {
 	// Self-delete the launcher script (already read by shell at this point).
 	sb.WriteString("rm -f \"$0\"\n")
 	sb.WriteString("exec claude")
+
+	// Inject hooks via --settings so ~/.claude/settings.json stays untouched.
+	if hooksJSON, err := config.BuildHooksSettingsJSON(); err == nil {
+		sb.WriteString(" --settings ")
+		sb.WriteString(shell.Quote(hooksJSON))
+	}
+
 	sb.WriteString(" --append-system-prompt ")
 	sb.WriteString(shell.Quote(systemPrompt))
 	if strings.TrimSpace(userPrompt) != "" {
@@ -535,6 +545,12 @@ func (m *Manager) readMCPInfo() (int, string, error) {
 
 func (m *Manager) buildClaudeCommand(sess Session) string {
 	claudeArgs := "claude"
+
+	// Inject hooks via --settings so ~/.claude/settings.json stays untouched.
+	if hooksJSON, err := config.BuildHooksSettingsJSON(); err == nil {
+		claudeArgs += " --settings " + shell.Quote(hooksJSON)
+	}
+
 	for _, f := range sess.Flags {
 		claudeArgs += " " + shell.Quote(f)
 	}
@@ -544,9 +560,20 @@ func (m *Manager) buildClaudeCommand(sess Session) string {
 
 // claudeEnv returns environment variables to pass to Claude Code sessions.
 // Inherits auth tokens and Claude-specific vars from the parent process.
-func claudeEnv() map[string]string {
+// When mcpPort > 0, injects LAZYCLAUDE_* env vars so hooks can connect directly.
+func claudeEnv(sessionID string, mcpPort int, mcpToken string) map[string]string {
 	env := map[string]string{
 		"CLAUDE_CODE_AUTO_CONNECT_IDE": "true",
+	}
+	// Inject lazyclaude session/server info for hooks (env-first, lock-file fallback).
+	if sessionID != "" {
+		env["LAZYCLAUDE_SESSION_ID"] = sessionID
+	}
+	if mcpPort > 0 {
+		env["LAZYCLAUDE_SERVER_PORT"] = strconv.Itoa(mcpPort)
+	}
+	if mcpToken != "" {
+		env["LAZYCLAUDE_SERVER_TOKEN"] = mcpToken
 	}
 	// Pass through Claude auth and config env vars
 	passthrough := []string{
@@ -645,7 +672,8 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot string) (*Ses
 	claudeCmd := fmt.Sprintf("exec \"$SHELL\" -lic 'exec sh %s'", shell.Quote(launcher))
 	m.log.Info("createPMSession", "id", id[:8], "path", projectRoot)
 
-	result, err := m.launchSession(ctx, sess, claudeCmd, projectRoot)
+	env := claudeEnv(id, mcpPort, token)
+	result, err := m.launchSession(ctx, sess, claudeCmd, projectRoot, env)
 	if err != nil {
 		return nil, err
 	}
