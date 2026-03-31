@@ -752,19 +752,19 @@ func Default() *Registry {
 		Description: "Scroll down one line",
 	})
 	r.Register(ActionDef{
-		Action:   ActionScrollHalfUp,
-		Bindings: []KeyBinding{{Key: gocui.KeyCtrlB}},
-		Scope:    ScopeScroll,
+		Action:      ActionScrollHalfUp,
+		Bindings:    []KeyBinding{{Key: gocui.KeyPgup}, {Rune: 'K'}},
+		Scope:       ScopeScroll,
 		HintLabel:   "half up",
-		HintKey:     "C-b",
+		HintKey:     "K/PgUp",
 		Description: "Scroll up half page",
 	})
 	r.Register(ActionDef{
-		Action:   ActionScrollHalfDown,
-		Bindings: []KeyBinding{{Key: gocui.KeyCtrlF}},
-		Scope:    ScopeScroll,
+		Action:      ActionScrollHalfDown,
+		Bindings:    []KeyBinding{{Key: gocui.KeyPgdn}, {Rune: 'J'}},
+		Scope:       ScopeScroll,
 		HintLabel:   "half down",
-		HintKey:     "C-f",
+		HintKey:     "J/PgDn",
 		Description: "Scroll down half page",
 	})
 	r.Register(ActionDef{
