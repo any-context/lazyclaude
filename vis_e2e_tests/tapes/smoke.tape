@@ -2,7 +2,7 @@ Output outputs/smoke/smoke.gif
 Output outputs/smoke/smoke.txt
 
 Set Shell "bash"
-Set Width 1800
+Set Width 1600
 Set Height 1200
 Set FontSize 16
 Set WaitTimeout 5s

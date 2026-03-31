@@ -30,8 +30,6 @@ RUN sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && \
     echo 'GatewayPorts yes' >> /etc/ssh/sshd_config && \
     passwd -d root
 RUN echo 'export PATH="/root/.local/bin:$PATH"' >> /root/.bashrc
-COPY vis_e2e_tests/claude-settings.json /root/.claude/settings.json
-COPY vis_e2e_tests/hooks/ /root/.claude/hooks/
 RUN echo '{"hasCompletedOnboarding":true,"numStartups":10,"projects":{"/":{"hasTrustDialogAccepted":true,"allowedTools":[]}}}' > /root/.claude.json
 EXPOSE 22
 CMD ["/usr/sbin/sshd", "-D"]
@@ -55,8 +53,6 @@ RUN go mod download
 COPY . .
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/root/.local/bin:${PATH}"
-COPY vis_e2e_tests/claude-settings.json /root/.claude/settings.json
-COPY vis_e2e_tests/hooks/ /root/.claude/hooks/
 RUN echo '{"hasCompletedOnboarding":true,"numStartups":10,"projects":{"/":{"hasTrustDialogAccepted":true,"allowedTools":[]}}}' > /root/.claude.json
 RUN go build -o bin/lazyclaude ./cmd/lazyclaude && \
     ln -sf /app/bin/lazyclaude /usr/local/bin/lazyclaude && \

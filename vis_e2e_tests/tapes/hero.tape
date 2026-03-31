@@ -2,39 +2,46 @@ Output outputs/hero/hero.gif
 Output outputs/hero/hero.txt
 
 Set Shell "bash"
-Set Width 1800
+Set Width 1600
 Set Height 1200
 Set FontSize 16
-Set WaitTimeout 60s
+Set WaitTimeout 90s
 
 # Launch lazyclaude via tmux plugin (Ctrl+\)
+Sleep 1s
 Ctrl+\
 Wait+Screen /No sessions/
 Sleep 1s
 
 # Create a new Claude Code session
 Type "n"
-Wait+Screen /app/
-Sleep 10s
+Wait+Screen /⟳/
+Sleep 1s
 
-# Enter fullscreen mode to interact with Claude
+# Navigate to the session row and enter fullscreen
+Down
 Enter
 Wait+Screen /Sonnet/
+Sleep 1s
 
-# Ask Claude to create a file (triggers Write tool permission prompt)
+# Dismiss welcome screen and type a prompt
+Escape
+Wait+Screen /❯/
+Sleep 1s
 Type "create a file /tmp/hello.txt with content 'Hello from lazyclaude!'" Enter
+Sleep 1s
 
-# Wait for Claude to process, then exit fullscreen to see popup
-Sleep 5s
+# Exit fullscreen
 Ctrl+\
 
-# Permission popup appears as a gocui overlay
+# Permission popup appears as a gocui overlay in session list view
 Wait+Screen /C-y/
 Sleep 2s
 
-# Approve the permission with Ctrl+y
+# Approve the permission
 Ctrl+y
-Sleep 3s
+Wait+Screen /✓/
+Sleep 1s
 
 # Exit lazyclaude
 Type "q"
