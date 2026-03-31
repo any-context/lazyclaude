@@ -9,6 +9,7 @@ import (
 	"github.com/KEMSHlM/lazyclaude/internal/gui/keymap"
 	"github.com/KEMSHlM/lazyclaude/internal/gui/presentation"
 	"github.com/KEMSHlM/lazyclaude/internal/session"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jesseduffield/gocui"
 	"github.com/mattn/go-runewidth"
 )
@@ -302,11 +303,13 @@ func (a *App) renderScrollContent(v *gocui.View) {
 	w := v.InnerWidth()
 
 	for i, raw := range lines {
-		line := truncateToWidth(raw, w)
+		// Use ANSI-aware truncation so escape sequences are not split.
+		line := ansi.Truncate(raw, w, "")
 		inSelection := selecting && i >= selStart && i <= selEnd
 		isCursor := i == cursorY
 
-		padded := padRight(line, w)
+		// ANSI-aware padding: use ansi.StringWidth instead of runewidth
+		padded := padRightANSI(line, w)
 		if inSelection && isCursor {
 			fmt.Fprintf(v, "\x1b[48;5;33;1;37m%s\x1b[0m\n", padded)
 		} else if inSelection {
@@ -351,6 +354,15 @@ func (a *App) renderScrollStatusBar(v *gocui.View, sessionName string) {
 		sessionName,
 		presentation.FgDimGray+presentation.IconSep+presentation.Reset,
 		hintBar)
+}
+
+// padRightANSI pads an ANSI-containing string with spaces to targetW display width.
+func padRightANSI(s string, targetW int) string {
+	sw := ansi.StringWidth(s)
+	if sw >= targetW {
+		return s
+	}
+	return s + strings.Repeat(" ", targetW-sw)
 }
 
 // padRight pads s with spaces so that its display width equals targetW.
