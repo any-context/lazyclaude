@@ -60,6 +60,7 @@ lazyclaude solves this with a single TUI that shows all sessions at a glance, ro
 - SSH remote sessions with automatic reverse tunnel for notifications
 - Built-in MCP server for Claude Code IDE auto-discovery
 - PM/Worker multi-agent orchestration support
+- Launch [lazygit](https://github.com/jesseduffield/lazygit) directly from the TUI (optional, if installed)
 
 ---
 
@@ -68,6 +69,7 @@ lazyclaude solves this with a single TUI that shows all sessions at a glance, ro
 - Go 1.25+
 - tmux >= 3.4 (for `display-popup -b rounded`)
 - [Claude CLI](https://docs.anthropic.com/en/docs/claude-code)
+- [lazygit](https://github.com/jesseduffield/lazygit) (optional -- for in-TUI git management)
 
 ## Installation
 

@@ -60,6 +60,7 @@ lazyclaude は、全セッションを一覧表示し、権限プロンプトを
 - SSH リモートセッション（通知用の自動リバーストンネル）
 - Claude Code IDE 自動検出用の組み込み MCP サーバー
 - PM/Worker マルチエージェントオーケストレーション対応
+- TUI から [lazygit](https://github.com/jesseduffield/lazygit) を直接起動可能（オプション、インストール済みの場合）
 
 ---
 
@@ -68,6 +69,7 @@ lazyclaude は、全セッションを一覧表示し、権限プロンプトを
 - Go 1.25+
 - tmux >= 3.4（`display-popup -b rounded` に必要）
 - [Claude CLI](https://docs.anthropic.com/en/docs/claude-code)
+- [lazygit](https://github.com/jesseduffield/lazygit)（オプション -- TUI 内での git 管理用）
 
 ## インストール
 
