@@ -14,7 +14,10 @@ func makeNotif(tool, window string) *model.ToolNotification {
 }
 
 func newTestApp() *App {
-	return &App{popups: NewPopupController()}
+	return &App{
+		popups:         NewPopupController(),
+		windowActivity: make(map[string]WindowActivityEntry),
+	}
 }
 
 // --- App-level popup tests ---
@@ -41,6 +44,30 @@ func TestApp_DismissPopup_RemovesFocusedOnly(t *testing.T) {
 
 	app.dismissPopup(ChoiceReject)
 	assert.False(t, app.hasPopup())
+}
+
+func TestApp_DismissPopup_SetsActivityRunning(t *testing.T) {
+	t.Parallel()
+	app := newTestApp()
+	app.showToolPopup(&model.ToolNotification{ToolName: "Bash", Window: "lc-1", Timestamp: time.Now()})
+	app.setWindowActivity("lc-1", WindowActivityEntry{State: model.ActivityNeedsInput})
+
+	app.dismissPopup(ChoiceAccept)
+	entry := app.windowActivity["lc-1"]
+	assert.Equal(t, model.ActivityRunning, entry.State)
+}
+
+func TestApp_DismissAllPopups_SetsActivityRunning(t *testing.T) {
+	t.Parallel()
+	app := newTestApp()
+	app.showToolPopup(&model.ToolNotification{ToolName: "Bash", Window: "lc-1", Timestamp: time.Now()})
+	app.showToolPopup(&model.ToolNotification{ToolName: "Write", Window: "lc-2", Timestamp: time.Now()})
+	app.setWindowActivity("lc-1", WindowActivityEntry{State: model.ActivityNeedsInput})
+	app.setWindowActivity("lc-2", WindowActivityEntry{State: model.ActivityNeedsInput})
+
+	app.dismissAllPopups(ChoiceAccept)
+	assert.Equal(t, model.ActivityRunning, app.windowActivity["lc-1"].State)
+	assert.Equal(t, model.ActivityRunning, app.windowActivity["lc-2"].State)
 }
 
 func TestApp_DismissPopup_NopWhenNoPopup(t *testing.T) {

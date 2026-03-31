@@ -27,6 +27,9 @@ func (a *App) dismissPopup(choice Choice) {
 	if window == "" {
 		return
 	}
+	// Transition NeedsInput -> Running immediately on the gocui goroutine,
+	// before the async SendChoice completes.
+	a.setWindowActivity(window, WindowActivityEntry{State: model.ActivityRunning})
 	if a.sessions != nil {
 		go func() {
 			_ = a.sessions.SendChoice(window, choice)
@@ -39,6 +42,11 @@ func (a *App) dismissAllPopups(choice Choice) {
 	windows := a.popups.DismissAll(choice)
 	if len(windows) == 0 {
 		return
+	}
+	// Transition NeedsInput -> Running immediately on the gocui goroutine,
+	// before the async SendChoice completes.
+	for _, w := range windows {
+		a.setWindowActivity(w, WindowActivityEntry{State: model.ActivityRunning})
 	}
 	if a.sessions != nil {
 		go func() {
