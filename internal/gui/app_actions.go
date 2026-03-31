@@ -871,6 +871,13 @@ func (a *App) ScrollModeHalfDown() {
 }
 
 func (a *App) ScrollModeToTop() {
+	// Re-query history_size since it grows while the session is active.
+	target := a.fullscreen.Target()
+	if target != "" {
+		if histSize, err := a.sessions.HistorySize(target); err == nil && histSize > 0 {
+			a.scroll.SetMaxOffset(histSize)
+		}
+	}
 	a.scroll.ToTop()
 	a.scroll.BumpGeneration()
 	a.captureScrollbackAsync()
