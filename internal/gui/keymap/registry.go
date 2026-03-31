@@ -753,20 +753,18 @@ func Default() *Registry {
 	})
 	r.Register(ActionDef{
 		Action:   ActionScrollHalfUp,
-		// gocui may send Ctrl+U as rune 'u' when Editable=false.
-		Bindings: []KeyBinding{{Key: gocui.KeyCtrlU}, {Rune: 'u'}},
+		Bindings: []KeyBinding{{Key: gocui.KeyCtrlB}},
 		Scope:    ScopeScroll,
 		HintLabel:   "half up",
-		HintKey:     "C-u",
+		HintKey:     "C-b",
 		Description: "Scroll up half page",
 	})
 	r.Register(ActionDef{
 		Action:   ActionScrollHalfDown,
-		// gocui sends Ctrl+D as rune 'd' when Editable=false, so bind both.
-		Bindings: []KeyBinding{{Key: gocui.KeyCtrlD}, {Rune: 'd', Mod: gocui.ModNone}},
+		Bindings: []KeyBinding{{Key: gocui.KeyCtrlF}},
 		Scope:    ScopeScroll,
 		HintLabel:   "half down",
-		HintKey:     "C-d",
+		HintKey:     "C-f",
 		Description: "Scroll down half page",
 	})
 	r.Register(ActionDef{
