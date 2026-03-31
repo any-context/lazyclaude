@@ -187,6 +187,9 @@ func (e *inputEditor) Edit(v *gocui.View, key gocui.Key, ch rune, mod gocui.Modi
 	if !e.app.fullscreen.IsActive() || e.app.hasPopup() {
 		return false
 	}
+	if e.app.scroll.IsActive() {
+		return false
+	}
 	return e.forwardAny(key, ch, mod)
 }
 
@@ -202,6 +205,10 @@ func (e *inputEditor) forwardAny(key gocui.Key, ch rune, mod gocui.Modifier) boo
 	if key == gocui.KeyEsc {
 		e.app.forwardSpecialKey("Escape")
 		return true
+	}
+	// Ctrl+V is reserved for scroll mode entry — do not forward.
+	if key == gocui.KeyCtrlV {
+		return false
 	}
 	if tmuxKey, ok := specialKeyMap[key]; ok {
 		e.app.forwardSpecialKey(tmuxKey)

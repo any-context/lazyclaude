@@ -63,16 +63,28 @@ func (m *mockPopupActions) PopupFocusPrev()                  { m.record("PopupFo
 func (m *mockPopupActions) PopupScrollDown()                 { m.record("PopupScrollDown") }
 func (m *mockPopupActions) PopupScrollUp()                   { m.record("PopupScrollUp") }
 
-// --- FullScreenActions mock ---
+// --- FullScreenActions mock (also implements ScrollActions for scroll dispatch) ---
 
 type mockFullScreenActions struct {
 	callRecorder
 	fullScreen bool
+	scrollMode bool
 }
 
 func (m *mockFullScreenActions) IsFullScreen() bool           { return m.fullScreen }
 func (m *mockFullScreenActions) ExitFullScreen()              { m.record("ExitFullScreen") }
 func (m *mockFullScreenActions) ForwardSpecialKey(key string) { m.record("ForwardSpecialKey:" + key) }
+func (m *mockFullScreenActions) IsScrollMode() bool           { return m.scrollMode }
+func (m *mockFullScreenActions) ScrollModeEnter()             { m.record("ScrollModeEnter") }
+func (m *mockFullScreenActions) ScrollModeExit()              { m.record("ScrollModeExit") }
+func (m *mockFullScreenActions) ScrollModeUp()                { m.record("ScrollModeUp") }
+func (m *mockFullScreenActions) ScrollModeDown()              { m.record("ScrollModeDown") }
+func (m *mockFullScreenActions) ScrollModeHalfUp()            { m.record("ScrollModeHalfUp") }
+func (m *mockFullScreenActions) ScrollModeHalfDown()          { m.record("ScrollModeHalfDown") }
+func (m *mockFullScreenActions) ScrollModeToTop()             { m.record("ScrollModeToTop") }
+func (m *mockFullScreenActions) ScrollModeToBottom()          { m.record("ScrollModeToBottom") }
+func (m *mockFullScreenActions) ScrollModeToggleSelect()      { m.record("ScrollModeToggleSelect") }
+func (m *mockFullScreenActions) ScrollModeCopy()              { m.record("ScrollModeCopy") }
 
 // --- LogsActions mock ---
 

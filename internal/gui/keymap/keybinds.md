@@ -189,6 +189,15 @@ Scroll the content of a notification popup.
 Exit full-screen mode and return to the session list.
 `Ctrl+\` or `Ctrl+D` detaches from the Claude Code session.
 
+## scroll_mode
+
+Enter scrollback browsing mode in full-screen.
+`Ctrl+V` activates scroll mode, allowing you to browse the tmux pane's scrollback history.
+Use `j`/`k` or arrow keys to scroll line by line, `Ctrl+U`/`Ctrl+D` for half-page jumps,
+and `g`/`G` to jump to the top or bottom of the scrollback buffer.
+Press `v` to toggle visual line selection, then `y` to copy the selected text to the clipboard.
+`Esc` or `q` exits scroll mode and returns to normal full-screen key forwarding.
+
 ## fullscreen_forward
 
 Keys forwarded directly to the Claude Code session in full-screen mode.

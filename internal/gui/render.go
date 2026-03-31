@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/KEMSHlM/lazyclaude/internal/gui/keymap"
 	"github.com/KEMSHlM/lazyclaude/internal/gui/presentation"
 	"github.com/KEMSHlM/lazyclaude/internal/session"
 	"github.com/jesseduffield/gocui"
@@ -289,6 +290,71 @@ func truncateToWidth(s string, maxW int) string {
 		w += rw
 	}
 	return s
+}
+
+// renderScrollContent renders scrollback lines with cursor/selection highlighting.
+func (a *App) renderScrollContent(v *gocui.View) {
+	lines := a.scroll.Lines()
+	if len(lines) == 0 {
+		fmt.Fprintln(v, presentation.Dim+"  Loading scrollback..."+presentation.Reset)
+		return
+	}
+
+	selecting := a.scroll.IsSelecting()
+	selStart, selEnd := a.scroll.SelectionRange()
+	cursorY := a.scroll.CursorY()
+	w := v.InnerWidth()
+
+	for i, raw := range lines {
+		line := truncateToWidth(raw, w)
+		inSelection := selecting && i >= selStart && i <= selEnd
+		isCursor := i == cursorY
+
+		padded := padRight(line, w)
+		if inSelection && isCursor {
+			fmt.Fprintf(v, "\x1b[48;5;33;1;37m%s\x1b[0m\n", padded)
+		} else if inSelection {
+			fmt.Fprintf(v, "\x1b[48;5;24;37m%s\x1b[0m\n", padded)
+		} else if isCursor && selecting {
+			fmt.Fprintf(v, "\x1b[48;5;238;1m%s\x1b[0m\n", padded)
+		} else if isCursor {
+			fmt.Fprintf(v, "\x1b[48;5;240m%s\x1b[0m\n", padded)
+		} else {
+			fmt.Fprintln(v, line)
+		}
+	}
+
+	scrollToCursor(v, cursorY)
+}
+
+// renderScrollStatusBar renders the scroll mode status bar.
+func (a *App) renderScrollStatusBar(v *gocui.View, sessionName string) {
+	offset := a.scroll.ScrollOffset()
+	mode := presentation.Bold + presentation.FgCyan + "SCROLL" + presentation.Reset
+	if a.scroll.IsSelecting() {
+		mode += " " + presentation.Bold + presentation.FgYellow + "VISUAL" + presentation.Reset
+	}
+	pos := fmt.Sprintf("[-%d]", offset)
+
+	scrollHints := a.keyRegistry.HintsForScope(keymap.ScopeScroll)
+	var hintBar string
+	for _, h := range scrollHints {
+		if h.HintLabel == "" {
+			continue
+		}
+		if hintBar != "" {
+			hintBar += "  "
+		}
+		hintBar += presentation.StyledKey(h.HintKeyLabel(), h.HintLabel)
+	}
+
+	fmt.Fprintf(v, " %s %s %s %s %s %s",
+		mode,
+		presentation.FgDimGray+pos+presentation.Reset,
+		presentation.FgDimGray+presentation.IconSep+presentation.Reset,
+		sessionName,
+		presentation.FgDimGray+presentation.IconSep+presentation.Reset,
+		hintBar)
 }
 
 // padRight pads s with spaces so that its display width equals targetW.

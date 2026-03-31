@@ -346,10 +346,15 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 	// Inner dimensions: subtract borders (1 col each side, 1 row each side).
 	previewW := l.Main.Width() - 1
 	previewH := l.Main.Height() - 1
-	a.renderPreview(v, items, previewW, previewH)
 
-	// Scroll offset for mouse scroll
-	v.SetOrigin(0, a.fullscreen.ScrollY())
+	if a.scroll.IsActive() {
+		v.Editable = false
+		a.renderScrollContent(v)
+	} else {
+		a.renderPreview(v, items, previewW, previewH)
+		// Scroll offset for mouse scroll
+		v.SetOrigin(0, a.fullscreen.ScrollY())
+	}
 
 	// Status bar
 	v2, err := g.SetView("fullscreen-bar", l.Options.X0, l.Options.Y0, l.Options.X1, l.Options.Y1, 0)
@@ -358,18 +363,23 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 	}
 	v2.Frame = false
 	v2.Clear()
-	fsHints := a.keyRegistry.HintsForScope(keymap.ScopeFullScreen)
-	var fsBar string
-	for _, h := range fsHints {
-		if fsBar != "" {
-			fsBar += "  "
+
+	if a.scroll.IsActive() {
+		a.renderScrollStatusBar(v2, items[targetIdx].Name)
+	} else {
+		fsHints := a.keyRegistry.HintsForScope(keymap.ScopeFullScreen)
+		var fsBar string
+		for _, h := range fsHints {
+			if fsBar != "" {
+				fsBar += "  "
+			}
+			fsBar += presentation.StyledKey(h.HintKeyLabel(), h.HintLabel)
 		}
-		fsBar += presentation.StyledKey(h.HintKeyLabel(), h.HintLabel)
+		fmt.Fprintf(v2, " %s %s %s",
+			items[targetIdx].Name,
+			presentation.FgDimGray+presentation.IconSep+presentation.Reset,
+			fsBar)
 	}
-	fmt.Fprintf(v2, " %s %s %s",
-		items[targetIdx].Name,
-		presentation.FgDimGray+presentation.IconSep+presentation.Reset,
-		fsBar)
 
 	g.Cursor = true
 	if _, err := g.SetCurrentView("main"); err != nil && !isUnknownView(err) {

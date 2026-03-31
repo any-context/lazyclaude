@@ -62,6 +62,19 @@ func (m *mockActions) IsFullScreen() bool           { return m.fullScreen }
 func (m *mockActions) ExitFullScreen()              { m.record("ExitFullScreen") }
 func (m *mockActions) ForwardSpecialKey(key string) { m.record("ForwardSpecialKey:" + key) }
 
+// ScrollActions
+func (m *mockActions) IsScrollMode() bool          { return false }
+func (m *mockActions) ScrollModeEnter()            { m.record("ScrollModeEnter") }
+func (m *mockActions) ScrollModeExit()             { m.record("ScrollModeExit") }
+func (m *mockActions) ScrollModeUp()               { m.record("ScrollModeUp") }
+func (m *mockActions) ScrollModeDown()             { m.record("ScrollModeDown") }
+func (m *mockActions) ScrollModeHalfUp()           { m.record("ScrollModeHalfUp") }
+func (m *mockActions) ScrollModeHalfDown()         { m.record("ScrollModeHalfDown") }
+func (m *mockActions) ScrollModeToTop()            { m.record("ScrollModeToTop") }
+func (m *mockActions) ScrollModeToBottom()         { m.record("ScrollModeToBottom") }
+func (m *mockActions) ScrollModeToggleSelect()     { m.record("ScrollModeToggleSelect") }
+func (m *mockActions) ScrollModeCopy()             { m.record("ScrollModeCopy") }
+
 // LogsActions
 func (m *mockActions) LogsCursorDown()    { m.record("LogsCursorDown") }
 func (m *mockActions) LogsCursorUp()      { m.record("LogsCursorUp") }

@@ -78,6 +78,21 @@ type PluginsPanelActions interface {
 	StartSearch()
 }
 
+// ScrollActions provides scroll mode operations in fullscreen.
+type ScrollActions interface {
+	IsScrollMode() bool
+	ScrollModeEnter()
+	ScrollModeExit()
+	ScrollModeUp()
+	ScrollModeDown()
+	ScrollModeHalfUp()
+	ScrollModeHalfDown()
+	ScrollModeToTop()
+	ScrollModeToBottom()
+	ScrollModeToggleSelect()
+	ScrollModeCopy()
+}
+
 // GlobalActions provides application-level key handler operations.
 type GlobalActions interface {
 	Mode() int
@@ -99,6 +114,7 @@ type AppActions interface {
 	SessionActions
 	PopupActions
 	FullScreenActions
+	ScrollActions
 	LogsActions
 	PluginsPanelActions
 	GlobalActions

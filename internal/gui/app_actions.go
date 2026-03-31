@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/KEMSHlM/lazyclaude/internal/core/choice"
 	"github.com/KEMSHlM/lazyclaude/internal/gui/keyhandler"
@@ -795,6 +796,123 @@ func (a *App) StartSearch() {
 	a.dialog.SearchQuery = ""
 	a.dialog.SearchPanel = panelName
 	a.dialog.SearchPreCursor = preCursor
+}
+
+// --- Scroll mode ---
+
+func (a *App) IsScrollMode() bool { return a.scroll.IsActive() }
+
+func (a *App) ScrollModeEnter() {
+	// Use the fullscreen view height for the initial scroll offset.
+	viewH := a.scrollViewHeight()
+	if viewH <= 0 {
+		return
+	}
+	a.scroll.Enter(viewH)
+	a.scroll.BumpGeneration()
+	a.captureScrollbackAsync()
+}
+
+func (a *App) ScrollModeExit() {
+	a.scroll.Exit()
+	a.preview.Invalidate()
+}
+
+func (a *App) ScrollModeUp() {
+	a.scroll.ScrollUp(1)
+	a.scroll.BumpGeneration()
+	a.captureScrollbackAsync()
+}
+
+func (a *App) ScrollModeDown() {
+	a.scroll.ScrollDown(1)
+	a.scroll.BumpGeneration()
+	a.captureScrollbackAsync()
+}
+
+func (a *App) ScrollModeHalfUp() {
+	a.scroll.ScrollUp(a.scroll.ViewHeight() / 2)
+	a.scroll.BumpGeneration()
+	a.captureScrollbackAsync()
+}
+
+func (a *App) ScrollModeHalfDown() {
+	a.scroll.ScrollDown(a.scroll.ViewHeight() / 2)
+	a.scroll.BumpGeneration()
+	a.captureScrollbackAsync()
+}
+
+func (a *App) ScrollModeToTop() {
+	a.scroll.ToTop()
+	a.scroll.BumpGeneration()
+	a.captureScrollbackAsync()
+}
+
+func (a *App) ScrollModeToBottom() {
+	a.scroll.ToBottom()
+	a.scroll.BumpGeneration()
+	a.captureScrollbackAsync()
+}
+
+func (a *App) ScrollModeToggleSelect() {
+	a.scroll.ToggleSelect()
+}
+
+func (a *App) ScrollModeCopy() {
+	text := a.scroll.CopyText()
+	if text != "" {
+		copyToClipboard(text)
+	}
+	a.scroll.Exit()
+	a.preview.Invalidate()
+}
+
+// scrollViewHeight returns the inner height of the fullscreen view.
+func (a *App) scrollViewHeight() int {
+	maxX, maxY := a.gui.Size()
+	if maxX <= 0 || maxY <= 0 {
+		return 0
+	}
+	// Fullscreen layout uses Main panel; inner height = maxY - status bar - borders.
+	return maxY - 3
+}
+
+// captureScrollbackAsync launches a goroutine to capture scrollback content.
+func (a *App) captureScrollbackAsync() {
+	target := a.fullscreen.Target()
+	if target == "" {
+		return
+	}
+	gen := a.scroll.Generation()
+	startLine, endLine := a.scroll.CaptureRange()
+	viewW := a.scrollViewWidth()
+
+	go func() {
+		result, err := a.sessions.CaptureScrollback(target, viewW, startLine, endLine)
+		if err != nil || a.scroll.Generation() != gen {
+			return
+		}
+		lines := splitLines(result.Content)
+		a.scroll.SetLines(lines)
+		a.gui.Update(func(g *gocui.Gui) error { return nil })
+	}()
+}
+
+// scrollViewWidth returns the inner width of the fullscreen view.
+func (a *App) scrollViewWidth() int {
+	maxX, _ := a.gui.Size()
+	if maxX <= 0 {
+		return 0
+	}
+	return maxX - 1
+}
+
+// splitLines splits a string into lines, preserving empty trailing lines.
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
 }
 
 // --- Application ---

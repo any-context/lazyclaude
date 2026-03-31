@@ -37,6 +37,11 @@ type Client interface {
 	// CapturePaneANSI captures pane content with ANSI escape codes.
 	CapturePaneANSI(ctx context.Context, target string) (string, error)
 
+	// CapturePaneANSIRange captures a range of pane content with ANSI escape codes.
+	// start and end are line offsets passed as -S and -E flags to capture-pane.
+	// Negative values count from the end of the scrollback buffer.
+	CapturePaneANSIRange(ctx context.Context, target string, start, end int) (string, error)
+
 	// SendKeys sends key sequences to a tmux target.
 	// Keys are interpreted as tmux key names (e.g., "Enter", "Space").
 	SendKeys(ctx context.Context, target string, keys ...string) error

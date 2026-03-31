@@ -727,5 +727,86 @@ func Default() *Registry {
 		DocSection:  "fullscreen_forward",
 	})
 
+	// --- FullScreen: scroll mode entry ---
+	r.Register(ActionDef{
+		Action:      ActionScrollEnter,
+		Bindings:    []KeyBinding{{Key: gocui.KeyCtrlV}},
+		Scope:       ScopeFullScreen,
+		HintLabel:   "scroll",
+		HintKey:     "C-v",
+		Description: "Enter scroll mode for scrollback browsing",
+		DocSection:  "scroll_mode",
+	})
+
+	// --- Scroll mode ---
+	r.Register(ActionDef{
+		Action:      ActionScrollUp,
+		Bindings:    []KeyBinding{{Rune: 'k'}, {Key: gocui.KeyArrowUp}},
+		Scope:       ScopeScroll,
+		Description: "Scroll up one line",
+	})
+	r.Register(ActionDef{
+		Action:      ActionScrollDown,
+		Bindings:    []KeyBinding{{Rune: 'j'}, {Key: gocui.KeyArrowDown}},
+		Scope:       ScopeScroll,
+		Description: "Scroll down one line",
+	})
+	r.Register(ActionDef{
+		Action:      ActionScrollHalfUp,
+		Bindings:    []KeyBinding{{Key: gocui.KeyCtrlU}},
+		Scope:       ScopeScroll,
+		HintLabel:   "half up",
+		HintKey:     "C-u",
+		Description: "Scroll up half page",
+	})
+	r.Register(ActionDef{
+		Action:      ActionScrollHalfDown,
+		Bindings:    []KeyBinding{{Key: gocui.KeyCtrlD}},
+		Scope:       ScopeScroll,
+		HintLabel:   "half down",
+		HintKey:     "C-d",
+		Description: "Scroll down half page",
+	})
+	r.Register(ActionDef{
+		Action:      ActionScrollToTop,
+		Bindings:    []KeyBinding{{Rune: 'g'}},
+		Scope:       ScopeScroll,
+		HintLabel:   "top",
+		HintKey:     "g",
+		Description: "Scroll to top of scrollback",
+	})
+	r.Register(ActionDef{
+		Action:      ActionScrollToBottom,
+		Bindings:    []KeyBinding{{Rune: 'G'}},
+		Scope:       ScopeScroll,
+		HintLabel:   "bottom",
+		HintKey:     "G",
+		Description: "Scroll to bottom (exit scroll)",
+	})
+	r.Register(ActionDef{
+		Action:      ActionScrollToggleSelect,
+		Bindings:    []KeyBinding{{Rune: 'v'}},
+		Scope:       ScopeScroll,
+		HintLabel:   "select",
+		HintKey:     "v",
+		Description: "Toggle visual line selection",
+	})
+	r.Register(ActionDef{
+		Action:      ActionScrollCopy,
+		Bindings:    []KeyBinding{{Rune: 'y'}},
+		Scope:       ScopeScroll,
+		HintLabel:   "copy",
+		HintKey:     "y",
+		Description: "Copy selected text to clipboard",
+	})
+	r.Register(ActionDef{
+		Action:      ActionScrollExit,
+		Bindings:    []KeyBinding{{Key: gocui.KeyEsc}, {Rune: 'q'}},
+		Scope:       ScopeScroll,
+		HintLabel:   "exit",
+		HintKey:     "Esc",
+		Description: "Exit scroll mode",
+	})
+
 	return r
 }

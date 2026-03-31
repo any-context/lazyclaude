@@ -477,6 +477,35 @@ func (a *sessionAdapter) CapturePreview(id string, width, height int) (gui.Previ
 	}, nil
 }
 
+func (a *sessionAdapter) CaptureScrollback(id string, width, startLine, endLine int) (gui.PreviewResult, error) {
+	sess := a.mgr.Store().FindByID(id)
+	if sess == nil {
+		return gui.PreviewResult{}, nil
+	}
+	target := sess.TmuxWindow
+	if target == "" {
+		target = "lazyclaude:" + sess.WindowName()
+	}
+	ctx := context.Background()
+
+	content, err := a.tmux.CapturePaneANSIRange(ctx, target, startLine, endLine)
+	if err != nil || width <= 0 {
+		return gui.PreviewResult{Content: content}, err
+	}
+
+	// Safety truncate lines to width
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if ansi.StringWidth(line) > width {
+			lines[i] = ansi.Truncate(line, width, "")
+		}
+	}
+
+	return gui.PreviewResult{
+		Content: strings.Join(lines, "\n"),
+	}, nil
+}
+
 func (a *sessionAdapter) Create(path, host string) error {
 	if path == "." {
 		abs, err := filepath.Abs(".")

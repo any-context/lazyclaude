@@ -313,6 +313,12 @@ func (c *ExecClient) CapturePaneANSI(ctx context.Context, target string) (string
 	return c.run(ctx, "capture-pane", "-t", target, "-ep")
 }
 
+// CapturePaneANSIRange captures a range of pane content with ANSI escape codes.
+func (c *ExecClient) CapturePaneANSIRange(ctx context.Context, target string, start, end int) (string, error) {
+	return c.run(ctx, "capture-pane", "-t", target, "-ep",
+		"-S", strconv.Itoa(start), "-E", strconv.Itoa(end))
+}
+
 func (c *ExecClient) SendKeys(ctx context.Context, target string, keys ...string) error {
 	args := append([]string{"send-keys", "-t", target}, keys...)
 	_, err := c.run(ctx, args...)

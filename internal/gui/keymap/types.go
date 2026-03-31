@@ -27,6 +27,7 @@ const (
 	ScopeLog        Scope = "log"
 	ScopePopup      Scope = "popup"
 	ScopeFullScreen Scope = "fullscreen"
+	ScopeScroll     Scope = "scroll"
 )
 
 // KeyAction identifies a logical action in the keymap.
@@ -126,6 +127,20 @@ const (
 	ActionForwardEsc        KeyAction = "forward_esc"
 	ActionForwardDown       KeyAction = "forward_down"
 	ActionForwardUp         KeyAction = "forward_up"
+	ActionScrollEnter       KeyAction = "scroll_enter"
+)
+
+// --- Scroll mode actions ---
+const (
+	ActionScrollUp           KeyAction = "scroll_up"
+	ActionScrollDown         KeyAction = "scroll_down"
+	ActionScrollHalfUp       KeyAction = "scroll_half_up"
+	ActionScrollHalfDown     KeyAction = "scroll_half_down"
+	ActionScrollToTop        KeyAction = "scroll_to_top"
+	ActionScrollToBottom     KeyAction = "scroll_to_bottom"
+	ActionScrollToggleSelect KeyAction = "scroll_toggle_select"
+	ActionScrollCopy         KeyAction = "scroll_copy"
+	ActionScrollExit         KeyAction = "scroll_exit"
 )
 
 // TabAll means the action is active on all tabs within a panel.
@@ -196,6 +211,10 @@ func (kb KeyBinding) HintKey() string {
 		return "C-n"
 	case gocui.KeyCtrlD:
 		return "C-d"
+	case gocui.KeyCtrlV:
+		return "C-v"
+	case gocui.KeyCtrlU:
+		return "C-u"
 	case gocui.KeyCtrlBackslash:
 		return "C-\\"
 	case gocui.KeyArrowUp:

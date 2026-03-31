@@ -45,6 +45,16 @@ func (a *App) IsFullScreenForTest() bool {
 	return a.fullscreen.IsActive()
 }
 
+// ScrollStateForTest returns the scroll state for testing.
+func (a *App) ScrollStateForTest() *ScrollState {
+	return a.scroll
+}
+
+// IsScrollModeForTest returns whether scroll mode is active.
+func (a *App) IsScrollModeForTest() bool {
+	return a.scroll.IsActive()
+}
+
 // StateForTest returns the current AppState.
 func (a *App) StateForTest() AppState {
 	if a.fullscreen.IsActive() {

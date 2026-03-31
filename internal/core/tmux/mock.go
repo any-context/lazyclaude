@@ -10,7 +10,8 @@ type MockClient struct {
 	Sessions map[string][]WindowInfo
 	Panes    map[string][]PaneInfo // keyed by session
 	Clients  []ClientInfo
-	Captured map[string]string // target -> content
+	Captured      map[string]string // target -> content
+	RangeCaptures map[string]string // "target:start:end" -> content
 	SentKeys map[string][]string
 	Options  map[string]string
 	Messages map[string]string
@@ -39,7 +40,8 @@ func NewMockClient() *MockClient {
 	return &MockClient{
 		Sessions: make(map[string][]WindowInfo),
 		Panes:    make(map[string][]PaneInfo),
-		Captured: make(map[string]string),
+		Captured:      make(map[string]string),
+		RangeCaptures: make(map[string]string),
 		SentKeys: make(map[string][]string),
 		Options:  make(map[string]string),
 		Messages: make(map[string]string),
@@ -161,6 +163,17 @@ func (m *MockClient) CapturePaneContent(_ context.Context, target string) (strin
 func (m *MockClient) CapturePaneANSI(_ context.Context, target string) (string, error) {
 	if m.ErrCapture != nil {
 		return "", m.ErrCapture
+	}
+	return m.Captured[target], nil
+}
+
+func (m *MockClient) CapturePaneANSIRange(_ context.Context, target string, start, end int) (string, error) {
+	if m.ErrCapture != nil {
+		return "", m.ErrCapture
+	}
+	key := fmt.Sprintf("%s:%d:%d", target, start, end)
+	if content, ok := m.RangeCaptures[key]; ok {
+		return content, nil
 	}
 	return m.Captured[target], nil
 }
