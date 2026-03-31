@@ -1,5 +1,7 @@
 # lazyclaude
 
+[English](README.md) | **日本語**
+
 > [lazygit](https://github.com/jesseduffield/lazygit) にインスパイアされた、複数の [Claude Code](https://docs.anthropic.com/en/docs/claude-code) セッションを管理する TUI。
 
 ライブプレビュー、権限プロンプトのポップアップ、スクロールバック閲覧、SSH リモートセッション -- すべてを一つの tmux popup から。

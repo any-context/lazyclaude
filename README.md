@@ -1,6 +1,6 @@
 # lazyclaude
 
-[Japanese / 日本語](README_ja.md)
+**English** | [日本語](README_ja.md)
 
 > A [lazygit](https://github.com/jesseduffield/lazygit)-inspired TUI for managing multiple [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions.
 
