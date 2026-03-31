@@ -45,8 +45,13 @@ lazyclaude solves this with a single TUI that shows all sessions at a glance, ro
 - Scrollback browser with vim-like navigation (`Ctrl+V` or mouse wheel)
 - Visual line selection and clipboard copy (`v` select, `y` copy)
 
+**MCP Server & Plugin Management**
+- View and toggle MCP servers registered in Claude Code
+- Install, uninstall, and enable/disable Claude Code plugins from the TUI
+- Scope-aware operations (project vs global)
+
 **Search & Navigation**
-- fzz-style `/` filter on any panel (sessions, plugins, MCP servers)
+- fzf-style `/` filter on any panel (sessions, plugins, MCP servers)
 - `?` Telescope-style keybinding help overlay
 - `Tab` / `Shift+Tab` panel cycling
 
