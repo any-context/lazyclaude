@@ -182,6 +182,10 @@ make lint          # golangci-lint
 make readme-gif    # Regenerate docs/images/hero.gif (Docker required)
 ```
 
+## Contributing
+
+We welcome contributions! Whether it's bug reports, feature requests, or pull requests -- all are appreciated. See [Issues](https://github.com/any-context/lazyclaude/issues) for current tasks or open a new one.
+
 ## License
 
 MIT

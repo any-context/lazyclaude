@@ -180,6 +180,10 @@ make lint          # golangci-lint
 make readme-gif    # docs/images/hero.gif を再生成（Docker 必須）
 ```
 
+## コントリビューション
+
+コントリビューションを歓迎します！ バグ報告、機能リクエスト、プルリクエスト -- すべて大歓迎です。現在のタスクは [Issues](https://github.com/any-context/lazyclaude/issues) をご覧ください。
+
 ## ライセンス
 
 MIT
