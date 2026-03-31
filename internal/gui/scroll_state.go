@@ -82,16 +82,18 @@ func (s *ScrollState) ScrollDown(n int) {
 	}
 }
 
-// ToTop scrolls to the maximum offset (top of scrollback).
+// ToTop scrolls to the maximum offset (top of scrollback) and moves cursor to first line.
 func (s *ScrollState) ToTop() {
 	if s.maxOffset > 0 {
 		s.scrollOffset = s.maxOffset
 	}
+	s.cursorY = 0
 }
 
-// ToBottom scrolls to offset 0 (live position).
+// ToBottom scrolls to offset 0 (live position) and moves cursor to last line.
 func (s *ScrollState) ToBottom() {
 	s.scrollOffset = 0
+	s.cursorY = s.viewHeight - 1
 }
 
 // CursorDown moves the cursor down one line within the viewport.
