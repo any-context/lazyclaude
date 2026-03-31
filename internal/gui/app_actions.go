@@ -911,13 +911,13 @@ func stripANSI(s string) string {
 
 // scrollViewHeight returns the inner height of the fullscreen view.
 func (a *App) scrollViewHeight() int {
-	maxX, maxY := a.gui.Size()
-	if maxX <= 0 || maxY <= 0 {
+	v, err := a.gui.View("main")
+	if err != nil {
 		return 0
 	}
-	// Fullscreen layout uses Main panel; inner height = maxY - status bar - borders.
-	return maxY - 3
+	return v.InnerHeight()
 }
+
 
 // captureScrollbackAsync launches a goroutine to capture scrollback content.
 func (a *App) captureScrollbackAsync() {
@@ -945,11 +945,11 @@ func (a *App) captureScrollbackAsync() {
 
 // scrollViewWidth returns the inner width of the fullscreen view.
 func (a *App) scrollViewWidth() int {
-	maxX, _ := a.gui.Size()
-	if maxX <= 0 {
+	v, err := a.gui.View("main")
+	if err != nil {
 		return 0
 	}
-	return maxX - 1
+	return v.InnerWidth()
 }
 
 // splitLines splits a string into lines, preserving empty trailing lines.
