@@ -185,6 +185,7 @@ make readme-gif    # Regenerate docs/images/hero.gif (Docker required)
 ## Known Issues
 
 - **Paste in fullscreen mode** -- Pasting text (Cmd+V / Ctrl+Shift+V) in fullscreen mode does not work reliably. This is a limitation of how tmux `display-popup` interacts with bracketed paste sequences. Workaround: use `a` to attach directly to the session, then paste.
+- **SSH remote sessions** -- SSH session support is experimental and may not work fully in all environments. Reverse tunnel setup and remote hook injection have not been extensively tested across different SSH configurations.
 
 ## Contributing
 
