@@ -80,10 +80,15 @@ func (s *ScrollState) ScrollDown(n int) {
 	}
 }
 
-// ToTop scrolls to the maximum offset.
+// ToTop scrolls to the maximum offset. If maxOffset is not yet known,
+// jumps to a large offset; the actual limit will be discovered when
+// capture returns fewer lines than viewHeight.
 func (s *ScrollState) ToTop() {
 	if s.maxOffset > 0 {
 		s.scrollOffset = s.maxOffset
+	} else {
+		// Jump high; capture will clamp to actual history size.
+		s.scrollOffset = 50000
 	}
 }
 
@@ -143,11 +148,6 @@ func (s *ScrollState) SelectionRange() (start, end int) {
 		start, end = end, start
 	}
 	return start, end
-}
-
-// ClearSelection exits visual selection mode.
-func (s *ScrollState) ClearSelection() {
-	s.selecting = false
 }
 
 // CopyText returns the text for the current selection (or current line if not selecting).

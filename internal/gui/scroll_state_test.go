@@ -86,6 +86,20 @@ func TestScrollState_ToTopToBottom(t *testing.T) {
 	}
 }
 
+func TestScrollState_ToTopWithoutMaxOffset(t *testing.T) {
+	s := NewScrollState()
+	s.Enter(40)
+
+	// Without maxOffset, ToTop should jump to a large value
+	s.ToTop()
+	if s.ScrollOffset() == 40 {
+		t.Error("ToTop without maxOffset should jump beyond initial offset")
+	}
+	if s.ScrollOffset() == 0 {
+		t.Error("ToTop without maxOffset should not stay at 0")
+	}
+}
+
 func TestScrollState_CursorUpDown(t *testing.T) {
 	s := NewScrollState()
 	s.Enter(40)
