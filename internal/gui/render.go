@@ -40,8 +40,6 @@ func sessionStatusIcon(item *SessionItem) string {
 		return " " + presentation.IconIdle
 	case model.ActivityError:
 		return " " + presentation.IconError
-	case model.ActivityDead:
-		return " " + presentation.IconDead
 	}
 
 	// Fallback: running session with no activity info yet.

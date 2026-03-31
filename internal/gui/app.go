@@ -73,8 +73,8 @@ type SessionItem struct {
 	Status     string
 	Flags      []string
 	TmuxWindow string
-	Activity   model.ActivityState // 5-stage activity state
-	ToolName   string              // last tool name (for context info)
+	Activity model.ActivityState // 4-stage activity state (Running, NeedsInput, Idle, Error)
+	ToolName string              // last tool name; only meaningful when Activity == Running or NeedsInput
 	Role       string              // "pm", "worker", or "" (empty = regular session)
 }
 
@@ -406,6 +406,7 @@ func (a *App) WindowActivity(window string) model.ActivityState {
 
 // WindowActivityMap returns a shallow copy of the window activity map.
 // Used by the session adapter to merge lifecycle state into SessionItem.Activity.
+// Must be called from the gocui event loop goroutine only (layout callbacks).
 func (a *App) WindowActivityMap() map[string]WindowActivityEntry {
 	if len(a.windowActivity) == 0 {
 		return nil

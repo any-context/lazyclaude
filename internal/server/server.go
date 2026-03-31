@@ -568,6 +568,11 @@ func (s *Server) handlePromptSubmit(w http.ResponseWriter, r *http.Request) {
 	if window == "" {
 		window = s.state.LastPendingWindow()
 	}
+	if window == "" {
+		s.log.Printf("prompt-submit: window not found for pid=%d", req.PID)
+		http.Error(w, "window not found", http.StatusNotFound)
+		return
+	}
 
 	s.log.Printf("prompt-submit: pid=%d window=%s", req.PID, window)
 

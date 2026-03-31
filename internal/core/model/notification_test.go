@@ -22,18 +22,21 @@ func TestIsDiff_False(t *testing.T) {
 func TestActivityState_String(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
+		name  string
 		state model.ActivityState
 		want  string
 	}{
-		{model.ActivityUnknown, ""},
-		{model.ActivityRunning, "running"},
-		{model.ActivityNeedsInput, "needs_input"},
-		{model.ActivityIdle, "idle"},
-		{model.ActivityError, "error"},
-		{model.ActivityDead, "dead"},
+		{"Unknown", model.ActivityUnknown, ""},
+		{"Running", model.ActivityRunning, "running"},
+		{"NeedsInput", model.ActivityNeedsInput, "needs_input"},
+		{"Idle", model.ActivityIdle, "idle"},
+		{"Error", model.ActivityError, "error"},
 	}
 	for _, tt := range tests {
-		assert.Equal(t, tt.want, tt.state.String())
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, tt.state.String())
+		})
 	}
 }
 

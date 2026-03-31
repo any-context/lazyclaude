@@ -2,7 +2,9 @@ package model
 
 import "time"
 
-// ActivityState represents the 5-stage Claude session activity state.
+// ActivityState represents the Claude session activity state.
+// Currently 4 states are actively set via hooks; Dead will be added
+// when tmux-sync-based process detection is wired (future PR).
 type ActivityState int
 
 const (
@@ -16,8 +18,6 @@ const (
 	ActivityIdle
 	// ActivityError means the turn stopped with an error or interrupt.
 	ActivityError
-	// ActivityDead means the process exited (detected by tmux sync).
-	ActivityDead
 )
 
 // String returns a human-readable label for the activity state.
@@ -31,8 +31,6 @@ func (s ActivityState) String() string {
 		return "idle"
 	case ActivityError:
 		return "error"
-	case ActivityDead:
-		return "dead"
 	default:
 		return ""
 	}
