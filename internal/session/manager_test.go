@@ -701,7 +701,7 @@ func TestManager_CreateWorkerSession_DuplicateName(t *testing.T) {
 	assert.Contains(t, err.Error(), "already exists")
 }
 
-func TestManager_launchWorktreeSession_RoleNone_UsesWorktreePrompt(t *testing.T) {
+func TestManager_CreateWorktree_SetsWorkerRole(t *testing.T) {
 	t.Parallel()
 	mgr, mock := newTestManager(t)
 	ctx := context.Background()
@@ -709,15 +709,14 @@ func TestManager_launchWorktreeSession_RoleNone_UsesWorktreePrompt(t *testing.T)
 	projectRoot := t.TempDir()
 	initGitRepo(t, projectRoot)
 
-	// CreateWorktree uses RoleNone (backward compat path)
-	sess, err := mgr.CreateWorktree(ctx, "role-none-wt", "task", projectRoot)
+	sess, err := mgr.CreateWorktree(ctx, "wt-worker", "task", projectRoot)
 	require.NoError(t, err)
 	require.NotNil(t, sess)
 
-	// Role should be RoleNone (zero value)
-	assert.Equal(t, session.RoleNone, sess.Role)
+	// CreateWorktree should set RoleWorker
+	assert.Equal(t, session.RoleWorker, sess.Role)
 
-	// Command should reference a launcher script (uses BuildWorktreePrompt path)
+	// Command should reference a launcher script
 	cmd := mock.LastNewSessionOpts.Command
 	assert.Contains(t, cmd, "sh")
 	assert.Contains(t, cmd, "lazyclaude-wt-")

@@ -228,11 +228,9 @@ func (m *Manager) createWorktreeSession(ctx context.Context, opts worktreeOpts) 
 	}
 
 	// Read MCP info outside the lock (file I/O).
-	// Worker role requires MCP info; regular worktrees gracefully degrade.
-	mcpPort, _, mcpErr := m.readMCPInfo()
-	if mcpErr != nil && opts.Role == RoleWorker {
-		return nil, fmt.Errorf("read MCP info for worker session: %w", mcpErr)
-	}
+	// Used only to decide whether the Worker prompt (CLI-based) or the
+	// basic worktree isolation prompt is injected.
+	mcpPort, _, _ := m.readMCPInfo()
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -262,7 +260,7 @@ func (m *Manager) CreateWorktree(ctx context.Context, name, userPrompt, projectR
 		Name:        name,
 		UserPrompt:  userPrompt,
 		ProjectRoot: projectRoot,
-		Role:        RoleNone,
+		Role:        RoleWorker,
 	})
 }
 
@@ -274,7 +272,7 @@ func (m *Manager) ResumeWorktree(ctx context.Context, worktreePath, userPrompt, 
 		WtPath:      worktreePath,
 		UserPrompt:  userPrompt,
 		ProjectRoot: projectRoot,
-		Role:        RoleNone,
+		Role:        RoleWorker,
 		SkipGitAdd:  true,
 	})
 }
