@@ -29,7 +29,10 @@ func TestDiscoverServer_FindsAliveServer(t *testing.T) {
 		Transport: "ws",
 		App:       lockApp,
 	}
-	data, _ := json.Marshal(lock)
+	data, err := json.Marshal(lock)
+	if err != nil {
+		t.Fatalf("marshal lock: %v", err)
+	}
 	lockPath := filepath.Join(ideDir, strconv.Itoa(port)+".lock")
 	if err := os.WriteFile(lockPath, data, 0o600); err != nil {
 		t.Fatalf("write lock: %v", err)
@@ -55,14 +58,17 @@ func TestDiscoverServer_SkipsDeadServer(t *testing.T) {
 		Transport: "ws",
 		App:       lockApp,
 	}
-	data, _ := json.Marshal(lock)
+	data, err := json.Marshal(lock)
+	if err != nil {
+		t.Fatalf("marshal lock: %v", err)
+	}
 	lockPath := filepath.Join(ideDir, "99999.lock")
 	if err := os.WriteFile(lockPath, data, 0o600); err != nil {
 		t.Fatalf("write lock: %v", err)
 	}
 
-	_, err := DiscoverServer(ideDir)
-	if err == nil {
+	_, discErr := DiscoverServer(ideDir)
+	if discErr == nil {
 		t.Fatal("expected error for dead server, got nil")
 	}
 }
@@ -86,7 +92,10 @@ func TestDiscoverServer_SkipsNonLazyclaudeLock(t *testing.T) {
 		Transport: "ws",
 		App:       "vscode",
 	}
-	data, _ := json.Marshal(lock)
+	data, err := json.Marshal(lock)
+	if err != nil {
+		t.Fatalf("marshal lock: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(ideDir, strconv.Itoa(port)+".lock"), data, 0o600); err != nil {
 		t.Fatalf("write lock: %v", err)
 	}
@@ -130,7 +139,10 @@ func TestDiscoverServer_PicksHighestPort(t *testing.T) {
 			Transport: "ws",
 			App:       lockApp,
 		}
-		data, _ := json.Marshal(lock)
+		data, err := json.Marshal(lock)
+	if err != nil {
+		t.Fatalf("marshal lock: %v", err)
+	}
 		if err := os.WriteFile(filepath.Join(ideDir, strconv.Itoa(tc.port)+".lock"), data, 0o600); err != nil {
 			t.Fatalf("write lock: %v", err)
 		}

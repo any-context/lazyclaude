@@ -41,13 +41,7 @@ func newMsgSendCmd() *cobra.Command {
 
 			client := server.NewClient(disc.Port, disc.Token)
 
-			// If --from was not specified, use "cli" as a synthetic sender ID.
-			fromID := from
-			if fromID == "" {
-				fromID = "cli"
-			}
-
-			if err := client.SendMessage(fromID, targetID, msgType, body); err != nil {
+			if err := client.SendMessage(from, targetID, msgType, body); err != nil {
 				return fmt.Errorf("send message: %w", err)
 			}
 
@@ -57,7 +51,7 @@ func newMsgSendCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&msgType, "type", "status", "message type (review_request, review_response, status, done)")
-	cmd.Flags().StringVar(&from, "from", "", "sender session ID (default: cli)")
+	cmd.Flags().StringVar(&from, "from", "cli", "sender session ID")
 
 	return cmd
 }

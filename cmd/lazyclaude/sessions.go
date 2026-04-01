@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"text/tabwriter"
 
@@ -36,12 +35,12 @@ func newSessionsCmd() *cobra.Command {
 			}
 
 			if jsonOutput {
-				enc := json.NewEncoder(os.Stdout)
+				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
 				return enc.Encode(sessions)
 			}
 
-			return printSessionsTable(os.Stdout, sessions, verbose)
+			return printSessionsTable(cmd.OutOrStdout(), sessions, verbose)
 		},
 	}
 
@@ -107,6 +106,7 @@ func detectProjectRoot(sessions []server.SessionInfo) string {
 }
 
 // commonPrefix returns the longest common prefix of two paths at directory boundaries.
+// Assumes POSIX "/" separator (macOS/Linux only).
 func commonPrefix(a, b string) string {
 	partsA := strings.Split(a, "/")
 	partsB := strings.Split(b, "/")
