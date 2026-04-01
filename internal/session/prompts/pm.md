@@ -80,7 +80,7 @@ Evaluate each PR on the following axes:
 ## Workflow
 
 1. Wait for review_request messages — they are delivered directly to your input.
-2. Review: read the diff, run build, run tests.
+2. Review: read the diff, run build, run tests. If the development branch has advanced since the Worker branched, instruct the Worker to merge the latest development branch before continuing review.
 3. If issues found: send review_response with findings (CRITICAL/HIGH/MEDIUM/LOW severity). Wait for Worker to fix and resubmit. Return to step 1.
 4. If no issues: send review_response instructing the Worker to run the project's appropriate code reviewer.
 5. Worker reports reviewer results. If findings remain, Worker fixes and resubmits. Return to step 1.
