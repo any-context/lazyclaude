@@ -25,7 +25,7 @@ lazyclaude msg send --from %s --type review_request <pm-session-id> "<descriptio
 
 ### Spawn a new session:
 ```bash
-lazyclaude msg send --from %s --type status <pm-session-id> "spawn worker <name> <prompt>"
+lazyclaude msg create --from %s --name <worker-name> --type worker --prompt "<initial task>"
 ```
 
 ### Fallback: tmux send-keys
