@@ -15,6 +15,7 @@ var validMsgTypes = map[string]bool{
 	"review_response": true,
 	"status":          true,
 	"done":            true,
+	"issue":           true,
 }
 
 func newMsgCmd() *cobra.Command {
@@ -42,7 +43,7 @@ func newMsgSendCmd() *cobra.Command {
 			body := strings.Join(args[1:], " ")
 
 			if !validMsgTypes[msgType] {
-				return fmt.Errorf("invalid --type %q; must be one of: review_request, review_response, status, done", msgType)
+				return fmt.Errorf("invalid --type %q; must be one of: review_request, review_response, status, done, issue", msgType)
 			}
 
 			paths := config.DefaultPaths()
@@ -62,7 +63,7 @@ func newMsgSendCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&msgType, "type", "status", "message type (review_request, review_response, status, done)")
+	cmd.Flags().StringVar(&msgType, "type", "status", "message type (review_request, review_response, status, done, issue)")
 	cmd.Flags().StringVar(&from, "from", "cli", "sender session ID")
 
 	return cmd

@@ -291,6 +291,7 @@ var validMsgTypes = map[string]bool{
 	"review_response": true,
 	"status":          true,
 	"done":            true,
+	"issue":           true,
 }
 
 func isValidMsgType(t string) bool {
