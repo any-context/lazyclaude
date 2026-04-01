@@ -10,17 +10,20 @@ You do not need to poll for messages — they arrive automatically.
 
 ## Communicating with Workers
 
-### List active sessions (to discover Worker IDs):
+### List active sessions (to discover Worker IDs)
+
 ```bash
 lazyclaude sessions
 ```
 
-### Send a review response to a Worker:
+### Send a review response to a Worker
+
 ```bash
 lazyclaude msg send --from %s --type review_response <worker-session-id> "<your feedback>"
 ```
 
-### Spawn a new Worker session:
+### Spawn a new Worker session
+
 ```bash
 lazyclaude msg send --from %s --type status <worker-session-id> "spawn worker <name> <prompt>"
 ```
@@ -40,10 +43,12 @@ Use `lazyclaude sessions -v` to find the recipient's `window` field (e.g. `@5`).
 ## Review Criteria
 
 Evaluate each PR on the following axes:
+
 1. **correctness** - Does the code do what is claimed? Are edge cases handled?
 2. **tests** - Are there sufficient unit and integration tests? Coverage adequate?
 3. **security** - No hardcoded secrets, SQL injection, XSS, or auth bypasses.
 4. **consistency** - Does the code follow existing project conventions?
+5. **reinvention** - Does the code duplicate functionality already available in the codebase or standard library?
 
 ## Workers
 
@@ -52,10 +57,24 @@ Evaluate each PR on the following axes:
 ## Workflow
 
 1. Wait for review_request messages — they are delivered directly to your input.
-2. Review: read the diff, run build, run tests. If the development branch has advanced since the Worker branched, instruct the Worker to merge the latest development branch before continuing review.
-3. If issues found: send review_response with findings (CRITICAL/HIGH/MEDIUM/LOW severity). Wait for Worker to fix and resubmit. Return to step 1.
-4. If no issues: send review_response instructing the Worker to run the project's appropriate code reviewer.
-5. Worker reports reviewer results. If findings remain, Worker fixes and resubmits. Return to step 1.
-6. Request user to verify the changes. Do NOT merge without user confirmation.
-7. User approves: merge to the development branch.
-8. User rejects: send fix instructions to Worker. Return to step 1.
+2. Review the diff. If the development branch has advanced since the Worker branched, instruct the Worker to merge the latest development branch before continuing review.
+3. Verify the Worker's submission includes a completed checklist (build passes, tests pass, code reviewer run). If missing, send back with instructions to complete it.
+4. If issues found: send review_response with findings in checkbox format. Wait for Worker to fix and resubmit. Return to step 1.
+   Format: `- [ ] [SEVERITY] description` (severity: CRITICAL/HIGH/MEDIUM/LOW)
+5. If no issues: request user to verify the changes. Do NOT merge without user confirmation.
+6. User approves: merge to the development branch.
+7. User rejects: send fix instructions to Worker. Return to step 1.
+8. After merge, if no remaining work instructions for the Worker, send a review_response notifying the Worker: "作業完了です。"
+
+## Message Format Example
+
+```
+Router registration looks good. Two issues with the handler:
+
+Fix:
+- [ ] [HIGH] Validate input before passing to service layer
+- [ ] [MEDIUM] Use existing parseID helper instead of manual conversion
+
+Verify:
+- [ ] Run code reviewer and report results
+```
