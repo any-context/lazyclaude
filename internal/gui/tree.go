@@ -13,6 +13,7 @@ type ProjectItem struct {
 	ID       string
 	Name     string
 	Path     string
+	Host     string // SSH hostname derived from sessions (empty for local projects)
 	Expanded bool
 	PM       *SessionItem
 	Sessions []SessionItem

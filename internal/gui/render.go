@@ -52,9 +52,6 @@ func sessionStatusIcon(item *SessionItem) string {
 // sessionDisplayName returns the decorated name for a session item.
 func sessionDisplayName(item *SessionItem) string {
 	name := item.Name
-	if item.Host != "" {
-		name = presentation.FgPurple + item.Host + presentation.Reset + ":" + name
-	}
 	if session.IsWorktreePath(item.Path) {
 		name = presentation.IconWorktree + " " + name
 	}
@@ -81,7 +78,11 @@ func renderTree(v *gocui.View, nodes []TreeNode, cursor int) {
 			if node.Project.Expanded {
 				expandIcon = presentation.IconProjectExpanded
 			}
-			fmt.Fprintf(v, " %s %s\n", expandIcon, node.Project.Name)
+			projectLabel := node.Project.Name
+			if node.Project.Host != "" {
+				projectLabel += " " + presentation.FgPurple + "[" + node.Project.Host + "]" + presentation.Reset
+			}
+			fmt.Fprintf(v, " %s %s\n", expandIcon, projectLabel)
 
 		case SessionNode:
 			name := sessionDisplayName(node.Session)

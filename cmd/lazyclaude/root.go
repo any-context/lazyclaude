@@ -381,10 +381,24 @@ func buildProjectItems(projects []session.Project, pending map[string]bool, wind
 		for j, s := range p.Sessions {
 			sessions[j] = sessionToItem(s, pending, windowActivity)
 		}
+		// Derive host from any session (all sessions in a project share the same host).
+		host := ""
+		if pm != nil && pm.Host != "" {
+			host = pm.Host
+		}
+		if host == "" {
+			for _, s := range sessions {
+				if s.Host != "" {
+					host = s.Host
+					break
+				}
+			}
+		}
 		items[i] = gui.ProjectItem{
 			ID:       p.ID,
 			Name:     p.Name,
 			Path:     p.Path,
+			Host:     host,
 			Expanded: p.Expanded,
 			PM:       pm,
 			Sessions: sessions,
