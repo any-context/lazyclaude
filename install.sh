@@ -3,7 +3,7 @@
 # For tmux plugin integration, use TPM or clone the repo instead.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/any-context/lazyclaude/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/any-context/lazyclaude/prod/install.sh | sh
 
 set -e
 

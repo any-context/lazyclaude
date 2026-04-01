@@ -81,7 +81,7 @@ lazyclaude solves this with a single TUI that shows all sessions at a glance, ro
 ### Quick install (standalone binary)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/any-context/lazyclaude/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/any-context/lazyclaude/prod/install.sh | sh
 ```
 
 Downloads a pre-built binary to `~/.local/bin/`. No Go required. Run with `lazyclaude`.

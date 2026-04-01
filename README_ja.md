@@ -81,7 +81,7 @@ lazyclaude は、全セッションを一覧表示し、権限プロンプトを
 ### クイックインストール（スタンドアロンバイナリ）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/any-context/lazyclaude/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/any-context/lazyclaude/prod/install.sh | sh
 ```
 
 ビルド済みバイナリを `~/.local/bin/` にダウンロードします。Go は不要です。`lazyclaude` で起動。
