@@ -140,9 +140,9 @@ func TestDiscoverServer_PicksHighestPort(t *testing.T) {
 			App:       lockApp,
 		}
 		data, err := json.Marshal(lock)
-	if err != nil {
-		t.Fatalf("marshal lock: %v", err)
-	}
+		if err != nil {
+			t.Fatalf("marshal lock: %v", err)
+		}
 		if err := os.WriteFile(filepath.Join(ideDir, strconv.Itoa(tc.port)+".lock"), data, 0o600); err != nil {
 			t.Fatalf("write lock: %v", err)
 		}

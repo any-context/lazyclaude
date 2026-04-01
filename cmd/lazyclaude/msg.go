@@ -9,6 +9,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// validMsgTypes mirrors the server's allowlist.
+var validMsgTypes = map[string]bool{
+	"review_request":  true,
+	"review_response": true,
+	"status":          true,
+	"done":            true,
+}
+
 func newMsgCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "msg",
@@ -33,6 +41,10 @@ func newMsgSendCmd() *cobra.Command {
 			targetID := args[0]
 			body := strings.Join(args[1:], " ")
 
+			if !validMsgTypes[msgType] {
+				return fmt.Errorf("invalid --type %q; must be one of: review_request, review_response, status, done", msgType)
+			}
+
 			paths := config.DefaultPaths()
 			disc, err := server.DiscoverServer(paths.IDEDir)
 			if err != nil {
@@ -41,7 +53,7 @@ func newMsgSendCmd() *cobra.Command {
 
 			client := server.NewClient(disc.Port, disc.Token)
 
-			if err := client.SendMessage(from, targetID, msgType, body); err != nil {
+			if err := client.SendMessage(cmd.Context(), from, targetID, msgType, body); err != nil {
 				return fmt.Errorf("send message: %w", err)
 			}
 

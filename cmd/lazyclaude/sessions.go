@@ -28,7 +28,7 @@ func newSessionsCmd() *cobra.Command {
 			}
 
 			client := server.NewClient(disc.Port, disc.Token)
-			sessions, err := client.Sessions()
+			sessions, err := client.Sessions(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("fetch sessions: %w", err)
 			}
