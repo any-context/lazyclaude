@@ -65,6 +65,7 @@ func TestRelativePath(t *testing.T) {
 		{"/home/user/project/.claude/worktrees/feat-a", "/home/user/project", ".claude/worktrees/feat-a"},
 		{"/other/path", "/home/user/project", "/other/path"},
 		{"/home/user/project/sub", "", "/home/user/project/sub"},
+		{"/home/user/project-x/file", "/home/user/project", "/home/user/project-x/file"},
 	}
 
 	for _, tt := range tests {

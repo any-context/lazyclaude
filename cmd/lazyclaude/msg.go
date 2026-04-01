@@ -51,7 +51,7 @@ func newMsgSendCmd() *cobra.Command {
 				return fmt.Errorf("send message: %w", err)
 			}
 
-			fmt.Printf("Message sent to %s\n", targetID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Message sent to %s\n", targetID)
 			return nil
 		},
 	}

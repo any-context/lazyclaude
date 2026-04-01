@@ -23,6 +23,7 @@ func DiscoverServer(ideDir string) (*DiscoverResult, error) {
 		return nil, fmt.Errorf("read ide dir %s: %w", ideDir, err)
 	}
 
+	mgr := NewLockManager(ideDir)
 	var best *DiscoverResult
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".lock" {
@@ -34,7 +35,6 @@ func DiscoverServer(ideDir string) (*DiscoverResult, error) {
 			continue
 		}
 
-		mgr := NewLockManager(ideDir)
 		lock, err := mgr.Read(port)
 		if err != nil {
 			continue

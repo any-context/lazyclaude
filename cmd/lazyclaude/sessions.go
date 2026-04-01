@@ -130,13 +130,16 @@ func commonPrefix(a, b string) string {
 // relativePath returns the path relative to root, or the absolute path if
 // the path is not under root.
 func relativePath(path, root string) string {
-	if root == "" || !strings.HasPrefix(path, root) {
+	if root == "" {
 		return path
 	}
-	rel := strings.TrimPrefix(path, root)
-	rel = strings.TrimPrefix(rel, "/")
-	if rel == "" {
+	if path == root {
 		return "."
 	}
-	return rel
+	// Ensure match is at a directory boundary (root + "/").
+	prefix := root + "/"
+	if !strings.HasPrefix(path, prefix) {
+		return path
+	}
+	return strings.TrimPrefix(path, prefix)
 }
