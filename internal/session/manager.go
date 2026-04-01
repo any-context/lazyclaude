@@ -638,7 +638,7 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot string) (*Ses
 	workerList := strings.Join(workerLines, "\n")
 
 	id := uuid.New().String()
-	systemPrompt := BuildPMPrompt(id, workerList)
+	systemPrompt := BuildPMPrompt(projectRoot, id, workerList)
 
 	launcher, err := writeWorktreeLauncher(systemPrompt, "", m.paths.RuntimeDir)
 	if err != nil {
