@@ -32,6 +32,12 @@ type Config struct {
 	RuntimeDir string // choice files directory
 }
 
+// activityEntry stores the current activity state for a tmux window.
+type activityEntry struct {
+	State    model.ActivityState
+	ToolName string
+}
+
 // Server is the MCP WebSocket + HTTP server.
 type Server struct {
 	config         Config
@@ -44,6 +50,11 @@ type Server struct {
 	ownsBroker     bool // true when the server created the broker (and must close it)
 	sessionLister  SessionLister
 	sessionCreator SessionCreator
+
+	// activityMap tracks hook-based activity state per tmux window.
+	// Updated directly by hook handlers; read by /msg/sessions.
+	activityMap map[string]activityEntry
+	activityMu  sync.RWMutex
 
 	listener net.Listener
 	httpSrv  *http.Server
@@ -74,12 +85,13 @@ func New(cfg Config, tmuxClient tmux.Client, logger *log.Logger, opts ...ServerO
 	lockMgr := NewLockManager(cfg.IDEDir)
 
 	s := &Server{
-		config:  cfg,
-		state:   state,
-		handler: handler,
-		lock:    lockMgr,
-		tmux:    tmuxClient,
-		log:     logger,
+		config:      cfg,
+		state:       state,
+		handler:     handler,
+		lock:        lockMgr,
+		tmux:        tmuxClient,
+		log:         logger,
+		activityMap: make(map[string]activityEntry),
 	}
 
 	for _, opt := range opts {
@@ -207,6 +219,51 @@ func (s *Server) SetSessionCreator(sc SessionCreator) {
 // external broker is injected via WithBroker, it outlives the server.
 func (s *Server) NotifyBroker() *event.Broker[model.Event] {
 	return s.notifyBroker
+}
+
+// setActivity records the hook-based activity state for a tmux window.
+// Called directly by hook handlers (not via broker subscription) to avoid
+// inflating HasSubscribers() and altering broker-vs-file dispatch logic.
+func (s *Server) setActivity(window string, state model.ActivityState, toolName string) {
+	if window == "" {
+		return
+	}
+	s.activityMu.Lock()
+	s.activityMap[window] = activityEntry{State: state, ToolName: toolName}
+	s.activityMu.Unlock()
+}
+
+// stopReasonToActivity maps a stop_reason string to an ActivityState.
+func stopReasonToActivity(reason string) model.ActivityState {
+	if reason == "error" {
+		return model.ActivityError
+	}
+	return model.ActivityIdle
+}
+
+// WindowActivity returns the current activity state for a tmux window.
+func (s *Server) WindowActivity(window string) (model.ActivityState, string) {
+	s.activityMu.RLock()
+	defer s.activityMu.RUnlock()
+	e, ok := s.activityMap[window]
+	if !ok {
+		return model.ActivityUnknown, ""
+	}
+	return e.State, e.ToolName
+}
+
+// enrichWithActivity overlays hook-based activity state onto session info.
+func (s *Server) enrichWithActivity(sessions []SessionInfo) {
+	s.activityMu.RLock()
+	defer s.activityMu.RUnlock()
+	for i := range sessions {
+		if sessions[i].Window == "" {
+			continue
+		}
+		if e, ok := s.activityMap[sessions[i].Window]; ok {
+			sessions[i].Activity = e.State.String()
+		}
+	}
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -351,6 +408,7 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 			CWD:      req.CWD,
 		})
 		// Also signal Running state with the tool name for sidebar display.
+		s.setActivity(window, model.ActivityRunning, req.ToolName)
 		s.notifyBroker.Publish(model.Event{ActivityNotification: &model.ActivityNotification{
 			Window:    window,
 			State:     model.ActivityRunning,
@@ -439,6 +497,7 @@ func (s *Server) resolveToolInfo(window string, req notifyRequest) (toolName, in
 // dispatchToolNotification builds a ToolNotification and delivers it via
 // the appropriate single path: broker (TUI in-process) or display-popup (daemon).
 func (s *Server) dispatchToolNotification(window, toolName, input, cwd string) {
+	s.setActivity(window, model.ActivityNeedsInput, toolName)
 	// Detect max option from Claude's permission dialog.
 	// Use bare window ID (e.g., "@1") — tmux resolves it across sessions.
 	maxOpt := 3
@@ -513,6 +572,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.log.Printf("stop: pid=%d window=%s reason=%s", req.PID, window, req.StopReason)
+	s.setActivity(window, stopReasonToActivity(req.StopReason), "")
 
 	n := model.StopNotification{
 		Window:     window,
@@ -556,6 +616,7 @@ func (s *Server) handleSessionStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.log.Printf("session-start: pid=%d window=%s", req.PID, window)
+	s.setActivity(window, model.ActivityRunning, "")
 
 	n := model.SessionStartNotification{
 		Window:    window,
@@ -603,6 +664,7 @@ func (s *Server) handlePromptSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.log.Printf("prompt-submit: pid=%d window=%s", req.PID, window)
+	s.setActivity(window, model.ActivityRunning, "")
 
 	n := model.PromptSubmitNotification{
 		Window:    window,

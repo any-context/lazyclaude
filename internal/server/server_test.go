@@ -598,3 +598,155 @@ func TestServer_PromptSubmit_PublishesBrokerEvent(t *testing.T) {
 		t.Fatal("expected prompt-submit event on broker")
 	}
 }
+
+// --- Activity tracking tests ---
+
+func TestServer_Activity_SessionStartSetsRunning(t *testing.T) {
+	t.Parallel()
+	srv, port, _ := startTestServer(t)
+	srv.State().SetConn("c1", &server.ConnState{PID: 2000, Window: "@20"})
+
+	body, _ := json.Marshal(map[string]any{
+		"pid":        2000,
+		"session_id": "sess-act",
+	})
+	resp := postEndpoint(t, port, "/session-start", body)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	require.Eventually(t, func() bool {
+		state, _ := srv.WindowActivity("@20")
+		return state.String() == "running"
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
+func TestServer_Activity_StopSetsIdle(t *testing.T) {
+	t.Parallel()
+	srv, port, _ := startTestServer(t)
+	srv.State().SetConn("c1", &server.ConnState{PID: 2001, Window: "@21"})
+
+	body, _ := json.Marshal(map[string]any{
+		"pid":         2001,
+		"stop_reason": "end_turn",
+		"session_id":  "sess-idle",
+	})
+	resp := postEndpoint(t, port, "/stop", body)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	require.Eventually(t, func() bool {
+		state, _ := srv.WindowActivity("@21")
+		return state.String() == "idle"
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
+func TestServer_Activity_StopErrorSetsError(t *testing.T) {
+	t.Parallel()
+	srv, port, _ := startTestServer(t)
+	srv.State().SetConn("c1", &server.ConnState{PID: 2002, Window: "@22"})
+
+	body, _ := json.Marshal(map[string]any{
+		"pid":         2002,
+		"stop_reason": "error",
+		"session_id":  "sess-err",
+	})
+	resp := postEndpoint(t, port, "/stop", body)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	require.Eventually(t, func() bool {
+		state, _ := srv.WindowActivity("@22")
+		return state.String() == "error"
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
+func TestServer_Activity_PromptSubmitSetsRunning(t *testing.T) {
+	t.Parallel()
+	srv, port, _ := startTestServer(t)
+	srv.State().SetConn("c1", &server.ConnState{PID: 2003, Window: "@23"})
+
+	body, _ := json.Marshal(map[string]any{
+		"pid":        2003,
+		"session_id": "sess-ps",
+	})
+	resp := postEndpoint(t, port, "/prompt-submit", body)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	require.Eventually(t, func() bool {
+		state, _ := srv.WindowActivity("@23")
+		return state.String() == "running"
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
+func TestServer_Activity_ToolInfoSetsRunning(t *testing.T) {
+	t.Parallel()
+	srv, port, _ := startTestServer(t)
+	srv.State().SetConn("c1", &server.ConnState{PID: 2004, Window: "@24"})
+
+	body, _ := json.Marshal(map[string]any{
+		"type":      "tool_info",
+		"pid":       2004,
+		"tool_name": "Read",
+	})
+	resp := postNotify(t, port, body)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	require.Eventually(t, func() bool {
+		state, toolName := srv.WindowActivity("@24")
+		return state.String() == "running" && toolName == "Read"
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
+func TestServer_Activity_UnknownWindowReturnsUnknown(t *testing.T) {
+	t.Parallel()
+	srv, _, _ := startTestServer(t)
+
+	state, toolName := srv.WindowActivity("@nonexistent")
+	assert.Equal(t, "", state.String())
+	assert.Equal(t, "", toolName)
+}
+
+func TestMsgSessions_returns_activity(t *testing.T) {
+	t.Parallel()
+	srv, port, _ := startTestServer(t)
+
+	sessions := []server.SessionInfo{
+		{ID: "s1", Name: "main", Role: "pm", Path: "/work", Window: "@30"},
+		{ID: "s2", Name: "worker", Role: "worker", Path: "/work/feat", Window: "@31"},
+	}
+	srv.SetSessionLister(&fakeSessionLister{sessions: sessions})
+
+	// Inject activity via hook endpoints
+	srv.State().SetConn("c1", &server.ConnState{PID: 3000, Window: "@30"})
+	srv.State().SetConn("c2", &server.ConnState{PID: 3001, Window: "@31"})
+
+	// Session start for @30 -> running
+	body, _ := json.Marshal(map[string]any{"pid": 3000, "session_id": "s1"})
+	resp := postEndpoint(t, port, "/session-start", body)
+	resp.Body.Close()
+
+	// Stop for @31 -> idle
+	body, _ = json.Marshal(map[string]any{"pid": 3001, "stop_reason": "end_turn", "session_id": "s2"})
+	resp = postEndpoint(t, port, "/stop", body)
+	resp.Body.Close()
+
+	// Wait for activity loop to process
+	require.Eventually(t, func() bool {
+		s1, _ := srv.WindowActivity("@30")
+		s2, _ := srv.WindowActivity("@31")
+		return s1.String() == "running" && s2.String() == "idle"
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// Fetch sessions and check activity field
+	sessResp := msgSessions(t, port, "test-token")
+	defer sessResp.Body.Close()
+	require.Equal(t, http.StatusOK, sessResp.StatusCode)
+
+	var result []server.SessionInfo
+	require.NoError(t, json.NewDecoder(sessResp.Body).Decode(&result))
+	require.Len(t, result, 2)
+	assert.Equal(t, "running", result[0].Activity)
+	assert.Equal(t, "idle", result[1].Activity)
+}

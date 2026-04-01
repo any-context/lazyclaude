@@ -59,16 +59,16 @@ func printSessionsTable(out io.Writer, sessions []server.SessionInfo, verbose bo
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 
 	if verbose {
-		fmt.Fprintln(w, "ID\tNAME\tROLE\tSTATUS\tHOST\tWINDOW\tPATH")
+		fmt.Fprintln(w, "ID\tNAME\tROLE\tSTATUS\tACTIVITY\tHOST\tWINDOW\tPATH")
 		for _, s := range sessions {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				s.ID, s.Name, s.Role, s.Status, s.Host, s.Window, s.Path)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				s.ID, s.Name, s.Role, s.Status, s.Activity, s.Host, s.Window, s.Path)
 		}
 	} else {
-		fmt.Fprintln(w, "ID\tNAME\tROLE\tSTATUS\tHOST\tPATH")
+		fmt.Fprintln(w, "ID\tNAME\tROLE\tSTATUS\tACTIVITY\tHOST\tPATH")
 		for _, s := range sessions {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				s.ID, s.Name, s.Role, s.Status, s.Host, s.Path)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				s.ID, s.Name, s.Role, s.Status, s.Activity, s.Host, s.Path)
 		}
 	}
 

@@ -57,13 +57,14 @@ type MsgCreateSession struct {
 
 // SessionInfo is a lightweight session descriptor returned by /msg/sessions.
 type SessionInfo struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Role   string `json:"role"`
-	Path   string `json:"path"`
-	Host   string `json:"host,omitempty"`   // SSH host (e.g. "user@host"); empty for local
-	Window string `json:"window,omitempty"` // tmux window ID (e.g. "@1")
-	Status string `json:"status,omitempty"` // runtime status string (e.g. "Running")
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Role     string `json:"role"`
+	Path     string `json:"path"`
+	Host     string `json:"host,omitempty"`     // SSH host (e.g. "user@host"); empty for local
+	Window   string `json:"window,omitempty"`   // tmux window ID (e.g. "@1")
+	Status   string `json:"status,omitempty"`   // runtime status string (e.g. "Running")
+	Activity string `json:"activity,omitempty"` // hook-based activity state (e.g. "running", "idle")
 }
 
 type msgCreateRequest struct {
@@ -330,6 +331,9 @@ func (s *Server) handleMsgSessions(w http.ResponseWriter, r *http.Request) {
 	if sessions == nil {
 		sessions = []SessionInfo{}
 	}
+
+	// Overlay hook-based activity state from the broker subscription.
+	s.enrichWithActivity(sessions)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(sessions); err != nil {
