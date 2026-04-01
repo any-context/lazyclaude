@@ -32,7 +32,7 @@ func (s ActivityState) String() string {
 	case ActivityError:
 		return "error"
 	default:
-		return ""
+		return "unknown"
 	}
 }
 

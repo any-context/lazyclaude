@@ -26,7 +26,7 @@ func TestActivityState_String(t *testing.T) {
 		state model.ActivityState
 		want  string
 	}{
-		{"Unknown", model.ActivityUnknown, ""},
+		{"Unknown", model.ActivityUnknown, "unknown"},
 		{"Running", model.ActivityRunning, "running"},
 		{"NeedsInput", model.ActivityNeedsInput, "needs_input"},
 		{"Idle", model.ActivityIdle, "idle"},
@@ -44,5 +44,5 @@ func TestActivityState_ZeroValue(t *testing.T) {
 	t.Parallel()
 	var s model.ActivityState
 	assert.Equal(t, model.ActivityUnknown, s)
-	assert.Equal(t, "", s.String())
+	assert.Equal(t, "unknown", s.String())
 }

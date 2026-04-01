@@ -264,6 +264,8 @@ func (s *Server) enrichWithActivity(sessions []SessionInfo) {
 		}
 		if e, ok := s.activityMap[sessions[i].Window]; ok {
 			sessions[i].Activity = e.State.String()
+		} else {
+			sessions[i].Activity = model.ActivityUnknown.String()
 		}
 	}
 }

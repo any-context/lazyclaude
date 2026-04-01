@@ -724,7 +724,7 @@ func TestServer_Activity_UnknownWindowReturnsUnknown(t *testing.T) {
 	srv, _, _ := startTestServer(t)
 
 	state, toolName := srv.WindowActivity("@nonexistent")
-	assert.Equal(t, "", state.String())
+	assert.Equal(t, "unknown", state.String())
 	assert.Equal(t, "", toolName)
 }
 
