@@ -12,8 +12,12 @@ LAUNCHER="${CURRENT_DIR}/scripts/lazyclaude-launch.sh"
 BINARY="${CURRENT_DIR}/bin/lazyclaude"
 
 if [ ! -x "$BINARY" ]; then
-    echo "lazyclaude: binary not found at $BINARY (run 'make build')" >&2
-    exit 1
+    echo "lazyclaude: binary not found, building..." >&2
+    (cd "$CURRENT_DIR" && make build) >&2
+    if [ ! -x "$BINARY" ]; then
+        echo "lazyclaude: build failed (is Go installed?)" >&2
+        exit 1
+    fi
 fi
 
 # Detect user's tmux socket.
