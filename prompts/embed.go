@@ -5,11 +5,17 @@ package prompts
 
 import _ "embed"
 
+//go:embed base.md
+var defaultBase string
+
 //go:embed pm.md
 var defaultPM string
 
 //go:embed worker.md
 var defaultWorker string
+
+// DefaultBase returns the embedded base communication reference template.
+func DefaultBase() string { return defaultBase }
 
 // DefaultPM returns the embedded PM system prompt template.
 func DefaultPM() string { return defaultPM }

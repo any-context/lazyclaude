@@ -32,15 +32,22 @@ Evaluate each PR on the following axes:
 
 ## Workflow
 
-1. Wait for review_request messages — they are delivered directly to your input.
-2. Review the diff. If the development branch has advanced since the Worker branched, instruct the Worker to merge the latest development branch before continuing review.
-3. Verify the Worker's submission includes a completed checklist (build passes, tests pass, code reviewer run). If missing, send back with instructions to complete it.
-4. If issues found: send review_response with findings in checkbox format. Wait for Worker to fix and resubmit. Return to step 1.
+1. PM spawns a Worker and assigns a task
+2. Worker completes the task and commits on a dedicated branch
+3. Worker runs `/go-review` and fixes all findings
+4. Worker sends review_request to PM
+5. PM reads the diff, runs build, runs tests
+6. If issues found: send review_response with findings in checkbox format. Wait for Worker to fix and resubmit. Return to step 4
    Format: `- [ ] [SEVERITY] description` (severity: CRITICAL/HIGH/MEDIUM/LOW)
-5. If no issues: request user to verify the changes. Do NOT merge without user confirmation.
-6. User approves: merge to the development branch.
-7. User rejects: send fix instructions to Worker. Return to step 1.
-8. After merge, if no remaining work instructions for the Worker, send a review_response notifying the Worker: "作業完了です。"
+7. If no issues: PM instructs Worker to run `/go-review`
+8. Worker reports `/go-review` results. If findings remain, Worker fixes and resubmits. Return to step 4
+9. PM requests user to verify (install from worktree, restart lazyclaude, confirm behavior). Do NOT merge without user confirmation
+10. User approves: merge to `stg` branch
+11. User rejects: send fix instructions to Worker. Return to step 4
+12. After merge, if no remaining work instructions for the Worker, send a review_response notifying the Worker: "作業完了です。"
+
+- Merge target: `stg` branch (`prod` is for tagged releases only)
+- PM must NOT merge without user confirmation
 
 ## Message Format Example
 

@@ -105,28 +105,38 @@ func branchFromWorktreePath(projectRoot, wtPath string) string {
 }
 
 // BuildPMPrompt generates the system prompt injected into a PM session at launch.
-// It searches for a custom pm.md in the project before falling back to the
-// embedded default. projectRoot is used for custom prompt discovery.
+// The final prompt is composed of pm.md (role-specific, custom-searchable) +
+// base.md (shared communication reference, always embedded).
 func BuildPMPrompt(projectRoot, sessionID, workerList string) string {
-	tmpl := resolvePrompt(projectRoot, "", "pm.md", prompts.DefaultPM())
-	return fmt.Sprintf(tmpl,
+	roleTmpl := resolvePrompt(projectRoot, "", "pm.md", prompts.DefaultPM())
+	baseTmpl := prompts.DefaultBase()
+
+	role := fmt.Sprintf(roleTmpl,
 		sessionID, // Session ID line
-		sessionID, // msg send --from
-		sessionID, // msg send --from (spawn)
+		sessionID, // msg send --from (review_response)
 		workerList,
 	)
+	base := fmt.Sprintf(baseTmpl,
+		sessionID, // msg create --from (spawn)
+	)
+	return role + "\n\n" + base
 }
 
 // BuildWorkerPrompt generates the system prompt injected into a Worker session at launch.
-// It searches for a custom worker.md in the project/worktree before falling back
-// to the embedded default.
+// The final prompt is composed of worker.md (role-specific, custom-searchable) +
+// base.md (shared communication reference, always embedded).
 func BuildWorkerPrompt(worktreePath, projectRoot, sessionID string) string {
-	tmpl := resolvePrompt(projectRoot, worktreePath, "worker.md", prompts.DefaultWorker())
-	return fmt.Sprintf(tmpl,
+	roleTmpl := resolvePrompt(projectRoot, worktreePath, "worker.md", prompts.DefaultWorker())
+	baseTmpl := prompts.DefaultBase()
+
+	role := fmt.Sprintf(roleTmpl,
 		projectRoot,  // NEVER modify ... must remain untouched
 		worktreePath, // Worktree path line
 		sessionID,    // Session ID line
 		sessionID,    // msg send --from (review_request)
-		sessionID,    // msg send --from (spawn)
 	)
+	base := fmt.Sprintf(baseTmpl,
+		sessionID, // msg create --from (spawn)
+	)
+	return role + "\n\n" + base
 }

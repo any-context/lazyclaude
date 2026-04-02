@@ -65,8 +65,10 @@ func TestBuildPMPrompt_ContainsRequiredFields(t *testing.T) {
 	}{
 		{"sessionID", "sess-abc123"},
 		{"worker list", "worker-1, worker-2"},
-		{"sessions CLI", "lazyclaude sessions"},
+		{"sessions CLI (base)", "lazyclaude sessions"},
 		{"msg send CLI", "lazyclaude msg send"},
+		{"msg create CLI (base)", "lazyclaude msg create"},
+		{"tmux fallback (base)", "tmux -L lazyclaude send-keys"},
 		{"role description", "PM"},
 		{"review criteria correctness", "correctness"},
 		{"review criteria tests", "test"},
@@ -127,8 +129,10 @@ func TestBuildWorkerPrompt_ContainsRequiredFields(t *testing.T) {
 		{"worktree path", wtPath},
 		{"project root", root},
 		{"sessionID", "sess-worker-99"},
-		{"sessions CLI", "lazyclaude sessions"},
+		{"sessions CLI (base)", "lazyclaude sessions"},
 		{"msg send CLI", "lazyclaude msg send"},
+		{"msg create CLI (base)", "lazyclaude msg create"},
+		{"tmux fallback (base)", "tmux -L lazyclaude send-keys"},
 		{"isolation instruction", "NEVER modify"},
 		{"role description", "Worker"},
 		{"review request instruction", "review"},
@@ -213,7 +217,7 @@ func TestBuildPMPrompt_UsesProjectCustomPrompt(t *testing.T) {
 	if err := os.MkdirAll(customDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	customTemplate := "Custom PM prompt. Session: %s, From: %s, Spawn: %s, Workers: %s"
+	customTemplate := "Custom PM prompt. Session: %s, From: %s, Workers: %s"
 	if err := os.WriteFile(filepath.Join(customDir, "pm.md"), []byte(customTemplate), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +239,7 @@ func TestBuildWorkerPrompt_UsesProjectCustomPrompt(t *testing.T) {
 	if err := os.MkdirAll(customDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	customTemplate := "Custom Worker. Root: %s, WT: %s, Session: %s, From: %s, Spawn: %s"
+	customTemplate := "Custom Worker. Root: %s, WT: %s, Session: %s, From: %s"
 	if err := os.WriteFile(filepath.Join(customDir, "worker.md"), []byte(customTemplate), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +264,7 @@ func TestBuildWorkerPrompt_WorktreeCustomTakesPriority(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "worker.md"),
-		[]byte("Project level: %s %s %s %s %s"), 0o644); err != nil {
+		[]byte("Project level: %s %s %s %s"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -271,7 +275,7 @@ func TestBuildWorkerPrompt_WorktreeCustomTakesPriority(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(wtDir, "worker.md"),
-		[]byte("Worktree level: %s %s %s %s %s"), 0o644); err != nil {
+		[]byte("Worktree level: %s %s %s %s"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -350,7 +354,7 @@ func TestBuildWorkerPrompt_PathTraversalInBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(outsideDir, "worker.md"),
-		[]byte("Escaped: %s %s %s %s %s"), 0o644); err != nil {
+		[]byte("Escaped: %s %s %s %s"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
