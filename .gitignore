@@ -10,3 +10,4 @@ old_tapes/
 .claude/settings.json
 .claude/settings.local.json
 .reports/
+.lazyclaude/
