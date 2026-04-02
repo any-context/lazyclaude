@@ -1,8 +1,12 @@
 package session
 
 import (
-	_ "embed"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/any-context/lazyclaude/prompts"
 )
 
 // Role identifies the operational role of a session.
@@ -33,33 +37,106 @@ func (r Role) IsValid() bool {
 	return r == RoleNone || r == RolePM || r == RoleWorker
 }
 
-//go:embed prompts/pm.md
-var pmSystemPrompt string
+// resolvePrompt searches for a custom prompt file in priority order and falls
+// back to the embedded default. The search order is:
+//
+//  1. {projectRoot}/.claude/worktree/{branch}/.lazyclaude/prompts/{filename}
+//  2. {projectRoot}/.lazyclaude/prompts/{filename}
+//  3. Embedded default (compiled into the binary)
+//
+// Note: the worktree custom config path uses "worktree" (singular) for per-branch
+// configuration, which is distinct from the "worktrees" (plural) directory where
+// git worktree checkouts reside (WorktreePathSegment).
+//
+// worktreePath may be empty (e.g. for PM sessions that run in the project root).
+// When empty, the worktree-level search is skipped.
+// projectRoot must be an absolute path; relative paths fall back to the default.
+func resolvePrompt(projectRoot, worktreePath, filename, fallback string) string {
+	if !filepath.IsAbs(projectRoot) {
+		return fallback
+	}
 
-// BuildPMPrompt generates the system prompt injected into a PM session at launch.
-// Uses lazyclaude CLI subcommands for server communication instead of raw curl.
-// The template is loaded from prompts/pm.md.
-func BuildPMPrompt(sessionID string, workerList string) string {
-	return fmt.Sprintf(pmSystemPrompt,
-		sessionID, // Session ID line
-		sessionID, // msg send --from
-		sessionID, // msg send --from (spawn)
-		workerList,
-	)
+	cleanRoot := filepath.Clean(projectRoot) + string(os.PathSeparator)
+	var candidates []string
+
+	if worktreePath != "" {
+		branch := branchFromWorktreePath(projectRoot, worktreePath)
+		if branch != "" {
+			candidate := filepath.Join(projectRoot, ".claude", "worktree", branch, ".lazyclaude", "prompts", filename)
+			if strings.HasPrefix(candidate, cleanRoot) {
+				candidates = append(candidates, candidate)
+			}
+		}
+	}
+
+	projectCandidate := filepath.Join(projectRoot, ".lazyclaude", "prompts", filename)
+	if strings.HasPrefix(projectCandidate, cleanRoot) {
+		candidates = append(candidates, projectCandidate)
+	}
+
+	for _, candidate := range candidates {
+		data, err := os.ReadFile(candidate)
+		if err == nil && len(data) > 0 {
+			return string(data)
+		}
+	}
+
+	return fallback
 }
 
-//go:embed prompts/worker.md
-var workerRolePrompt string
+// branchFromWorktreePath extracts the branch name from a worktree path by
+// computing the path relative to {projectRoot}/{WorktreePathSegment}/.
+// Returns empty string if the path does not match the expected pattern.
+func branchFromWorktreePath(projectRoot, wtPath string) string {
+	base := filepath.Join(projectRoot, WorktreePathSegment) + string(os.PathSeparator)
+	if !strings.HasPrefix(wtPath, base) {
+		return ""
+	}
+	rel := strings.TrimPrefix(wtPath, base)
+	parts := strings.SplitN(rel, string(os.PathSeparator), 2)
+	if len(parts) == 0 || parts[0] == "" {
+		return ""
+	}
+	branch := parts[0]
+	if strings.Contains(branch, "..") {
+		return ""
+	}
+	return branch
+}
+
+// BuildPMPrompt generates the system prompt injected into a PM session at launch.
+// The final prompt is composed of pm.md (role-specific, custom-searchable) +
+// base.md (shared communication reference, always embedded).
+func BuildPMPrompt(projectRoot, sessionID, workerList string) string {
+	roleTmpl := resolvePrompt(projectRoot, "", "pm.md", prompts.DefaultPM())
+	baseTmpl := prompts.DefaultBase()
+
+	role := fmt.Sprintf(roleTmpl,
+		sessionID, // Session ID line
+		sessionID, // msg send --from (review_response)
+		workerList,
+	)
+	base := fmt.Sprintf(baseTmpl,
+		sessionID, // msg create --from (spawn)
+	)
+	return role + "\n\n" + base
+}
 
 // BuildWorkerPrompt generates the system prompt injected into a Worker session at launch.
-// Uses lazyclaude CLI subcommands for server communication instead of raw curl.
-// The template is loaded from prompts/worker.md.
+// The final prompt is composed of worker.md (role-specific, custom-searchable) +
+// base.md (shared communication reference, always embedded).
 func BuildWorkerPrompt(worktreePath, projectRoot, sessionID string) string {
-	return fmt.Sprintf(workerRolePrompt,
+	roleTmpl := resolvePrompt(projectRoot, worktreePath, "worker.md", prompts.DefaultWorker())
+	baseTmpl := prompts.DefaultBase()
+
+	role := fmt.Sprintf(roleTmpl,
 		projectRoot,  // NEVER modify ... must remain untouched
 		worktreePath, // Worktree path line
 		sessionID,    // Session ID line
 		sessionID,    // msg send --from (review_request)
-		sessionID,    // msg send --from (spawn)
 	)
+	base := fmt.Sprintf(baseTmpl,
+		sessionID, // msg create --from (spawn)
+	)
+	return role + "\n\n" + base
 }

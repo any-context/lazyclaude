@@ -10,35 +10,11 @@ You do not need to poll for messages — they arrive automatically.
 
 ## Communicating with Workers
 
-### List active sessions (to discover Worker IDs)
-
-```bash
-lazyclaude sessions
-```
-
 ### Send a review response to a Worker
 
 ```bash
 lazyclaude msg send --from %s --type review_response <worker-session-id> "<your feedback>"
 ```
-
-### Spawn a new Worker session
-
-```bash
-lazyclaude msg create --from %s --name <worker-name> --type worker --prompt "<initial task>"
-```
-
-### Fallback: tmux send-keys
-
-If lazyclaude CLI is not available, bypass the API and paste
-the message directly into the tmux pane:
-
-```bash
-tmux -L lazyclaude send-keys -l -t <window-id> -- "<message text>"
-tmux -L lazyclaude send-keys -t <window-id> Enter
-```
-
-Use `lazyclaude sessions -v` to find the recipient's `window` field (e.g. `@5`).
 
 ## Review Criteria
 

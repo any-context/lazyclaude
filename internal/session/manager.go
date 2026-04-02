@@ -333,18 +333,10 @@ func (m *Manager) launchSession(ctx context.Context, sess Session, claudeCmd, st
 // launchWorktreeSession is the shared logic for creating a tmux window
 // running Claude Code in a worktree directory. Called by CreateWorktree,
 // ResumeWorktree, and CreateWorkerSession. Caller must hold m.mu.
-//
-// mcpPort controls prompt selection: when > 0 the full Worker prompt with
-// CLI commands is used; otherwise the basic worktree isolation prompt is used.
 func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userPrompt, projectRoot string, role Role, mcpPort int) (*Session, error) {
 	id := uuid.New().String()
 
-	var systemPrompt string
-	if mcpPort > 0 {
-		systemPrompt = BuildWorkerPrompt(wtPath, projectRoot, id)
-	} else {
-		systemPrompt = BuildWorktreePrompt(wtPath, projectRoot)
-	}
+	systemPrompt := BuildWorkerPrompt(wtPath, projectRoot, id)
 
 	launcher, err := writeWorktreeLauncher(systemPrompt, userPrompt, m.paths.RuntimeDir)
 	if err != nil {
@@ -644,7 +636,7 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot string) (*Ses
 	workerList := strings.Join(workerLines, "\n")
 
 	id := uuid.New().String()
-	systemPrompt := BuildPMPrompt(id, workerList)
+	systemPrompt := BuildPMPrompt(projectRoot, id, workerList)
 
 	launcher, err := writeWorktreeLauncher(systemPrompt, "", m.paths.RuntimeDir)
 	if err != nil {
