@@ -119,7 +119,7 @@ func TestBuildPMPrompt_UsesCLINotCurl(t *testing.T) {
 func TestBuildWorkerPrompt_ContainsRequiredFields(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	wtPath := filepath.Join(root, ".claude", "worktrees", "feat-x")
+	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "feat-x")
 	prompt := session.BuildWorkerPrompt(wtPath, root, "sess-worker-99")
 
 	cases := []struct {
@@ -148,7 +148,7 @@ func TestBuildWorkerPrompt_ContainsRequiredFields(t *testing.T) {
 func TestBuildWorkerPrompt_NoPollInstructions(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	wtPath := filepath.Join(root, ".claude", "worktrees", "feat-x")
+	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "feat-x")
 	prompt := session.BuildWorkerPrompt(wtPath, root, "sess-worker-99")
 	if strings.Contains(prompt, "/msg/poll") {
 		t.Error("BuildWorkerPrompt should not contain /msg/poll (push-based, no polling needed)")
@@ -158,7 +158,7 @@ func TestBuildWorkerPrompt_NoPollInstructions(t *testing.T) {
 func TestBuildWorkerPrompt_PathIsolation(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	wtPath := filepath.Join(root, ".claude", "worktrees", "my-task")
+	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "my-task")
 	prompt := session.BuildWorkerPrompt(wtPath, root, "id-1")
 
 	if !strings.Contains(prompt, wtPath) {
@@ -172,7 +172,7 @@ func TestBuildWorkerPrompt_PathIsolation(t *testing.T) {
 func TestBuildWorkerPrompt_UsesCLINotCurl(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	wtPath := filepath.Join(root, ".claude", "worktrees", "feat-x")
+	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "feat-x")
 	prompt := session.BuildWorkerPrompt(wtPath, root, "sess-worker-99")
 
 	if strings.Contains(prompt, "curl -s") {
@@ -189,7 +189,7 @@ func TestBuildWorkerPrompt_UsesCLINotCurl(t *testing.T) {
 func TestBuildWorkerPrompt_SessionIDInFromFlag(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	wtPath := filepath.Join(root, ".claude", "worktrees", "feat-x")
+	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "feat-x")
 	prompt := session.BuildWorkerPrompt(wtPath, root, "sess-worker-99")
 
 	if !strings.Contains(prompt, "--from sess-worker-99") {
@@ -244,7 +244,7 @@ func TestBuildWorkerPrompt_UsesProjectCustomPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wtPath := filepath.Join(root, ".claude", "worktrees", "feat-x")
+	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "feat-x")
 	prompt := session.BuildWorkerPrompt(wtPath, root, "sid-2")
 	if !strings.Contains(prompt, "Custom Worker") {
 		t.Error("expected custom Worker prompt to be used")
@@ -270,7 +270,7 @@ func TestBuildWorkerPrompt_WorktreeCustomTakesPriority(t *testing.T) {
 
 	// Set up worktree-level custom prompt (higher priority)
 	branch := "feat-x"
-	wtDir := filepath.Join(root, ".claude", "worktree", branch, ".lazyclaude", "prompts")
+	wtDir := filepath.Join(root, ".lazyclaude", "worktree", branch, ".lazyclaude", "prompts")
 	if err := os.MkdirAll(wtDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestBuildWorkerPrompt_WorktreeCustomTakesPriority(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wtPath := filepath.Join(root, ".claude", "worktrees", branch)
+	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", branch)
 	prompt := session.BuildWorkerPrompt(wtPath, root, "sid-3")
 	if !strings.Contains(prompt, "Worktree level") {
 		t.Error("expected worktree-level custom prompt to take priority over project-level")
@@ -305,7 +305,7 @@ func TestBuildPMPrompt_FallsBackToEmbedded(t *testing.T) {
 func TestBuildWorkerPrompt_FallsBackToEmbedded(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	wtPath := filepath.Join(root, ".claude", "worktrees", "feat-y")
+	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "feat-y")
 
 	prompt := session.BuildWorkerPrompt(wtPath, root, "sid-5")
 	if !strings.Contains(prompt, "Worker") {
@@ -328,7 +328,7 @@ func TestBuildWorkerPrompt_SkipsEmptyCustomFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wtPath := filepath.Join(root, ".claude", "worktrees", "feat-z")
+	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "feat-z")
 	prompt := session.BuildWorkerPrompt(wtPath, root, "sid-6")
 	if !strings.Contains(prompt, "Worker") {
 		t.Error("expected fallback to embedded prompt for empty custom file")
@@ -359,7 +359,7 @@ func TestBuildWorkerPrompt_PathTraversalInBranch(t *testing.T) {
 	}
 
 	// Craft a worktree path with ".." in the branch name
-	wtPath := filepath.Join(root, ".claude", "worktrees", "../../..")
+	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "../../..")
 	prompt := session.BuildWorkerPrompt(wtPath, root, "sid-8")
 	if strings.Contains(prompt, "Escaped") {
 		t.Error("path traversal via branch name should be blocked")

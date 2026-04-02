@@ -260,7 +260,7 @@ func (m *Manager) createWorktreeSession(ctx context.Context, opts worktreeOpts) 
 }
 
 // CreateWorktree creates a git worktree and launches Claude Code with an initial prompt.
-// The worktree is placed at {projectRoot}/.claude/worktrees/{name}/.
+// The worktree is placed at {projectRoot}/.lazyclaude/worktrees/{name}/.
 func (m *Manager) CreateWorktree(ctx context.Context, name, userPrompt, projectRoot string) (*Session, error) {
 	return m.createWorktreeSession(ctx, worktreeOpts{
 		Name:        name,

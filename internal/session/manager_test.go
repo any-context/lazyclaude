@@ -406,7 +406,7 @@ func TestManager_CreateWorktree_Basic(t *testing.T) {
 	assert.Equal(t, session.StatusRunning, sess.Status)
 
 	// Worktree directory should exist
-	wtDir := filepath.Join(projectRoot, ".claude", "worktrees", "fix-popup")
+	wtDir := filepath.Join(projectRoot, ".lazyclaude", "worktrees", "fix-popup")
 	info, err := os.Stat(wtDir)
 	require.NoError(t, err)
 	assert.True(t, info.IsDir())
@@ -475,7 +475,7 @@ func TestManager_CreateWorktree_ExistingDir(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	initGitRepo(t, projectRoot)
-	wtDir := filepath.Join(projectRoot, ".claude", "worktrees", "reuse-me")
+	wtDir := filepath.Join(projectRoot, ".lazyclaude", "worktrees", "reuse-me")
 	require.NoError(t, os.MkdirAll(wtDir, 0o755))
 
 	// Should succeed even if directory already exists (reuse)
@@ -502,7 +502,7 @@ func TestManager_CreateWorktree_LauncherScriptContents(t *testing.T) {
 	_ = sess2
 
 	// Worktree dir should contain the isolation marker
-	wtDir := filepath.Join(projectRoot, ".claude", "worktrees", "inspect-me")
+	wtDir := filepath.Join(projectRoot, ".lazyclaude", "worktrees", "inspect-me")
 	_, err = os.Stat(wtDir)
 	require.NoError(t, err)
 }
@@ -649,7 +649,7 @@ func TestManager_CreateWorkerSession_Basic(t *testing.T) {
 	assert.NotEmpty(t, sess.ID)
 
 	// Worktree directory should exist
-	wtDir := filepath.Join(projectRoot, ".claude", "worktrees", "feat-x")
+	wtDir := filepath.Join(projectRoot, ".lazyclaude", "worktrees", "feat-x")
 	info, err := os.Stat(wtDir)
 	require.NoError(t, err)
 	assert.True(t, info.IsDir())

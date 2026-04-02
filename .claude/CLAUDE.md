@@ -21,7 +21,7 @@ awk '/\[Frame 5\]/,/\[Frame 6\]/{if(/\[Frame 6\]/)exit; print}' vis_e2e_tests/ou
 - Tapes contain only human interactions. Test setup goes in `entrypoint.sh`
 - Output: `outputs/{name}/` with `.gif` + `.txt` + `.log`
 - Launch lazyclaude via tmux plugin (`Ctrl+\`), not the binary directly. The Dockerfile's bash wrapper runs `lazyclaude setup` + `lazyclaude.tmux` automatically, so just press `Ctrl+\` in the tape to open the popup
-- When working in worktrees, use `.claude/worktree/`. Check for container name conflicts before running (`docker compose ps`)
+- When working in worktrees, use `.lazyclaude/worktree/`. Check for container name conflicts before running (`docker compose ps`)
 - After tests, run `open vis_e2e_tests/outputs/<tape>/` to inspect GIF results in Finder
 
 ### E2E manual debugging (Docker shell)
