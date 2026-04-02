@@ -21,13 +21,13 @@ type Project struct {
 }
 
 // InferProjectRoot extracts the project root directory from a session path.
-// For worktree paths, it strips the .claude/worktrees/<name> suffix.
+// For worktree paths, it strips the .lazyclaude/worktrees/<name> suffix.
 // For non-worktree paths, it returns the path unchanged.
 func InferProjectRoot(path string) string {
 	if path == "" {
 		return ""
 	}
-	idx := strings.Index(path, "/.claude/worktrees/")
+	idx := strings.Index(path, "/.lazyclaude/worktrees/")
 	if idx >= 0 {
 		return path[:idx]
 	}

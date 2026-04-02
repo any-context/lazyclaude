@@ -21,7 +21,7 @@ func TestPrintSessionsTable_Empty(t *testing.T) {
 func TestPrintSessionsTable_Normal(t *testing.T) {
 	sessions := []server.SessionInfo{
 		{ID: "abc123", Name: "pm", Role: "pm", Status: "Running", Path: "/home/user/project", Window: "@1"},
-		{ID: "def456", Name: "feat-a", Role: "worker", Status: "Running", Path: "/home/user/project/.claude/worktrees/feat-a", Window: "@2"},
+		{ID: "def456", Name: "feat-a", Role: "worker", Status: "Running", Path: "/home/user/project/.lazyclaude/worktrees/feat-a", Window: "@2"},
 	}
 
 	var buf bytes.Buffer

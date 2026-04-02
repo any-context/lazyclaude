@@ -16,12 +16,12 @@ func TestInferProjectRoot_Worktree(t *testing.T) {
 	}{
 		{
 			name: "standard worktree path",
-			path: "/home/user/projects/lazyclaude/.claude/worktrees/feat-auth",
+			path: "/home/user/projects/lazyclaude/.lazyclaude/worktrees/feat-auth",
 			want: "/home/user/projects/lazyclaude",
 		},
 		{
 			name: "nested project root",
-			path: "/opt/repos/my-api/.claude/worktrees/fix-bug",
+			path: "/opt/repos/my-api/.lazyclaude/worktrees/fix-bug",
 			want: "/opt/repos/my-api",
 		},
 	}

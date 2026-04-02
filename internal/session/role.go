@@ -40,7 +40,7 @@ func (r Role) IsValid() bool {
 // resolvePrompt searches for a custom prompt file in priority order and falls
 // back to the embedded default. The search order is:
 //
-//  1. {projectRoot}/.claude/worktree/{branch}/.lazyclaude/prompts/{filename}
+//  1. {projectRoot}/.lazyclaude/worktree/{branch}/.lazyclaude/prompts/{filename}
 //  2. {projectRoot}/.lazyclaude/prompts/{filename}
 //  3. Embedded default (compiled into the binary)
 //
@@ -62,7 +62,7 @@ func resolvePrompt(projectRoot, worktreePath, filename, fallback string) string 
 	if worktreePath != "" {
 		branch := branchFromWorktreePath(projectRoot, worktreePath)
 		if branch != "" {
-			candidate := filepath.Join(projectRoot, ".claude", "worktree", branch, ".lazyclaude", "prompts", filename)
+			candidate := filepath.Join(projectRoot, ".lazyclaude", "worktree", branch, ".lazyclaude", "prompts", filename)
 			if strings.HasPrefix(candidate, cleanRoot) {
 				candidates = append(candidates, candidate)
 			}

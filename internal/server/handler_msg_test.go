@@ -229,7 +229,7 @@ func TestMsgCreate_worker_success(t *testing.T) {
 			ID:     "new-session-id",
 			Name:   "feat-auth",
 			Role:   "worker",
-			Path:   "/project/.claude/worktrees/feat-auth",
+			Path:   "/project/.lazyclaude/worktrees/feat-auth",
 			Window: "@5",
 		},
 	}
@@ -248,7 +248,7 @@ func TestMsgCreate_worker_success(t *testing.T) {
 	assert.Equal(t, "new-session-id", result.Session.ID)
 	assert.Equal(t, "feat-auth", result.Session.Name)
 	assert.Equal(t, "worker", result.Session.Role)
-	assert.Equal(t, "/project/.claude/worktrees/feat-auth", result.Session.Path)
+	assert.Equal(t, "/project/.lazyclaude/worktrees/feat-auth", result.Session.Path)
 	assert.Equal(t, "@5", result.Session.Window)
 }
 

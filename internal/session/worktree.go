@@ -11,7 +11,7 @@ import (
 
 // WorktreePathSegment is the relative path segment identifying worktree directories.
 // Used for both path construction and detection.
-const WorktreePathSegment = ".claude/worktrees"
+const WorktreePathSegment = ".lazyclaude/worktrees"
 
 // worktreeSystemPrompt is the isolation instruction prepended to the user's prompt.
 const worktreeSystemPrompt = `You are working in an isolated worktree at %s.
@@ -51,14 +51,14 @@ func BuildWorktreePrompt(worktreePath, projectRoot string) string {
 	return fmt.Sprintf(worktreeSystemPrompt, worktreePath, projectRoot)
 }
 
-// WorktreeInfo describes an existing git worktree under .claude/worktrees/.
+// WorktreeInfo describes an existing git worktree under .lazyclaude/worktrees/.
 type WorktreeInfo struct {
 	Name   string // last path segment (e.g. "fix-popup")
 	Path   string // full path to worktree directory
 	Branch string // branch name without refs/heads/ prefix
 }
 
-// ListWorktrees returns existing git worktrees under .claude/worktrees/.
+// ListWorktrees returns existing git worktrees under .lazyclaude/worktrees/.
 // Returns nil (not error) if projectRoot is not a git repo.
 func ListWorktrees(ctx context.Context, projectRoot string) ([]WorktreeInfo, error) {
 	cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain")
@@ -79,7 +79,7 @@ func ListWorktrees(ctx context.Context, projectRoot string) ([]WorktreeInfo, err
 }
 
 // parseWorktreePorcelain parses `git worktree list --porcelain` output
-// and returns only entries under .claude/worktrees/.
+// and returns only entries under .lazyclaude/worktrees/.
 func parseWorktreePorcelain(output string) []WorktreeInfo {
 	var items []WorktreeInfo
 	blocks := strings.Split(strings.TrimSpace(output), "\n\n")

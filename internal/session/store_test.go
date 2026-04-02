@@ -280,7 +280,7 @@ func TestStore_WorkerRoleRoundTrip(t *testing.T) {
 	path := filepath.Join(dir, "state.json")
 
 	store := session.NewStore(path)
-	sess := newTestSession("id-w", "worker-1", "/project/.claude/worktrees/feat-x")
+	sess := newTestSession("id-w", "worker-1", "/project/.lazyclaude/worktrees/feat-x")
 	sess.Role = session.RoleWorker
 	store.Add(sess)
 	require.NoError(t, store.Save())
@@ -342,7 +342,7 @@ func TestStore_FindProjectForSession_WorkerInWorktree(t *testing.T) {
 	t.Parallel()
 	s := session.NewStore("")
 	// Worktree path → InferProjectRoot maps to /project
-	workerSess := newTestSession("w-id", "feat-x", "/project/.claude/worktrees/feat-x")
+	workerSess := newTestSession("w-id", "feat-x", "/project/.lazyclaude/worktrees/feat-x")
 	workerSess.Role = session.RoleWorker
 	s.Add(workerSess)
 

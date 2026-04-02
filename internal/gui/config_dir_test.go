@@ -5,11 +5,11 @@ import "testing"
 func TestConfigDirForSession_WorkerInWorktree(t *testing.T) {
 	app := &App{}
 	s := &SessionItem{
-		Path: "/project/.claude/worktrees/feat-x",
+		Path: "/project/.lazyclaude/worktrees/feat-x",
 		Role: "worker",
 	}
 	got := app.configDirForSession(s)
-	if got != "/project/.claude/worktrees/feat-x" {
+	if got != "/project/.lazyclaude/worktrees/feat-x" {
 		t.Errorf("worker worktree session: got %q, want worktree path", got)
 	}
 }
@@ -29,11 +29,11 @@ func TestConfigDirForSession_RegularSession(t *testing.T) {
 func TestConfigDirForSession_WorktreeNonWorker(t *testing.T) {
 	app := &App{}
 	s := &SessionItem{
-		Path: "/project/.claude/worktrees/feat-y",
+		Path: "/project/.lazyclaude/worktrees/feat-y",
 		Role: "",
 	}
 	got := app.configDirForSession(s)
-	if got != "/project/.claude/worktrees/feat-y" {
+	if got != "/project/.lazyclaude/worktrees/feat-y" {
 		t.Errorf("non-worker worktree session: got %q, want worktree path", got)
 	}
 }

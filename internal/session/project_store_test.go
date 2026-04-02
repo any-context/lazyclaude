@@ -50,7 +50,7 @@ func TestStore_AddWorktreeSessionGroupsUnderProject(t *testing.T) {
 	// Add a regular session
 	s.Add(newTestSession("id-1", "main", "/home/user/lazyclaude"))
 	// Add a worktree session under the same project
-	s.Add(newTestSession("id-2", "feat-auth", "/home/user/lazyclaude/.claude/worktrees/feat-auth"))
+	s.Add(newTestSession("id-2", "feat-auth", "/home/user/lazyclaude/.lazyclaude/worktrees/feat-auth"))
 
 	projects := s.Projects()
 	require.Len(t, projects, 1, "worktree should belong to same project")
@@ -89,7 +89,7 @@ func TestStore_RemoveSessionFromProject(t *testing.T) {
 	s := session.NewStore("")
 
 	s.Add(newTestSession("id-1", "main", "/home/user/lazyclaude"))
-	s.Add(newTestSession("id-2", "feat", "/home/user/lazyclaude/.claude/worktrees/feat"))
+	s.Add(newTestSession("id-2", "feat", "/home/user/lazyclaude/.lazyclaude/worktrees/feat"))
 
 	ok := s.Remove("id-2")
 	assert.True(t, ok)
@@ -137,7 +137,7 @@ func TestStore_SaveAndLoad_ProjectFormat(t *testing.T) {
 	pm := newTestSession("id-pm", "pm", "/home/user/lazyclaude")
 	pm.Role = session.RolePM
 	s1.Add(pm)
-	s1.Add(newTestSession("id-2", "feat", "/home/user/lazyclaude/.claude/worktrees/feat"))
+	s1.Add(newTestSession("id-2", "feat", "/home/user/lazyclaude/.lazyclaude/worktrees/feat"))
 	require.NoError(t, s1.Save())
 
 	s2 := session.NewStore(path)
@@ -187,7 +187,7 @@ func TestStore_FindByID_AcrossProjects(t *testing.T) {
 	s := session.NewStore("")
 
 	s.Add(newTestSession("id-1", "main", "/home/user/project-a"))
-	s.Add(newTestSession("id-2", "feat", "/home/user/project-b/.claude/worktrees/feat"))
+	s.Add(newTestSession("id-2", "feat", "/home/user/project-b/.lazyclaude/worktrees/feat"))
 
 	found := s.FindByID("id-2")
 	require.NotNil(t, found)
