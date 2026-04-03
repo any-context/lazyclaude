@@ -399,8 +399,9 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "window not found", http.StatusNotFound)
 		return
 	}
-	// Cache for future lookups from same PID
-	s.state.SetConn(fmt.Sprintf("notify-%d", req.PID), &ConnState{PID: req.PID, Window: window})
+	// Cache for future lookups from same PID. Use a fixed "hook-" prefix so all
+	// hook types share one entry per PID, avoiding unbounded accumulation.
+	s.state.SetConn(fmt.Sprintf("hook-%d", req.PID), &ConnState{PID: req.PID, Window: window})
 
 	s.log.Printf("notify: type=%s pid=%d window=%s tool=%s", req.Type, req.PID, window, req.ToolName)
 
@@ -576,7 +577,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	}
 	// Cache PID→window so subsequent hooks with the same PID resolve instantly.
 	if window != "" && req.PID > 0 {
-		s.state.SetConn(fmt.Sprintf("stop-%d", req.PID), &ConnState{PID: req.PID, Window: window})
+		s.state.SetConn(fmt.Sprintf("hook-%d", req.PID), &ConnState{PID: req.PID, Window: window})
 	}
 
 	s.log.Printf("stop: pid=%d window=%s reason=%s", req.PID, window, req.StopReason)
@@ -624,7 +625,7 @@ func (s *Server) handleSessionStart(w http.ResponseWriter, r *http.Request) {
 	}
 	// Cache PID→window so subsequent hooks with the same PID resolve instantly.
 	if window != "" && req.PID > 0 {
-		s.state.SetConn(fmt.Sprintf("session-start-%d", req.PID), &ConnState{PID: req.PID, Window: window})
+		s.state.SetConn(fmt.Sprintf("hook-%d", req.PID), &ConnState{PID: req.PID, Window: window})
 	}
 
 	s.log.Printf("session-start: pid=%d window=%s", req.PID, window)
@@ -676,7 +677,7 @@ func (s *Server) handlePromptSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	// Cache PID→window so subsequent hooks with the same PID resolve instantly.
 	if req.PID > 0 {
-		s.state.SetConn(fmt.Sprintf("prompt-submit-%d", req.PID), &ConnState{PID: req.PID, Window: window})
+		s.state.SetConn(fmt.Sprintf("hook-%d", req.PID), &ConnState{PID: req.PID, Window: window})
 	}
 
 	s.log.Printf("prompt-submit: pid=%d window=%s", req.PID, window)
