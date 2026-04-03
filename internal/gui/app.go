@@ -50,11 +50,11 @@ type SessionProvider interface {
 	SendChoice(window string, choice Choice) error
 	AttachSession(id string) error
 	LaunchLazygit(path, host string) error
-	CreateWorktree(name, prompt, projectRoot string) error
-	ResumeWorktree(worktreePath, prompt, projectRoot string) error
-	ListWorktrees(projectRoot string) ([]WorktreeInfo, error)
-	CreatePMSession(projectRoot string) error
-	CreateWorkerSession(name, prompt, projectRoot string) error
+	CreateWorktree(name, prompt, projectRoot, host string) error
+	ResumeWorktree(worktreePath, prompt, projectRoot, host string) error
+	ListWorktrees(projectRoot, host string) ([]WorktreeInfo, error)
+	CreatePMSession(projectRoot, host string) error
+	CreateWorkerSession(name, prompt, projectRoot, host string) error
 }
 
 // WorktreeInfo describes an existing worktree for the chooser.

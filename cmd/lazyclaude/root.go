@@ -279,7 +279,7 @@ func (a *sessionCreatorAdapter) FindProjectForSession(id string) *server.Session
 }
 
 func (a *sessionCreatorAdapter) CreateWorkerSession(ctx context.Context, name, prompt, projectRoot string) (*server.SessionCreateResult, error) {
-	sess, err := a.mgr.CreateWorkerSession(ctx, name, prompt, projectRoot)
+	sess, err := a.mgr.CreateWorkerSession(ctx, name, prompt, projectRoot, "")
 	if err != nil {
 		return nil, fmt.Errorf("create worker session: %w", err)
 	}
@@ -578,28 +578,28 @@ func (a *sessionAdapter) SendChoice(window string, c gui.Choice) error {
 	return tmuxadapter.SendToPane(context.Background(), a.tmux, window, c)
 }
 
-func (a *sessionAdapter) CreateWorktree(name, prompt, projectRoot string) error {
-	_, err := a.mgr.CreateWorktree(context.Background(), name, prompt, projectRoot)
+func (a *sessionAdapter) CreateWorktree(name, prompt, projectRoot, host string) error {
+	_, err := a.mgr.CreateWorktree(context.Background(), name, prompt, projectRoot, host)
 	return err
 }
 
-func (a *sessionAdapter) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
-	_, err := a.mgr.ResumeWorktree(context.Background(), worktreePath, prompt, projectRoot)
+func (a *sessionAdapter) ResumeWorktree(worktreePath, prompt, projectRoot, host string) error {
+	_, err := a.mgr.ResumeWorktree(context.Background(), worktreePath, prompt, projectRoot, host)
 	return err
 }
 
-func (a *sessionAdapter) CreatePMSession(projectRoot string) error {
-	_, err := a.mgr.CreatePMSession(context.Background(), projectRoot)
+func (a *sessionAdapter) CreatePMSession(projectRoot, host string) error {
+	_, err := a.mgr.CreatePMSession(context.Background(), projectRoot, host)
 	return err
 }
 
-func (a *sessionAdapter) CreateWorkerSession(name, prompt, projectRoot string) error {
-	_, err := a.mgr.CreateWorkerSession(context.Background(), name, prompt, projectRoot)
+func (a *sessionAdapter) CreateWorkerSession(name, prompt, projectRoot, host string) error {
+	_, err := a.mgr.CreateWorkerSession(context.Background(), name, prompt, projectRoot, host)
 	return err
 }
 
-func (a *sessionAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeInfo, error) {
-	items, err := session.ListWorktrees(context.Background(), projectRoot)
+func (a *sessionAdapter) ListWorktrees(projectRoot, host string) ([]gui.WorktreeInfo, error) {
+	items, err := session.ListWorktrees(context.Background(), projectRoot, host)
 	if err != nil {
 		return nil, err
 	}

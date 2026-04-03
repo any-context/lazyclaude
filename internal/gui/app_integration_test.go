@@ -77,11 +77,11 @@ func (m *mockSessionProvider) SendChoice(window string, choice gui.Choice) error
 }
 func (m *mockSessionProvider) AttachSession(_ string) error                       { return nil }
 func (m *mockSessionProvider) LaunchLazygit(_, _ string) error                    { return nil }
-func (m *mockSessionProvider) CreateWorktree(_, _, _ string) error               { return nil }
-func (m *mockSessionProvider) ResumeWorktree(_, _, _ string) error               { return nil }
-func (m *mockSessionProvider) ListWorktrees(_ string) ([]gui.WorktreeInfo, error) { return nil, nil }
-func (m *mockSessionProvider) CreatePMSession(_ string) error                     { return nil }
-func (m *mockSessionProvider) CreateWorkerSession(_, _, _ string) error           { return nil }
+func (m *mockSessionProvider) CreateWorktree(_, _, _, _ string) error               { return nil }
+func (m *mockSessionProvider) ResumeWorktree(_, _, _, _ string) error               { return nil }
+func (m *mockSessionProvider) ListWorktrees(_, _ string) ([]gui.WorktreeInfo, error) { return nil, nil }
+func (m *mockSessionProvider) CreatePMSession(_, _ string) error                     { return nil }
+func (m *mockSessionProvider) CreateWorkerSession(_, _, _, _ string) error           { return nil }
 
 func (m *mockSessionProvider) getSentChoices() []sentChoice {
 	m.mu.Lock()

@@ -1,10 +1,12 @@
 package session
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -90,6 +92,22 @@ func buildSSHCommand(sess Session, mcpPort int, token string) (string, error) {
 	args = append(args, fmt.Sprintf("eval \"$(echo %s | base64 -d)\"", encoded))
 
 	return strings.Join(args, " "), nil
+}
+
+// RunSSHCommand executes a command on a remote host via SSH and returns its output.
+// Uses the same base64-encoding pattern as buildSSHCommand to avoid quoting issues.
+func RunSSHCommand(ctx context.Context, host, command string) ([]byte, error) {
+	encoded := base64.StdEncoding.EncodeToString([]byte(command))
+	sshHost, port := splitHostPort(host)
+
+	args := []string{"-o", "BatchMode=yes"}
+	if port != "" {
+		args = append(args, "-p", port)
+	}
+	args = append(args, sshHost, fmt.Sprintf("eval \"$(echo %s | base64 -d)\"", encoded))
+
+	cmd := exec.CommandContext(ctx, "ssh", args...)
+	return cmd.Output()
 }
 
 // BuildLazygitSSHArgs returns the exec.Command arguments for launching lazygit
