@@ -563,6 +563,7 @@ func (a *App) showWorktreeDialog(g *gocui.Gui) bool {
 	v.Title = " Branch "
 	v.Editable = true
 	v.Editor = gocui.DefaultEditor
+	v.Clear()
 	v.TextArea.Clear()
 	v.RenderTextArea()
 	setRoundedFrame(v)
@@ -583,6 +584,7 @@ func (a *App) showWorktreeDialog(g *gocui.Gui) bool {
 	v2.Editable = true
 	v2.Editor = gocui.DefaultEditor
 	v2.Wrap = true
+	v2.Clear()
 	v2.TextArea.Clear()
 	v2.TextArea.AutoWrap = true
 	v2.TextArea.AutoWrapWidth = w - 2 // view 幅からフレーム分を引く
@@ -704,8 +706,10 @@ func (a *App) showWorktreeResumePrompt(g *gocui.Gui, worktreeName string) bool {
 	v.Editable = true
 	v.Editor = gocui.DefaultEditor
 	v.Wrap = true
+	v.TextArea.Clear()
 	v.TextArea.AutoWrap = true
 	v.TextArea.AutoWrapWidth = w - 2
+	v.RenderTextArea()
 	setRoundedFrame(v)
 
 	hintY0 := promptY1
