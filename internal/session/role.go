@@ -41,10 +41,24 @@ func (r Role) IsValid() bool {
 
 // readRemoteFile reads a file from a remote host via SSH.
 // Returns the file contents or an error if the file does not exist or is unreadable.
-func readRemoteFile(host, path string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func readRemoteFile(ctx context.Context, host, path string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	return RunSSHCommand(ctx, host, fmt.Sprintf("cat %s 2>/dev/null", posixQuote(path)))
+}
+
+// fileReader abstracts file reading so resolvePrompt can read from either the
+// local filesystem or a remote host via SSH.
+type fileReader func(path string) ([]byte, error)
+
+// localFileReader returns a fileReader that reads from the local filesystem.
+func localFileReader() fileReader {
+	return func(path string) ([]byte, error) { return os.ReadFile(path) }
+}
+
+// remoteFileReader returns a fileReader that reads from a remote host via SSH.
+func remoteFileReader(ctx context.Context, host string) fileReader {
+	return func(path string) ([]byte, error) { return readRemoteFile(ctx, host, path) }
 }
 
 // resolvePrompt searches for a custom prompt file in priority order and falls
@@ -61,8 +75,7 @@ func readRemoteFile(host, path string) ([]byte, error) {
 // worktreePath may be empty (e.g. for PM sessions that run in the project root).
 // When empty, the worktree-level search is skipped.
 // projectRoot must be an absolute path; relative paths fall back to the default.
-// host, when non-empty, causes files to be read from the remote host via SSH.
-func resolvePrompt(projectRoot, worktreePath, filename, fallback, host string) string {
+func resolvePrompt(projectRoot, worktreePath, filename, fallback string, read fileReader) string {
 	if !filepath.IsAbs(projectRoot) {
 		return fallback
 	}
@@ -86,13 +99,7 @@ func resolvePrompt(projectRoot, worktreePath, filename, fallback, host string) s
 	}
 
 	for _, candidate := range candidates {
-		var data []byte
-		var err error
-		if host != "" {
-			data, err = readRemoteFile(host, candidate)
-		} else {
-			data, err = os.ReadFile(candidate)
-		}
+		data, err := read(candidate)
 		if err == nil && len(data) > 0 {
 			return string(data)
 		}
@@ -121,12 +128,21 @@ func branchFromWorktreePath(projectRoot, wtPath string) string {
 	return branch
 }
 
+// promptFileReader returns the appropriate fileReader for the given host.
+// Empty host reads from the local filesystem; non-empty host reads via SSH.
+func promptFileReader(ctx context.Context, host string) fileReader {
+	if host != "" {
+		return remoteFileReader(ctx, host)
+	}
+	return localFileReader()
+}
+
 // BuildPMPrompt generates the system prompt injected into a PM session at launch.
 // The final prompt is composed of pm.md (role-specific, custom-searchable) +
 // base.md (shared communication reference, always embedded).
 // host, when non-empty, causes custom prompt files to be read from the remote host via SSH.
-func BuildPMPrompt(projectRoot, sessionID, workerList, host string) string {
-	roleTmpl := resolvePrompt(projectRoot, "", "pm.md", prompts.DefaultPM(), host)
+func BuildPMPrompt(ctx context.Context, projectRoot, sessionID, workerList, host string) string {
+	roleTmpl := resolvePrompt(projectRoot, "", "pm.md", prompts.DefaultPM(), promptFileReader(ctx, host))
 	baseTmpl := prompts.DefaultBase()
 
 	role := fmt.Sprintf(roleTmpl,
@@ -144,8 +160,8 @@ func BuildPMPrompt(projectRoot, sessionID, workerList, host string) string {
 // The final prompt is composed of worker.md (role-specific, custom-searchable) +
 // base.md (shared communication reference, always embedded).
 // host, when non-empty, causes custom prompt files to be read from the remote host via SSH.
-func BuildWorkerPrompt(worktreePath, projectRoot, sessionID, host string) string {
-	roleTmpl := resolvePrompt(projectRoot, worktreePath, "worker.md", prompts.DefaultWorker(), host)
+func BuildWorkerPrompt(ctx context.Context, worktreePath, projectRoot, sessionID, host string) string {
+	roleTmpl := resolvePrompt(projectRoot, worktreePath, "worker.md", prompts.DefaultWorker(), promptFileReader(ctx, host))
 	baseTmpl := prompts.DefaultBase()
 
 	role := fmt.Sprintf(roleTmpl,

@@ -350,7 +350,7 @@ func (m *Manager) launchSession(ctx context.Context, sess Session, claudeCmd, st
 // ResumeWorktree, and CreateWorkerSession. Caller must hold m.mu.
 func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userPrompt, projectRoot, host string, role Role, mcpPort int, mcpToken string) (*Session, error) {
 	id := uuid.New().String()
-	systemPrompt := BuildWorkerPrompt(wtPath, projectRoot, id, host)
+	systemPrompt := BuildWorkerPrompt(ctx, wtPath, projectRoot, id, host)
 
 	sess := Session{
 		ID:        id,
@@ -747,7 +747,7 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot, host string)
 	workerList := strings.Join(workerLines, "\n")
 
 	id := uuid.New().String()
-	systemPrompt := BuildPMPrompt(projectRoot, id, workerList, host)
+	systemPrompt := BuildPMPrompt(ctx, projectRoot, id, workerList, host)
 
 	sess := Session{
 		ID:        id,
