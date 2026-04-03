@@ -208,7 +208,8 @@ func (a *App) currentSessionHost() string {
 
 // currentProjectRoot returns the project root path for the currently selected
 // tree node. For ProjectNode, returns Project.Path directly. For SessionNode,
-// infers the project root via InferProjectRoot (handles worktree paths).
+// looks up the parent project's stored Path (avoids InferProjectRoot which can
+// mismatch on remote when paths differ from the stored project path).
 // Falls back to filepath.Abs(".") when no node is selected.
 func (a *App) currentProjectRoot() string {
 	node := a.currentNode()
@@ -219,6 +220,13 @@ func (a *App) currentProjectRoot() string {
 				return node.Project.Path
 			}
 		case SessionNode:
+			// Look up the parent project's stored path instead of inferring
+			// from the session's worktree path. This prevents mismatches when
+			// the stored project path differs from InferProjectRoot output
+			// (e.g. relative "." vs absolute, or symlink-resolved paths).
+			if path := a.projectPathByID(node.ProjectID); path != "" {
+				return path
+			}
 			if node.Session != nil && node.Session.Path != "" {
 				return session.InferProjectRoot(node.Session.Path)
 			}
@@ -229,6 +237,21 @@ func (a *App) currentProjectRoot() string {
 		return "."
 	}
 	return session.InferProjectRoot(abs)
+}
+
+// projectPathByID returns the stored Path for the project with the given ID.
+// Returns "" if not found. Scans the current tree nodes which are already
+// cached, so this is inexpensive.
+func (a *App) projectPathByID(projectID string) string {
+	if projectID == "" {
+		return ""
+	}
+	for _, n := range a.treeNodes() {
+		if n.Kind == ProjectNode && n.ProjectID == projectID && n.Project != nil {
+			return n.Project.Path
+		}
+	}
+	return ""
 }
 
 // configDirForSession returns the directory to use for configuration lookups
