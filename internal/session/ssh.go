@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -43,9 +44,7 @@ func writeRemoteScript(sess Session, mcpPort int, token string, opts *remoteScri
 	b.WriteString(fmt.Sprintf("trap 'rm -f \"%s\"' EXIT\n", lockFile))
 
 	if sess.Path != "" && sess.Path != "." {
-		// Use POSIX single-quote escaping (not Go %q) for shell safety.
-		safePath := "'" + strings.ReplaceAll(sess.Path, "'", "'\\''") + "'"
-		b.WriteString(fmt.Sprintf("cd %s\n", safePath))
+		b.WriteString(fmt.Sprintf("cd %s\n", posixQuote(sess.Path)))
 	}
 
 	claudeArgs := "claude"
@@ -54,18 +53,19 @@ func writeRemoteScript(sess Session, mcpPort int, token string, opts *remoteScri
 	}
 
 	// If systemPrompt/userPrompt are provided (worktree/PM sessions),
-	// write them via heredoc to avoid quoting issues. The heredoc delimiter
-	// uses single-quoted labels so no expansion occurs inside.
+	// base64-encode them and decode into shell variables. This avoids all
+	// quoting issues: no heredoc delimiter collisions, no double-quote
+	// injection in the exec line. The exec line stays single-quoted.
 	hasPromptVars := opts != nil && opts.SystemPrompt != ""
 	if hasPromptVars {
-		b.WriteString("read -r -d '' _LC_SYSPROMPT << 'PROMPTEOF'\n")
-		b.WriteString(opts.SystemPrompt + "\n")
-		b.WriteString("PROMPTEOF\n")
+		encoded := base64.StdEncoding.EncodeToString([]byte(opts.SystemPrompt))
+		b.WriteString(fmt.Sprintf("_LC_SYSPROMPT=$(echo %s | base64 -d)\n", encoded))
+		claudeArgs += ` --append-system-prompt "$_LC_SYSPROMPT"`
 
 		if strings.TrimSpace(opts.UserPrompt) != "" {
-			b.WriteString("read -r -d '' _LC_USERPROMPT << 'UPROMPTEOF'\n")
-			b.WriteString(opts.UserPrompt + "\n")
-			b.WriteString("UPROMPTEOF\n")
+			uEncoded := base64.StdEncoding.EncodeToString([]byte(opts.UserPrompt))
+			b.WriteString(fmt.Sprintf("_LC_USERPROMPT=$(echo %s | base64 -d)\n", uEncoded))
+			claudeArgs += ` "$_LC_USERPROMPT"`
 		}
 	}
 
@@ -86,21 +86,20 @@ func writeRemoteScript(sess Session, mcpPort int, token string, opts *remoteScri
 	// exec $SHELL -lc runs in remote's login shell (loads .zprofile/.profile for PATH)
 	// $SHELL is expanded on remote since this script is base64-encoded and eval'd there.
 	//
-	// When prompt variables are set (worktree/PM sessions), we use double quotes
-	// for the -lic argument so $-variables expand. The claude binary name and
-	// fixed flags are safe in double-quote context. When no prompt variables
-	// are needed, the original single-quote form is used.
+	// When prompt variables are present, we must use double quotes for the -lic
+	// argument so $-variables expand. The prompt values are base64-decoded into
+	// variables above, so no injection is possible through the prompt content.
+	// When no prompt variables are needed, the single-quote form is used.
 	if hasPromptVars {
-		promptArgs := " --append-system-prompt \"$_LC_SYSPROMPT\""
-		if opts != nil && strings.TrimSpace(opts.UserPrompt) != "" {
-			promptArgs += " \"$_LC_USERPROMPT\""
-		}
-		b.WriteString(fmt.Sprintf("%s exec \"$SHELL\" -lic \"exec %s%s\"\n", envPrefix.String(), claudeArgs, promptArgs))
+		b.WriteString(fmt.Sprintf("%s exec \"$SHELL\" -lic \"exec %s\"\n", envPrefix.String(), claudeArgs))
 	} else {
 		b.WriteString(fmt.Sprintf("%s exec \"$SHELL\" -lic 'exec %s'\n", envPrefix.String(), claudeArgs))
 	}
 
 	scriptPath := fmt.Sprintf("/tmp/lazyclaude/ssh-%s.sh", sess.ID[:8])
+	if err := os.MkdirAll(filepath.Dir(scriptPath), 0o700); err != nil {
+		return "", fmt.Errorf("create script dir: %w", err)
+	}
 	if err := os.WriteFile(scriptPath, []byte(b.String()), 0o755); err != nil {
 		return "", fmt.Errorf("write remote script: %w", err)
 	}
@@ -165,8 +164,7 @@ func BuildLazygitSSHArgs(host, path string) (string, []string) {
 	if port != "" {
 		args = append(args, "-p", port)
 	}
-	safePath := "'" + strings.ReplaceAll(path, "'", "'\\''") + "'"
-	remoteCmd := fmt.Sprintf("cd %s && lazygit", safePath)
+	remoteCmd := fmt.Sprintf("cd %s && lazygit", posixQuote(path))
 	encoded := base64.StdEncoding.EncodeToString([]byte(remoteCmd))
 	args = append(args, sshHost, fmt.Sprintf("eval \"$(echo %s | base64 -d)\"", encoded))
 	return "ssh", args

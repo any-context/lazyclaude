@@ -472,14 +472,14 @@ func createGitWorktreeRemote(ctx context.Context, projectRoot, wtPath, branch, h
 	// Try creating worktree with a new branch first.
 	addCmd := fmt.Sprintf("cd %s && git worktree add -b %s %s 2>&1", sq(projectRoot), sq(branch), sq(wtPath))
 	out, err := RunSSHCommand(ctx, host, addCmd)
-	if err != nil {
-		// Branch may already exist — try without -b.
-		addCmd2 := fmt.Sprintf("cd %s && git worktree add %s %s 2>&1", sq(projectRoot), sq(wtPath), sq(branch))
-		out2, err2 := RunSSHCommand(ctx, host, addCmd2)
-		if err2 != nil {
-			return fmt.Errorf("%s\n%s", strings.TrimSpace(string(out)), strings.TrimSpace(string(out2)))
-		}
-		_ = out
+	if err == nil {
+		return nil
+	}
+	// Branch may already exist — try without -b.
+	addCmd2 := fmt.Sprintf("cd %s && git worktree add %s %s 2>&1", sq(projectRoot), sq(wtPath), sq(branch))
+	out2, err2 := RunSSHCommand(ctx, host, addCmd2)
+	if err2 != nil {
+		return fmt.Errorf("%s\n%s", strings.TrimSpace(string(out)), strings.TrimSpace(string(out2)))
 	}
 	return nil
 }
