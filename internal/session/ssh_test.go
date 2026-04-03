@@ -20,7 +20,7 @@ func TestWriteRemoteScript_CreatesFile(t *testing.T) {
 		Host: "user@remote",
 		Path: "/home/user/project",
 	}
-	path, err := writeRemoteScript(sess, 12345, "test-token")
+	path, err := writeRemoteScript(sess, 12345, "test-token", nil)
 	require.NoError(t, err)
 	defer os.Remove(path)
 
@@ -35,7 +35,7 @@ func TestWriteRemoteScript_PlainBash(t *testing.T) {
 		Host: "user@remote",
 		Path: "/home/user/project",
 	}
-	path, err := writeRemoteScript(sess, 12345, "test-token")
+	path, err := writeRemoteScript(sess, 12345, "test-token", nil)
 	require.NoError(t, err)
 	defer os.Remove(path)
 
@@ -57,7 +57,7 @@ func TestWriteRemoteScript_HeredocForJSON(t *testing.T) {
 		Host: "user@remote",
 		Path: "/home/user/project",
 	}
-	path, err := writeRemoteScript(sess, 12345, "my-secret-token")
+	path, err := writeRemoteScript(sess, 12345, "my-secret-token", nil)
 	require.NoError(t, err)
 	defer os.Remove(path)
 
@@ -78,7 +78,7 @@ func TestWriteRemoteScript_CdToPath(t *testing.T) {
 		Host: "user@remote",
 		Path: "/home/user/my project",
 	}
-	path, err := writeRemoteScript(sess, 12345, "tok")
+	path, err := writeRemoteScript(sess, 12345, "tok", nil)
 	require.NoError(t, err)
 	defer os.Remove(path)
 
@@ -86,8 +86,8 @@ func TestWriteRemoteScript_CdToPath(t *testing.T) {
 	require.NoError(t, err)
 	script := string(content)
 
-	// cd should use double quotes for $HOME safety and spaces
-	assert.Contains(t, script, `cd "/home/user/my project"`)
+	// cd should use POSIX single quotes for safe path handling
+	assert.Contains(t, script, "cd '/home/user/my project'")
 }
 
 func TestWriteRemoteScript_NoCdForDot(t *testing.T) {
@@ -97,7 +97,7 @@ func TestWriteRemoteScript_NoCdForDot(t *testing.T) {
 		Host: "user@remote",
 		Path: ".",
 	}
-	path, err := writeRemoteScript(sess, 12345, "tok")
+	path, err := writeRemoteScript(sess, 12345, "tok", nil)
 	require.NoError(t, err)
 	defer os.Remove(path)
 
@@ -113,7 +113,7 @@ func TestWriteRemoteScript_LockFileCleanup(t *testing.T) {
 		Host: "user@remote",
 		Path: "/home",
 	}
-	path, err := writeRemoteScript(sess, 9999, "tok")
+	path, err := writeRemoteScript(sess, 9999, "tok", nil)
 	require.NoError(t, err)
 	defer os.Remove(path)
 
@@ -133,7 +133,7 @@ func TestWriteRemoteScript_ClaudeFlags(t *testing.T) {
 		Path:  "/home",
 		Flags: []string{"--resume", "--working-dir=/tmp"},
 	}
-	path, err := writeRemoteScript(sess, 5555, "tok")
+	path, err := writeRemoteScript(sess, 5555, "tok", nil)
 	require.NoError(t, err)
 	defer os.Remove(path)
 
@@ -154,7 +154,7 @@ func TestBuildSSHCommand_Basic(t *testing.T) {
 		Host: "user@remote-server",
 		Path: "/home/user/project",
 	}
-	cmd, err := buildSSHCommand(sess, 12345, "test-token-abc")
+	cmd, err := buildSSHCommand(sess, 12345, "test-token-abc", nil)
 	require.NoError(t, err)
 
 	assert.Contains(t, cmd, "ssh -t")
@@ -171,7 +171,7 @@ func TestBuildSSHCommand_ReverseTunnel(t *testing.T) {
 		Host: "dev@10.0.1.5",
 		Path: "/workspace",
 	}
-	cmd, err := buildSSHCommand(sess, 9876, "tok-xyz")
+	cmd, err := buildSSHCommand(sess, 9876, "tok-xyz", nil)
 	require.NoError(t, err)
 
 	assert.Contains(t, cmd, "-R 9876:127.0.0.1:9876")
@@ -184,7 +184,7 @@ func TestBuildSSHCommand_HostWithPort(t *testing.T) {
 		Host: "user@host:2222",
 		Path: "/home",
 	}
-	cmd, err := buildSSHCommand(sess, 5555, "tok")
+	cmd, err := buildSSHCommand(sess, 5555, "tok", nil)
 	require.NoError(t, err)
 
 	assert.Contains(t, cmd, "-p 2222")
@@ -199,7 +199,7 @@ func TestBuildSSHCommand_NoNestedQuotes(t *testing.T) {
 		Host: "user@host",
 		Path: "/home/user/my project",
 	}
-	cmd, err := buildSSHCommand(sess, 5555, "tok")
+	cmd, err := buildSSHCommand(sess, 5555, "tok", nil)
 	require.NoError(t, err)
 
 	// Command should NOT have nested quote escaping
@@ -217,7 +217,7 @@ func TestBuildSSHCommand_KeepAlive(t *testing.T) {
 		Host: "user@host",
 		Path: "/home",
 	}
-	cmd, err := buildSSHCommand(sess, 5555, "tok")
+	cmd, err := buildSSHCommand(sess, 5555, "tok", nil)
 	require.NoError(t, err)
 
 	assert.Contains(t, cmd, "ServerAliveInterval")

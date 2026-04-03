@@ -133,13 +133,13 @@ func (a *App) setupGlobalKeybindings() error {
 		}
 
 		host := a.currentSessionHost()
+		projectRoot := a.currentProjectRoot()
 		a.closeWorktreeDialog(g)
 
 		go func() {
 			if a.sessions == nil {
 				return
 			}
-			projectRoot := a.currentProjectRoot()
 			if err := a.sessions.CreateWorktree(branchName, userPrompt, projectRoot, host); err != nil {
 				a.gui.Update(func(g *gocui.Gui) error {
 					a.setStatus(g, fmt.Sprintf("Error: %v", err))
@@ -271,13 +271,13 @@ func (a *App) setupGlobalKeybindings() error {
 		userPrompt := v.TextArea.GetContent()
 		wtPath := a.dialog.SelectedPath
 		host := a.currentSessionHost()
+		projectRoot := a.currentProjectRoot()
 		a.closeWorktreeResumePrompt(g)
 
 		go func() {
 			if a.sessions == nil {
 				return
 			}
-			projectRoot := a.currentProjectRoot()
 			if err := a.sessions.ResumeWorktree(wtPath, userPrompt, projectRoot, host); err != nil {
 				a.gui.Update(func(g *gocui.Gui) error {
 					a.setStatus(g, fmt.Sprintf("Error: %v", err))

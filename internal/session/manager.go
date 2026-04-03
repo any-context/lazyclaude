@@ -184,7 +184,7 @@ func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, e
 			return nil, fmt.Errorf("read MCP server info for SSH session: %w", mcpErr)
 		}
 		var sshErr error
-		claudeCmd, sshErr = buildSSHCommand(sess, mcpPort, mcpToken)
+		claudeCmd, sshErr = buildSSHCommand(sess, mcpPort, mcpToken, nil)
 		if sshErr != nil {
 			return nil, fmt.Errorf("build SSH command: %w", sshErr)
 		}
@@ -352,21 +352,18 @@ func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userP
 	}
 
 	var claudeCmd string
+	launchSuccess := false
 	if host != "" {
-		// SSH worktree session: build remote script with system prompt flags.
-		sess.Flags = []string{
-			"--append-system-prompt", shell.Quote(systemPrompt),
-		}
-		if strings.TrimSpace(userPrompt) != "" {
-			sess.Flags = append(sess.Flags, shell.Quote(userPrompt))
+		// SSH worktree session: pass system/user prompts via heredoc in the remote script.
+		scriptOpts := &remoteScriptOpts{
+			SystemPrompt: systemPrompt,
+			UserPrompt:   userPrompt,
 		}
 		var sshErr error
-		claudeCmd, sshErr = buildSSHCommand(sess, mcpPort, mcpToken)
+		claudeCmd, sshErr = buildSSHCommand(sess, mcpPort, mcpToken, scriptOpts)
 		if sshErr != nil {
 			return nil, fmt.Errorf("build SSH command: %w", sshErr)
 		}
-		// Clear flags after building the SSH command — they are baked into the script.
-		sess.Flags = nil
 
 		// Write pending window file for MCP server association.
 		pendingFile := filepath.Join(m.paths.RuntimeDir, "lazyclaude-pending-window")
@@ -378,9 +375,8 @@ func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userP
 		if err != nil {
 			return nil, fmt.Errorf("write launcher: %w", err)
 		}
-		cleanupLauncher := true
 		defer func() {
-			if cleanupLauncher {
+			if !launchSuccess {
 				os.Remove(launcher)
 			}
 		}()
@@ -388,9 +384,6 @@ func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userP
 		// shell.Quote wraps the temp path in single quotes ('...').
 		// OS temp paths never contain single quotes, so this is safe.
 		claudeCmd = fmt.Sprintf("exec \"$SHELL\" -lic 'exec sh %s'", shell.Quote(launcher))
-
-		// Defer cleanup cancellation only for local path.
-		defer func() { cleanupLauncher = false }()
 	}
 
 	m.log.Info("launchWorktree", "name", name, "id", id[:8], "path", wtPath, "host", host, "role", role)
@@ -405,7 +398,11 @@ func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userP
 		}
 		startDir = abs
 	}
-	return m.launchSession(ctx, sess, claudeCmd, startDir, env)
+	result, err := m.launchSession(ctx, sess, claudeCmd, startDir, env)
+	if err == nil {
+		launchSuccess = true
+	}
+	return result, err
 }
 
 // createGitWorktree creates a git worktree at wtPath with a new branch.
@@ -452,30 +449,32 @@ func createGitWorktree(ctx context.Context, projectRoot, wtPath, branch, host st
 
 // createGitWorktreeRemote creates a git worktree on a remote host via SSH.
 func createGitWorktreeRemote(ctx context.Context, projectRoot, wtPath, branch, host string) error {
+	sq := posixQuote // alias for readability
+
 	// Verify projectRoot is a git repository on remote.
-	checkCmd := fmt.Sprintf("cd %q && git rev-parse --git-dir", projectRoot)
+	checkCmd := fmt.Sprintf("cd %s && git rev-parse --git-dir", sq(projectRoot))
 	if _, err := RunSSHCommand(ctx, host, checkCmd); err != nil {
 		return fmt.Errorf("not a git repository: %s", projectRoot)
 	}
 
 	// Check if worktree directory already exists on remote (reuse).
-	existsCmd := fmt.Sprintf("test -d %q && echo exists", wtPath)
+	existsCmd := fmt.Sprintf("test -d %s && echo exists", sq(wtPath))
 	if out, err := RunSSHCommand(ctx, host, existsCmd); err == nil && strings.TrimSpace(string(out)) == "exists" {
 		return nil
 	}
 
 	// Ensure parent directory exists on remote.
-	mkdirCmd := fmt.Sprintf("mkdir -p %q", filepath.Dir(wtPath))
+	mkdirCmd := fmt.Sprintf("mkdir -p %s", sq(filepath.Dir(wtPath)))
 	if _, err := RunSSHCommand(ctx, host, mkdirCmd); err != nil {
 		return fmt.Errorf("create parent dir on remote: %w", err)
 	}
 
 	// Try creating worktree with a new branch first.
-	addCmd := fmt.Sprintf("cd %q && git worktree add -b %q %q 2>&1", projectRoot, branch, wtPath)
+	addCmd := fmt.Sprintf("cd %s && git worktree add -b %s %s 2>&1", sq(projectRoot), sq(branch), sq(wtPath))
 	out, err := RunSSHCommand(ctx, host, addCmd)
 	if err != nil {
 		// Branch may already exist — try without -b.
-		addCmd2 := fmt.Sprintf("cd %q && git worktree add %q %q 2>&1", projectRoot, wtPath, branch)
+		addCmd2 := fmt.Sprintf("cd %s && git worktree add %s %s 2>&1", sq(projectRoot), sq(wtPath), sq(branch))
 		out2, err2 := RunSSHCommand(ctx, host, addCmd2)
 		if err2 != nil {
 			return fmt.Errorf("%s\n%s", strings.TrimSpace(string(out)), strings.TrimSpace(string(out2)))
@@ -483,6 +482,13 @@ func createGitWorktreeRemote(ctx context.Context, projectRoot, wtPath, branch, h
 		_ = out
 	}
 	return nil
+}
+
+// posixQuote wraps a string in POSIX single quotes with proper escaping.
+// Any embedded single quotes are replaced with '\'' (end single quote,
+// escaped single quote, start single quote).
+func posixQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // writeWorktreeLauncher writes a shell script that launches claude with
@@ -732,19 +738,19 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot, host string)
 	}
 
 	var claudeCmd string
+	launchSuccess := false
 	if host != "" {
 		if mcpErr != nil {
 			return nil, fmt.Errorf("read MCP server info for SSH PM session: %w", mcpErr)
 		}
-		sess.Flags = []string{
-			"--append-system-prompt", shell.Quote(systemPrompt),
+		scriptOpts := &remoteScriptOpts{
+			SystemPrompt: systemPrompt,
 		}
 		var sshErr error
-		claudeCmd, sshErr = buildSSHCommand(sess, mcpPort, mcpToken)
+		claudeCmd, sshErr = buildSSHCommand(sess, mcpPort, mcpToken, scriptOpts)
 		if sshErr != nil {
 			return nil, fmt.Errorf("build SSH command: %w", sshErr)
 		}
-		sess.Flags = nil
 
 		pendingFile := filepath.Join(m.paths.RuntimeDir, "lazyclaude-pending-window")
 		if writeErr := os.WriteFile(pendingFile, []byte(sess.WindowName()), 0o600); writeErr != nil {
@@ -755,14 +761,12 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot, host string)
 		if err != nil {
 			return nil, fmt.Errorf("write launcher: %w", err)
 		}
-		cleanupLauncher := true
 		defer func() {
-			if cleanupLauncher {
+			if !launchSuccess {
 				os.Remove(launcher)
 			}
 		}()
 		claudeCmd = fmt.Sprintf("exec \"$SHELL\" -lic 'exec sh %s'", shell.Quote(launcher))
-		defer func() { cleanupLauncher = false }()
 	}
 
 	m.log.Info("createPMSession", "id", id[:8], "path", projectRoot, "host", host)
@@ -776,7 +780,11 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot, host string)
 		}
 		startDir = abs
 	}
-	return m.launchSession(ctx, sess, claudeCmd, startDir, env)
+	result, err := m.launchSession(ctx, sess, claudeCmd, startDir, env)
+	if err == nil {
+		launchSuccess = true
+	}
+	return result, err
 }
 
 // CreateWorkerSession creates a git worktree and launches Claude Code with the

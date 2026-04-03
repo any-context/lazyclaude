@@ -66,7 +66,8 @@ func ListWorktrees(ctx context.Context, projectRoot, host string) ([]WorktreeInf
 	var err error
 
 	if host != "" {
-		remoteCmd := fmt.Sprintf("cd %q && git worktree list --porcelain", projectRoot)
+		sq := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
+		remoteCmd := fmt.Sprintf("cd %s && git worktree list --porcelain", sq(projectRoot))
 		out, err = RunSSHCommand(ctx, host, remoteCmd)
 	} else {
 		cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain")
