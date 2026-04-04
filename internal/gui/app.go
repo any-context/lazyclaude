@@ -541,6 +541,11 @@ func (a *App) setStatus(g *gocui.Gui, msg string) {
 // so it is immediately visible regardless of which panel the user is viewing.
 // The error persists until explicitly cleared by clearError (cursor move,
 // Esc, or a successful setStatus call).
+//
+// Note: setStatus clears errorMsg as a side effect, but showError immediately
+// re-sets it on the next line. This is intentional — setStatus handles the
+// logs panel rendering and cache invalidation, while errorMsg controls the
+// main panel guard in isErrorActive.
 func (a *App) showError(g *gocui.Gui, msg string) {
 	a.setStatus(g, msg)
 	a.errorMsg = msg

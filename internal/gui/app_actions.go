@@ -386,6 +386,9 @@ func (a *App) EnterFullScreen() {
 	// error in the main panel instead of entering fullscreen (there is
 	// nothing to attach to).
 	if sess.TmuxWindow == "" && (sess.Activity == model.ActivityError || sess.Status == "Dead") {
+		// gui.Update is needed because showError calls g.View to write the
+		// main panel. The outer EnterFullScreen runs on the gocui event loop
+		// already, but showError requires a *gocui.Gui parameter.
 		a.gui.Update(func(g *gocui.Gui) error {
 			msg := "Session error (no tmux window)"
 			if a.errorMsg != "" {
