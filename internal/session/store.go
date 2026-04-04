@@ -544,6 +544,7 @@ func (s *Store) SyncWithTmux(windows []tmux.WindowInfo, panes []tmux.PaneInfo) {
 			if existing.Dead && !p.Dead {
 				paneByWindow[p.Window] = p
 			}
+			// If both are alive (or both are dead), keep the first-seen pane.
 			continue
 		}
 		paneByWindow[p.Window] = p
