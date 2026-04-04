@@ -41,7 +41,7 @@ func (r *MessageRouter) Register(p Provider) {
 func (r *MessageRouter) Unregister(providerID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	filtered := r.providers[:0]
+	filtered := make([]Provider, 0, len(r.providers))
 	for _, p := range r.providers {
 		if p.ID() != providerID {
 			filtered = append(filtered, p)

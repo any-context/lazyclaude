@@ -2,10 +2,8 @@ package daemon
 
 import "context"
 
-// Client defines the interface for communicating with a lazyclaude daemon.
-// Each method maps 1:1 to a daemon REST API endpoint.
-// Implementation is provided in Phase 1.
-type Client struct{}
+// clientAPI compile-time check is deferred to Phase 1 where the concrete
+// implementation is defined.
 
 // ClientAPI defines all operations available on a daemon.
 // Implementations wrap HTTP calls to the daemon REST API.

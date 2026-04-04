@@ -5,65 +5,91 @@ import (
 	"sync"
 )
 
-// SessionProvider abstracts a session backend for the CompositeProvider.
-// Both the local adapter and remote daemon clients implement this interface.
-// This mirrors gui.SessionProvider but lives in daemon to avoid import cycles.
-type SessionProvider interface {
-	// HasSession returns true if this provider manages the given session ID.
+// --- Small interfaces composing SessionProvider ---
+
+// SessionLister provides read-only access to sessions.
+type SessionLister interface {
 	HasSession(sessionID string) bool
-	// Host returns the hostname for this provider ("" for local).
 	Host() string
-	// Sessions returns all sessions from this provider.
 	Sessions() ([]SessionInfo, error)
-	// Create creates a session.
+}
+
+// SessionMutator provides session create/delete/rename operations.
+type SessionMutator interface {
 	Create(path string) error
-	// Delete deletes a session by ID.
 	Delete(id string) error
-	// Rename renames a session.
 	Rename(id, newName string) error
-	// PurgeOrphans removes orphaned sessions.
 	PurgeOrphans() (int, error)
-	// CapturePreview captures pane content.
+}
+
+// PreviewProvider captures pane content and scrollback.
+type PreviewProvider interface {
 	CapturePreview(id string, width, height int) (*PreviewResponse, error)
-	// CaptureScrollback captures scrollback lines.
 	CaptureScrollback(id string, width, startLine, endLine int) (*ScrollbackResponse, error)
-	// HistorySize returns scrollback line count.
 	HistorySize(id string) (int, error)
-	// SendChoice sends a permission choice.
+}
+
+// SessionActioner handles interactive session operations.
+type SessionActioner interface {
 	SendChoice(window string, choice int) error
-	// AttachSession attaches to a session interactively.
 	AttachSession(id string) error
-	// LaunchLazygit launches lazygit for a path.
 	LaunchLazygit(path string) error
-	// CreateWorktree creates a git worktree and session.
+}
+
+// WorktreeProvider manages git worktrees.
+type WorktreeProvider interface {
 	CreateWorktree(name, prompt, projectRoot string) error
-	// ResumeWorktree resumes a worktree session.
 	ResumeWorktree(worktreePath, prompt, projectRoot string) error
-	// ListWorktrees lists worktrees for a project root.
 	ListWorktrees(projectRoot string) ([]WorktreeInfo, error)
-	// CreatePMSession creates a PM session.
+}
+
+// RoleSessionProvider creates PM and worker sessions.
+type RoleSessionProvider interface {
 	CreatePMSession(projectRoot string) error
-	// CreateWorkerSession creates a worker session.
 	CreateWorkerSession(name, prompt, projectRoot string) error
-	// ConnectionState returns the connection state. Local always returns Connected.
+}
+
+// ConnectionAware exposes the daemon connection state.
+type ConnectionAware interface {
 	ConnectionState() ConnectionState
+}
+
+// SessionProvider is the full interface for a session backend.
+// Composed of smaller interfaces for testability.
+type SessionProvider interface {
+	SessionLister
+	SessionMutator
+	PreviewProvider
+	SessionActioner
+	WorktreeProvider
+	RoleSessionProvider
+	ConnectionAware
+}
+
+// MessageSender routes messages across providers.
+type MessageSender interface {
+	Send(from, to, msgType, body string) error
 }
 
 // CompositeProvider merges local and remote session providers.
 // The TUI interacts with this provider transparently; routing to the correct
 // backend is handled internally based on host or session ID.
+//
+// Concurrency model:
+// - c.local is set at construction and never replaced; safe to read without mutex.
+// - c.remotes and c.staleCache are protected by c.mu.
 type CompositeProvider struct {
 	mu      sync.RWMutex
 	local   SessionProvider
 	remotes map[string]SessionProvider // host -> provider
-	router  *MessageRouter
+	router  MessageSender
 
 	// staleCache holds the last known sessions from disconnected remotes.
 	staleCache map[string][]SessionInfo
 }
 
 // NewCompositeProvider creates a CompositeProvider with the given local backend.
-func NewCompositeProvider(local SessionProvider, router *MessageRouter) *CompositeProvider {
+func NewCompositeProvider(local SessionProvider, router MessageSender) *CompositeProvider {
 	return &CompositeProvider{
 		local:      local,
 		remotes:    make(map[string]SessionProvider),
@@ -90,9 +116,6 @@ func (c *CompositeProvider) RemoveRemote(host string) {
 // Sessions returns all sessions from local and remote providers merged.
 // Disconnected remotes return stale cached data.
 func (c *CompositeProvider) Sessions() ([]SessionInfo, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	local, err := c.local.Sessions()
 	if err != nil {
 		return nil, fmt.Errorf("local sessions: %w", err)
@@ -100,12 +123,19 @@ func (c *CompositeProvider) Sessions() ([]SessionInfo, error) {
 	items := make([]SessionInfo, len(local))
 	copy(items, local)
 
+	// Collect remote sessions under read lock.
+	c.mu.RLock()
+	type cacheUpdate struct {
+		host     string
+		sessions []SessionInfo
+	}
+	var updates []cacheUpdate
 	for host, rp := range c.remotes {
 		if rp.ConnectionState() == Connected {
 			remote, rerr := rp.Sessions()
 			if rerr == nil {
 				items = append(items, remote...)
-				c.updateStaleCacheLocked(host, remote)
+				updates = append(updates, cacheUpdate{host: host, sessions: remote})
 			} else {
 				items = append(items, c.staleCache[host]...)
 			}
@@ -113,6 +143,19 @@ func (c *CompositeProvider) Sessions() ([]SessionInfo, error) {
 			items = append(items, c.staleCache[host]...)
 		}
 	}
+	c.mu.RUnlock()
+
+	// Apply cache updates under write lock.
+	if len(updates) > 0 {
+		c.mu.Lock()
+		for _, u := range updates {
+			cached := make([]SessionInfo, len(u.sessions))
+			copy(cached, u.sessions)
+			c.staleCache[u.host] = cached
+		}
+		c.mu.Unlock()
+	}
+
 	return items, nil
 }
 
@@ -177,6 +220,7 @@ func (c *CompositeProvider) HistorySize(id string) (int, error) {
 
 // SendChoice sends a permission choice. Tries local first, then remotes.
 func (c *CompositeProvider) SendChoice(window string, choice int) error {
+	// c.local is immutable after construction; safe without mutex.
 	err := c.local.SendChoice(window, choice)
 	if err == nil {
 		return nil
@@ -257,6 +301,7 @@ func (c *CompositeProvider) CreateWorkerSession(name, prompt, projectRoot, host 
 }
 
 // providerForHost returns the provider for the given host.
+// c.local is immutable after construction; safe without mutex for host=="".
 func (c *CompositeProvider) providerForHost(host string) (SessionProvider, error) {
 	if host == "" {
 		return c.local, nil
@@ -271,6 +316,7 @@ func (c *CompositeProvider) providerForHost(host string) (SessionProvider, error
 }
 
 // providerForSession returns the provider that manages the given session.
+// c.local is immutable after construction; safe to call HasSession without mutex.
 func (c *CompositeProvider) providerForSession(sessionID string) SessionProvider {
 	if c.local.HasSession(sessionID) {
 		return c.local
@@ -283,12 +329,4 @@ func (c *CompositeProvider) providerForSession(sessionID string) SessionProvider
 		}
 	}
 	return nil
-}
-
-// updateStaleCacheLocked stores the latest session snapshot for a host.
-// Must be called with at least a read lock held on c.mu.
-func (c *CompositeProvider) updateStaleCacheLocked(host string, sessions []SessionInfo) {
-	cached := make([]SessionInfo, len(sessions))
-	copy(cached, sessions)
-	c.staleCache[host] = cached
 }

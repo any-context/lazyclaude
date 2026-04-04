@@ -52,7 +52,7 @@ type ConnectionManager interface {
 
 	// Client returns the daemon client for API calls.
 	// Returns an error if the connection is not in the Connected state.
-	Client() (*Client, error)
+	Client() (ClientAPI, error)
 
 	// OnStateChange registers a callback invoked when the connection state
 	// transitions. The callback receives the new state. Multiple callbacks

@@ -215,7 +215,7 @@ type MsgSessionInfo struct {
 type HealthResponse struct {
 	APIVersion    int    `json:"api_version"`
 	BinaryVersion string `json:"binary_version"`
-	UptimeSeconds int    `json:"uptime_s"`
+	UptimeSeconds int64  `json:"uptime_s"`
 	SessionCount  int    `json:"sessions"`
 }
 
