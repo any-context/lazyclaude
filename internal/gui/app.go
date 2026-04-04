@@ -563,7 +563,7 @@ func (a *App) clearError() {
 }
 
 // isErrorActive reports whether an error message is currently displayed.
-// Called once per layout cycle to guard preview rendering.
+// Used by the split-panel layout to guard preview rendering.
 func (a *App) isErrorActive() bool {
 	return a.errorMsg != ""
 }
