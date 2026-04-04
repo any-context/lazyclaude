@@ -21,6 +21,7 @@ import (
 	"github.com/any-context/lazyclaude/internal/core/tmux"
 	"github.com/any-context/lazyclaude/internal/daemon"
 	"github.com/any-context/lazyclaude/internal/gui"
+	"github.com/jesseduffield/gocui"
 	"github.com/any-context/lazyclaude/internal/mcp"
 	"github.com/any-context/lazyclaude/internal/notify"
 	"github.com/any-context/lazyclaude/internal/plugin"
@@ -115,56 +116,109 @@ func newRootCmd() *cobra.Command {
 			gc.Start()
 			lc.Register("gc", gc.Stop)
 
-			adapter := &sessionAdapter{mgr: mgr, tmux: tmuxClient, paths: paths}
-
 			app, err := gui.NewApp(gui.ModeMain)
 			if err != nil {
 				return fmt.Errorf("init TUI: %w", err)
 			}
-			adapter.windowActivityFn = app.WindowActivityMap
 
-			// Check if we're inside an SSH pane and wire CompositeProvider if so.
-			if sshHost := gui.DetectSSHHost(); sshHost != "" {
-				localProvider := &localDaemonProvider{mgr: mgr, tmux: tmuxClient, paths: paths}
-				composite := daemon.NewCompositeProvider(localProvider, nil)
+			// Always use CompositeProvider so manual 'c' connect can add remotes.
+			localProvider := &localDaemonProvider{mgr: mgr, tmux: tmuxClient, paths: paths}
+			composite := daemon.NewCompositeProvider(localProvider, nil)
 
-				// Connect to the remote daemon.
-				ssh := &daemon.ExecSSHExecutor{}
-				lifecycleMgr := daemon.NewLifecycleManager(ssh)
-				clientFactory := func(addr, token string) daemon.ClientAPI {
-					return daemon.NewHTTPClient(addr, token)
-				}
-				remoteConn := daemon.NewRemoteConnection(sshHost, lifecycleMgr, clientFactory)
-
-				if connErr := remoteConn.Connect(context.Background()); connErr != nil {
-					fmt.Fprintf(os.Stderr, "warning: remote connection to %s: %v\n", sshHost, connErr)
-				} else {
-					remoteProvider := daemon.NewRemoteProvider(sshHost, remoteConn)
-					lc.Register("remote-conn-"+sshHost, func() { remoteConn.Disconnect() })
-
-					// Start tmux socket forwarding for direct pane operations.
-					sockPath := daemon.SocketTunnelLocalPath(sshHost)
-					sockTunnel := daemon.NewSocketTunnel(sshHost, sockPath, "")
-					if sockErr := sockTunnel.Start(context.Background()); sockErr != nil {
-						fmt.Fprintf(os.Stderr, "warning: tmux socket tunnel to %s: %v\n", sshHost, sockErr)
-					} else {
-						remoteProvider.SetTmuxClient(sockTunnel.TmuxClient())
-						lc.Register("sock-tunnel-"+sshHost, func() { sockTunnel.Stop() })
-					}
-
-					composite.AddRemote(sshHost, remoteProvider)
-				}
-
-				compositeAdapter := &guiCompositeAdapter{
-					cp:       composite,
-					localMgr: mgr,
-					paths:    paths,
-				}
-				compositeAdapter.windowActivityFn = app.WindowActivityMap
-				app.SetSessions(compositeAdapter)
-			} else {
-				app.SetSessions(adapter)
+			ssh := &daemon.ExecSSHExecutor{}
+			lifecycleMgr := daemon.NewLifecycleManager(ssh)
+			clientFactory := func(addr, token string) daemon.ClientAPI {
+				return daemon.NewHTTPClient(addr, token)
 			}
+
+			// remoteConns tracks active RemoteConnections for status display.
+			var remoteConnsMu sync.Mutex
+			remoteConns := make(map[string]*daemon.RemoteConnection)
+			sockChecker := &socketHealthChecker{}
+
+			// connectRemoteHost establishes a full remote connection pipeline:
+			// daemon connection + socket tunnel + provider registration.
+			connectRemoteHost := func(host string) error {
+				remoteConn := daemon.NewRemoteConnection(host, lifecycleMgr, clientFactory)
+				if connErr := remoteConn.Connect(context.Background()); connErr != nil {
+					return fmt.Errorf("lazyclaude not found on %s. Run: lazyclaude deploy %s", host, host)
+				}
+
+				remoteProvider := daemon.NewRemoteProvider(host, remoteConn)
+				lc.Register("remote-conn-"+host, func() { remoteConn.Disconnect() })
+
+				// Socket forwarding for direct tmux pane operations.
+				sockPath := daemon.SocketTunnelLocalPath(host)
+				sockTunnel := daemon.NewSocketTunnel(host, sockPath, "")
+				if sockErr := sockTunnel.Start(context.Background()); sockErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: tmux socket tunnel to %s: %v\n", host, sockErr)
+				} else {
+					remoteProvider.SetTmuxClient(sockTunnel.TmuxClient())
+					lc.Register("sock-tunnel-"+host, func() { sockTunnel.Stop() })
+					sockChecker.add(host, sockTunnel, remoteProvider)
+
+					// Re-establish socket tunnel on reconnection.
+					remoteConn.OnReconnect(func() {
+						newSock := daemon.NewSocketTunnel(host, sockPath, "")
+						if err := newSock.Start(context.Background()); err == nil {
+							remoteProvider.SetTmuxClient(newSock.TmuxClient())
+							sockChecker.add(host, newSock, remoteProvider)
+						}
+					})
+				}
+
+				composite.AddRemote(host, remoteProvider)
+
+				remoteConnsMu.Lock()
+				remoteConns[host] = remoteConn
+				remoteConnsMu.Unlock()
+
+				return nil
+			}
+
+			// Auto-detect SSH host from the originating pane.
+			if sshHost := gui.DetectSSHHost(); sshHost != "" {
+				if connErr := connectRemoteHost(sshHost); connErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: %v\n", connErr)
+					go func() {
+						time.Sleep(200 * time.Millisecond)
+						app.Gui().Update(func(g *gocui.Gui) error {
+							app.ShowError(g, connErr.Error())
+							return nil
+						})
+					}()
+				}
+			}
+
+			compositeAdapter := &guiCompositeAdapter{
+				cp:       composite,
+				localMgr: mgr,
+				paths:    paths,
+			}
+			compositeAdapter.windowActivityFn = app.WindowActivityMap
+			app.SetSessions(compositeAdapter)
+
+			// Wire connection status for the options bar.
+			app.SetConnectionStatus(func() []gui.ConnectionStatus {
+				remoteConnsMu.Lock()
+				defer remoteConnsMu.Unlock()
+				var statuses []gui.ConnectionStatus
+				for host, conn := range remoteConns {
+					mismatch := false
+					if rv := conn.RemoteVersion(); rv != "" && rv != version {
+						mismatch = true
+					}
+					statuses = append(statuses, gui.ConnectionStatus{
+						Host:            host,
+						State:           conn.State().String(),
+						VersionMismatch: mismatch,
+					})
+				}
+				return statuses
+			})
+
+			// Wire connect dialog handler.
+			app.SetConnectFn(connectRemoteHost)
 
 			// Plugin manager: wraps `claude plugins` CLI (project scope only)
 			var pluginOpts []plugin.Option
@@ -196,7 +250,10 @@ func newRootCmd() *cobra.Command {
 				logger:   logger,
 			}
 			ctrlMgr.tryConnect()
-			app.SetOnTick(ctrlMgr.ensureConnected)
+			app.SetOnTick(func() {
+				ctrlMgr.ensureConnected()
+				sockChecker.check()
+			})
 			lc.Register("control-client", ctrlMgr.close)
 
 			return app.Run()
@@ -686,6 +743,59 @@ func (a *sessionAdapter) AttachSession(id string) error {
 }
 
 // controlManager handles control mode connection lifecycle.
+// socketHealthEntry tracks a socket tunnel and its associated remote provider
+// for periodic health checking and reconnection.
+type socketHealthEntry struct {
+	host     string
+	tunnel   *daemon.SocketTunnel
+	provider *daemon.RemoteProvider
+}
+
+// socketHealthChecker periodically checks socket tunnel health and reconnects.
+// Designed to be called from the GUI ticker (every 100ms); internally throttles
+// to ~5s intervals using a counter.
+type socketHealthChecker struct {
+	mu      sync.Mutex
+	entries []socketHealthEntry
+	counter int // ticker call counter for throttling
+}
+
+func (s *socketHealthChecker) add(host string, tunnel *daemon.SocketTunnel, provider *daemon.RemoteProvider) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entries = append(s.entries, socketHealthEntry{host: host, tunnel: tunnel, provider: provider})
+}
+
+// check is called from the ticker. Throttles to roughly every 5 seconds
+// (50 ticks at 100ms interval).
+func (s *socketHealthChecker) check() {
+	s.mu.Lock()
+	s.counter++
+	if s.counter < 50 {
+		s.mu.Unlock()
+		return
+	}
+	s.counter = 0
+	entries := make([]socketHealthEntry, len(s.entries))
+	copy(entries, s.entries)
+	s.mu.Unlock()
+
+	for i, e := range entries {
+		if e.tunnel != nil && !e.tunnel.IsAlive() {
+			sockPath := daemon.SocketTunnelLocalPath(e.host)
+			newTunnel := daemon.NewSocketTunnel(e.host, sockPath, "")
+			if err := newTunnel.Start(context.Background()); err == nil {
+				e.provider.SetTmuxClient(newTunnel.TmuxClient())
+				s.mu.Lock()
+				if i < len(s.entries) {
+					s.entries[i].tunnel = newTunnel
+				}
+				s.mu.Unlock()
+			}
+		}
+	}
+}
+
 type controlManager struct {
 	client   *tmux.ControlClient
 	onOutput func(string)

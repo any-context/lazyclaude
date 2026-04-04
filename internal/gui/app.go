@@ -26,6 +26,17 @@ const (
 	ModeMain AppMode = iota // lazyclaude -> session list + preview
 )
 
+// ConnectionStatus represents the remote connection state for TUI display.
+type ConnectionStatus struct {
+	Host            string // remote hostname (e.g. "AERO")
+	State           string // "connected", "reconnecting", "error", "disconnected"
+	VersionMismatch bool   // true if remote binary version differs from local
+}
+
+// ConnectionStatusProvider returns the current remote connection status.
+// Returns nil if no remote connection is configured.
+type ConnectionStatusProvider func() []ConnectionStatus
+
 // SessionProvider abstracts session operations for the GUI layer.
 // NotificationCacher caches pending notifications for badge rendering.
 // Implemented by sessionAdapter to avoid redundant (and destructive)
@@ -117,7 +128,9 @@ type App struct {
 	// windowActivity tracks the 5-stage activity state per tmux window.
 	// All reads/writes happen on the gocui event loop goroutine (gui.Update callbacks
 	// and layout), so no mutex is needed.
-	windowActivity map[string]WindowActivityEntry
+	windowActivity   map[string]WindowActivityEntry
+	connectionStatus ConnectionStatusProvider // remote connection status for options bar
+	connectFn        func(host string) error  // connects to a remote host (injected from root.go)
 }
 
 
@@ -379,6 +392,19 @@ func (a *App) SetNotifyBroker(broker *event.Broker[model.Event]) {
 	a.notify.SetBroker(broker)
 }
 
+// SetConnectionStatus sets the provider for remote connection status display.
+// Must be called before Run().
+func (a *App) SetConnectionStatus(fn ConnectionStatusProvider) {
+	a.connectionStatus = fn
+}
+
+// SetConnectFn sets the handler called when the user requests a remote
+// connection via the connect dialog. The function should establish the
+// connection and return an error if it fails. Must be called before Run().
+func (a *App) SetConnectFn(fn func(host string) error) {
+	a.connectFn = fn
+}
+
 // WindowActivityEntry stores activity state and context for a tmux window.
 type WindowActivityEntry struct {
 	State    model.ActivityState
@@ -451,6 +477,12 @@ func stopReasonToActivity(reason string) model.ActivityState {
 // Gui returns the underlying gocui.Gui (for testing).
 func (a *App) Gui() *gocui.Gui {
 	return a.gui
+}
+
+// ShowError displays an error in the logs and main panels.
+// Public wrapper for callers outside the gui package (e.g. root.go via gui.Update).
+func (a *App) ShowError(g *gocui.Gui, msg string) {
+	a.showError(g, msg)
 }
 
 func (a *App) setStatus(g *gocui.Gui, msg string) {

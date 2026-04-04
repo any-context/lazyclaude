@@ -28,6 +28,7 @@ type SessionActions interface {
 	ExpandProject()
 	CursorIsProject() bool
 	StartSearch()
+	ConnectRemote()
 }
 
 // PopupActions provides popup management.

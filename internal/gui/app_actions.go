@@ -440,6 +440,18 @@ func (a *App) SelectWorktree() {
 	}()
 }
 
+func (a *App) ConnectRemote() {
+	if a.HasActiveDialog() {
+		return
+	}
+	a.gui.Update(func(g *gocui.Gui) error {
+		if !a.showConnectDialog(g) {
+			a.setStatus(g, "Error: could not open connect dialog")
+		}
+		return nil
+	})
+}
+
 func (a *App) PurgeOrphans() {
 	if a.sessions == nil {
 		return

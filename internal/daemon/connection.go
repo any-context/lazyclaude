@@ -50,6 +50,9 @@ type ConnectionManager interface {
 	// State returns the current connection state.
 	State() ConnectionState
 
+	// Host returns the remote hostname.
+	Host() string
+
 	// Client returns the daemon client for API calls.
 	// Returns an error if the connection is not in the Connected state.
 	Client() (ClientAPI, error)

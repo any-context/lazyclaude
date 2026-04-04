@@ -25,6 +25,7 @@ type mockConnManager struct {
 
 func (m *mockConnManager) Connect(_ context.Context) error { return nil }
 func (m *mockConnManager) Disconnect() error               { return nil }
+func (m *mockConnManager) Host() string                    { return "mock-host" }
 
 func (m *mockConnManager) State() ConnectionState {
 	m.mu.Lock()

@@ -227,8 +227,11 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 	}
 	v4.Frame = false
 	v4.Clear()
-	if optionsText := a.dispatcher.ActiveOptionsBar(a); optionsText != "" {
-		fmt.Fprint(v4, optionsText)
+	optionsText := a.dispatcher.ActiveOptionsBar(a)
+	connText := a.formatConnectionStatus()
+	if optionsText != "" || connText != "" {
+		barWidth := l.Options.Width() - 1 // inner width
+		a.renderOptionsBarWithStatus(v4, optionsText, connText, barWidth)
 	}
 
 	// Keybind help overlay (rendered before focus logic so views exist).
@@ -486,6 +489,131 @@ func (a *App) renderPreview(v *gocui.View, items []SessionItem, previewW, previe
 	fmt.Fprintf(v, "  %s\n", item.Path)
 }
 
+
+// formatConnectionStatus returns a styled string showing remote connection state.
+// Returns "" if no remote connections are configured.
+func (a *App) formatConnectionStatus() string {
+	if a.connectionStatus == nil {
+		return ""
+	}
+	statuses := a.connectionStatus()
+	if len(statuses) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, s := range statuses {
+		switch s.State {
+		case "connected":
+			if s.VersionMismatch {
+				parts = append(parts, presentation.FgYellow+s.Host+" (version mismatch)"+presentation.Reset)
+			} else {
+				parts = append(parts, presentation.FgGreen+s.Host+presentation.Reset)
+			}
+		case "reconnecting":
+			parts = append(parts, presentation.FgYellow+s.Host+" (reconnecting...)"+presentation.Reset)
+		case "error":
+			parts = append(parts, presentation.FgRed+s.Host+" (offline)"+presentation.Reset)
+		case "connecting":
+			parts = append(parts, presentation.FgYellow+s.Host+" (connecting...)"+presentation.Reset)
+		default:
+			// disconnected or unknown — don't display
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " ")
+}
+
+// renderOptionsBarWithStatus writes the options bar with connection status
+// right-aligned. The status is separated from hints by padding.
+func (a *App) renderOptionsBarWithStatus(v *gocui.View, options, status string, barWidth int) {
+	if status == "" {
+		fmt.Fprint(v, options)
+		return
+	}
+	if options == "" {
+		// Right-align the status text.
+		pad := barWidth - printableLen(status) - 1
+		if pad < 0 {
+			pad = 0
+		}
+		fmt.Fprintf(v, "%*s%s", pad, "", status)
+		return
+	}
+	// Both present: left-align options, right-align status.
+	optLen := printableLen(options)
+	statusLen := printableLen(status)
+	gap := barWidth - optLen - statusLen
+	if gap < 2 {
+		// Not enough space — just show options.
+		fmt.Fprint(v, options)
+		return
+	}
+	fmt.Fprintf(v, "%s%*s%s", options, gap, "", status)
+}
+
+// printableLen returns the number of printable characters in a string,
+// stripping ANSI escape sequences.
+func printableLen(s string) int {
+	n := 0
+	inEsc := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEsc = true
+			continue
+		}
+		if inEsc {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEsc = false
+			}
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+// showConnectDialog creates a small input view for entering a remote hostname.
+// Returns false if the view could not be created.
+func (a *App) showConnectDialog(g *gocui.Gui) bool {
+	maxX, maxY := g.Size()
+	w := 40
+	if w > maxX-4 {
+		w = maxX - 4
+	}
+	x0 := (maxX - w) / 2
+	y0 := maxY/2 - 1
+	x1 := x0 + w
+	y1 := y0 + 2
+
+	v, err := g.SetView("connect-input", x0, y0, x1, y1, 0)
+	if err != nil && !isUnknownView(err) {
+		return false
+	}
+	setRoundedFrame(v)
+	v.Title = " Host "
+	v.Editable = true
+	v.Editor = gocui.DefaultEditor
+	v.TextArea.Clear()
+	v.RenderTextArea()
+	if _, err := g.SetCurrentView("connect-input"); err != nil && !isUnknownView(err) {
+		return false
+	}
+	g.Cursor = true
+	a.dialog.Kind = DialogConnect
+	return true
+}
+
+// closeConnectDialog removes the connect input view and restores focus.
+func (a *App) closeConnectDialog(g *gocui.Gui) {
+	a.dialog.Kind = DialogNone
+	g.DeleteView("connect-input")
+	g.Cursor = false
+	if _, err := g.SetCurrentView("sessions"); err != nil && !isUnknownView(err) {
+		_ = err
+	}
+}
 
 // copyToClipboard copies text to the system clipboard using pbcopy (macOS).
 func copyToClipboard(text string) {

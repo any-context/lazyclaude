@@ -416,6 +416,14 @@ func Default() *Registry {
 		Description: "Purge orphaned sessions",
 		DocSection:  "purge_orphans",
 	})
+	r.Register(ActionDef{
+		Action:      ActionConnectRemote,
+		Bindings:    []KeyBinding{{Rune: 'c'}},
+		Scope:       ScopeSession,
+		HintLabel:   "connect",
+		Description: "Connect to remote host",
+		DocSection:  "connect_remote",
+	})
 
 	// --- Plugins panel ---
 	// MCP tab: cursor, toggle denied, refresh

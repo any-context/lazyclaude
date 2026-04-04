@@ -11,10 +11,11 @@ import (
 // ExponentialBackoff calculates wait durations with exponential growth.
 // Not safe for concurrent use; callers must synchronise access.
 type ExponentialBackoff struct {
-	initial  time.Duration
-	max      time.Duration
-	factor   float64
-	attempts int
+	initial    time.Duration
+	max        time.Duration
+	factor     float64
+	maxRetries int // 0 = unlimited
+	attempts   int
 }
 
 // NewExponentialBackoff creates a backoff starting at initial, growing by factor
@@ -25,6 +26,13 @@ func NewExponentialBackoff(initial, max time.Duration, factor float64) *Exponent
 		max:     max,
 		factor:  factor,
 	}
+}
+
+// WithMaxRetries sets the maximum number of retry attempts.
+// Zero means unlimited (the default).
+func (b *ExponentialBackoff) WithMaxRetries(n int) *ExponentialBackoff {
+	b.maxRetries = n
+	return b
 }
 
 // Next returns the next backoff duration and increments the attempt counter.
@@ -47,8 +55,17 @@ func (b *ExponentialBackoff) Attempts() int {
 	return b.attempts
 }
 
+// Exhausted returns true if maxRetries is set and attempts have reached it.
+func (b *ExponentialBackoff) Exhausted() bool {
+	return b.maxRetries > 0 && b.attempts >= b.maxRetries
+}
+
 // ClientFactory creates a ClientAPI connected to the given address and token.
 type ClientFactory func(addr string, token string) ClientAPI
+
+// DefaultMaxRetries is the default number of reconnection attempts before
+// transitioning to ConnectionError.
+const DefaultMaxRetries = 5
 
 // RemoteConnection implements ConnectionManager for a remote daemon.
 type RemoteConnection struct {
@@ -60,12 +77,14 @@ type RemoteConnection struct {
 	connMu sync.Mutex
 
 	// mu protects mutable state read by State/Client/OnStateChange.
-	mu        sync.RWMutex
-	tunnel    *Tunnel
-	client    ClientAPI
-	state     ConnectionState
-	callbacks []func(ConnectionState)
-	backoff   *ExponentialBackoff
+	mu              sync.RWMutex
+	tunnel          *Tunnel
+	client          ClientAPI
+	state           ConnectionState
+	remoteVersion   string // binary version reported by the remote daemon
+	callbacks       []func(ConnectionState)
+	reconnectHooks  []func() // called after successful reconnection
+	backoff         *ExponentialBackoff
 
 	cancel context.CancelFunc // cancels the monitor/reconnect goroutine
 }
@@ -77,8 +96,22 @@ func NewRemoteConnection(host string, lifecycle *LifecycleManager, factory Clien
 		lifecycle:     lifecycle,
 		clientFactory: factory,
 		state:         Disconnected,
-		backoff:       NewExponentialBackoff(1*time.Second, 30*time.Second, 2),
+		backoff:       NewExponentialBackoff(1*time.Second, 30*time.Second, 2).WithMaxRetries(DefaultMaxRetries),
 	}
+}
+
+// Host returns the remote hostname.
+func (rc *RemoteConnection) Host() string {
+	return rc.host
+}
+
+// OnReconnect registers a callback invoked after a successful reconnection
+// (not after the initial Connect). Used to re-subscribe SSE, re-establish
+// socket tunnels, etc.
+func (rc *RemoteConnection) OnReconnect(fn func()) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.reconnectHooks = append(rc.reconnectHooks, fn)
 }
 
 // Connect establishes a connection: discovers or starts the remote daemon,
@@ -143,6 +176,7 @@ func (rc *RemoteConnection) connectLocked(ctx context.Context) error {
 	rc.mu.Lock()
 	rc.tunnel = tunnel
 	rc.client = client
+	rc.remoteVersion = health.BinaryVersion
 	rc.backoff.Reset()
 	rc.cancel = cancel
 	rc.mu.Unlock()
@@ -185,6 +219,14 @@ func (rc *RemoteConnection) State() ConnectionState {
 	rc.mu.RLock()
 	defer rc.mu.RUnlock()
 	return rc.state
+}
+
+// RemoteVersion returns the binary version reported by the remote daemon.
+// Returns "" if not connected or version was not reported.
+func (rc *RemoteConnection) RemoteVersion() string {
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+	return rc.remoteVersion
 }
 
 // Client returns the daemon client. Returns an error if not connected.
@@ -246,10 +288,20 @@ func (rc *RemoteConnection) monitorTunnel(ctx context.Context) {
 
 // reconnect attempts to re-establish the connection with exponential backoff.
 // It acquires connMu for each attempt to avoid racing with external Connect/Disconnect.
+// When max retries are exhausted, it transitions to ConnectionError.
 func (rc *RemoteConnection) reconnect(ctx context.Context) {
 	rc.setState(Reconnecting)
 
 	for {
+		rc.mu.Lock()
+		exhausted := rc.backoff.Exhausted()
+		rc.mu.Unlock()
+
+		if exhausted {
+			rc.setState(ConnectionError)
+			return
+		}
+
 		rc.mu.Lock()
 		delay := rc.backoff.Next()
 		rc.mu.Unlock()
@@ -264,6 +316,7 @@ func (rc *RemoteConnection) reconnect(ctx context.Context) {
 		err := rc.connectLocked(ctx)
 		rc.connMu.Unlock()
 		if err == nil {
+			rc.invokeReconnectHooks()
 			return
 		}
 
@@ -273,6 +326,18 @@ func (rc *RemoteConnection) reconnect(ctx context.Context) {
 		if state != Reconnecting && state != Connecting {
 			return
 		}
+	}
+}
+
+// invokeReconnectHooks calls all registered reconnect hooks.
+func (rc *RemoteConnection) invokeReconnectHooks() {
+	rc.mu.RLock()
+	hooks := make([]func(), len(rc.reconnectHooks))
+	copy(hooks, rc.reconnectHooks)
+	rc.mu.RUnlock()
+
+	for _, fn := range hooks {
+		fn()
 	}
 }
 

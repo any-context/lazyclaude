@@ -46,6 +46,7 @@ func (m *mockSessionActions) CollapseProject()         { m.record("CollapseProje
 func (m *mockSessionActions) ExpandProject()           { m.record("ExpandProject") }
 func (m *mockSessionActions) CursorIsProject() bool    { return m.cursorIsProject }
 func (m *mockSessionActions) StartSearch()             { m.record("StartSearch") }
+func (m *mockSessionActions) ConnectRemote()           { m.record("ConnectRemote") }
 
 // --- PopupActions mock ---
 

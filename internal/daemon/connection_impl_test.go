@@ -315,3 +315,87 @@ func TestExponentialBackoff_MaxCap(t *testing.T) {
 		}
 	}
 }
+
+func TestExponentialBackoff_Exhausted(t *testing.T) {
+	b := NewExponentialBackoff(10*time.Millisecond, 100*time.Millisecond, 2).WithMaxRetries(3)
+
+	if b.Exhausted() {
+		t.Error("Exhausted() should be false at start")
+	}
+
+	b.Next() // attempt 1
+	b.Next() // attempt 2
+	b.Next() // attempt 3
+
+	if !b.Exhausted() {
+		t.Error("Exhausted() should be true after 3 attempts with maxRetries=3")
+	}
+
+	b.Reset()
+	if b.Exhausted() {
+		t.Error("Exhausted() should be false after Reset()")
+	}
+}
+
+func TestExponentialBackoff_UnlimitedRetries(t *testing.T) {
+	b := NewExponentialBackoff(10*time.Millisecond, 100*time.Millisecond, 2)
+	// maxRetries=0 means unlimited
+	for i := 0; i < 100; i++ {
+		b.Next()
+	}
+	if b.Exhausted() {
+		t.Error("Exhausted() should always be false with maxRetries=0")
+	}
+}
+
+func TestRemoteConnection_Host(t *testing.T) {
+	ssh := newMockSSH()
+	lm := NewLifecycleManager(ssh)
+	rc := NewRemoteConnection("user@example.com", lm, nil)
+
+	if got := rc.Host(); got != "user@example.com" {
+		t.Errorf("Host() = %q, want %q", got, "user@example.com")
+	}
+}
+
+func TestRemoteConnection_RemoteVersion_Disconnected(t *testing.T) {
+	ssh := newMockSSH()
+	lm := NewLifecycleManager(ssh)
+	rc := NewRemoteConnection("user@host", lm, nil)
+
+	if got := rc.RemoteVersion(); got != "" {
+		t.Errorf("RemoteVersion() = %q, want empty", got)
+	}
+}
+
+func TestRemoteConnection_DefaultMaxRetries(t *testing.T) {
+	ssh := newMockSSH()
+	lm := NewLifecycleManager(ssh)
+	rc := NewRemoteConnection("user@host", lm, nil)
+
+	rc.mu.RLock()
+	maxRetries := rc.backoff.maxRetries
+	rc.mu.RUnlock()
+
+	if maxRetries != DefaultMaxRetries {
+		t.Errorf("default maxRetries = %d, want %d", maxRetries, DefaultMaxRetries)
+	}
+}
+
+func TestRemoteConnection_OnReconnect(t *testing.T) {
+	ssh := newMockSSH()
+	lm := NewLifecycleManager(ssh)
+	rc := NewRemoteConnection("user@host", lm, nil)
+
+	var called bool
+	rc.OnReconnect(func() {
+		called = true
+	})
+
+	// Directly invoke reconnect hooks.
+	rc.invokeReconnectHooks()
+
+	if !called {
+		t.Error("OnReconnect callback was not invoked")
+	}
+}

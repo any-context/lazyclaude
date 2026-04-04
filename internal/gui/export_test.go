@@ -139,6 +139,16 @@ func (a *App) HandlePasteContentForTest(text string) {
 	a.handlePasteContent(text)
 }
 
+// PrintableLenForTest exposes printableLen for testing.
+func PrintableLenForTest(s string) int {
+	return printableLen(s)
+}
+
+// FormatConnectionStatusForTest exposes formatConnectionStatus for testing.
+func (a *App) FormatConnectionStatusForTest() string {
+	return a.formatConnectionStatus()
+}
+
 // DrainBrokerForTest drains any pending events from the notify broker subscription
 // and calls showToolPopup for each one. Simulates what the ticker goroutine does
 // when the broker channel has events, without needing to run the event loop.

@@ -190,4 +190,89 @@ func TestComputeFullScreenLayout_Wide(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// printableLen
+// ---------------------------------------------------------------------------
+
+func TestPrintableLen(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		want  int
+	}{
+		{"plain text", "hello", 5},
+		{"empty", "", 0},
+		{"ansi green", "\x1b[32mhello\x1b[0m", 5},
+		{"multiple ansi", "\x1b[1m\x1b[32mhi\x1b[0m", 2},
+		{"no text just ansi", "\x1b[32m\x1b[0m", 0},
+		{"mixed text and ansi", "a\x1b[31mb\x1b[0mc", 3},
+		{"256-color", "\x1b[38;5;141mtest\x1b[0m", 4},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := gui.PrintableLenForTest(tt.input)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Connection status formatting
+// ---------------------------------------------------------------------------
+
+func TestFormatConnectionStatus_NoProvider(t *testing.T) {
+	app, err := gui.NewAppHeadless(gui.ModeMain, 120, 40)
+	require.NoError(t, err)
+
+	assert.Equal(t, "", app.FormatConnectionStatusForTest())
+}
+
+func TestFormatConnectionStatus_Connected(t *testing.T) {
+	app, err := gui.NewAppHeadless(gui.ModeMain, 120, 40)
+	require.NoError(t, err)
+
+	app.SetConnectionStatus(func() []gui.ConnectionStatus {
+		return []gui.ConnectionStatus{{Host: "AERO", State: "connected"}}
+	})
+	got := app.FormatConnectionStatusForTest()
+	assert.Contains(t, got, "AERO")
+	assert.NotContains(t, got, "offline")
+	assert.NotContains(t, got, "reconnecting")
+}
+
+func TestFormatConnectionStatus_VersionMismatch(t *testing.T) {
+	app, err := gui.NewAppHeadless(gui.ModeMain, 120, 40)
+	require.NoError(t, err)
+
+	app.SetConnectionStatus(func() []gui.ConnectionStatus {
+		return []gui.ConnectionStatus{{Host: "AERO", State: "connected", VersionMismatch: true}}
+	})
+	got := app.FormatConnectionStatusForTest()
+	assert.Contains(t, got, "version mismatch")
+}
+
+func TestFormatConnectionStatus_Error(t *testing.T) {
+	app, err := gui.NewAppHeadless(gui.ModeMain, 120, 40)
+	require.NoError(t, err)
+
+	app.SetConnectionStatus(func() []gui.ConnectionStatus {
+		return []gui.ConnectionStatus{{Host: "AERO", State: "error"}}
+	})
+	got := app.FormatConnectionStatusForTest()
+	assert.Contains(t, got, "offline")
+}
+
+func TestFormatConnectionStatus_Reconnecting(t *testing.T) {
+	app, err := gui.NewAppHeadless(gui.ModeMain, 120, 40)
+	require.NoError(t, err)
+
+	app.SetConnectionStatus(func() []gui.ConnectionStatus {
+		return []gui.ConnectionStatus{{Host: "AERO", State: "reconnecting"}}
+	})
+	got := app.FormatConnectionStatusForTest()
+	assert.Contains(t, got, "reconnecting")
+}
+
+// ---------------------------------------------------------------------------
 // Existing tab / bar tests (unchanged)

@@ -323,7 +323,41 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// 10. Keybind help overlay bindings
+	// 10. Connect dialog bindings (Enter to connect, Esc to cancel)
+	if err := a.gui.SetKeybinding("connect-input", gocui.KeyEnter, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		host := strings.TrimSpace(v.TextArea.GetContent())
+		a.closeConnectDialog(g)
+		if host == "" {
+			return nil
+		}
+		if a.connectFn == nil {
+			a.showError(g, "Remote connection not available")
+			return nil
+		}
+		a.setStatus(g, "Connecting to "+host+"...")
+		go func() {
+			err := a.connectFn(host)
+			a.gui.Update(func(g *gocui.Gui) error {
+				if err != nil {
+					a.showError(g, fmt.Sprintf("Connection failed: %v", err))
+				} else {
+					a.setStatus(g, "Connected to "+host)
+				}
+				return nil
+			})
+		}()
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := a.gui.SetKeybinding("connect-input", gocui.KeyEsc, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.closeConnectDialog(g)
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// 11. Keybind help overlay bindings
 	// Esc: close help
 	for _, viewName := range []string{helpInputView, helpListView} {
 		if err := a.gui.SetKeybinding(viewName, gocui.KeyEsc, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {

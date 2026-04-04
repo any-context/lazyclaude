@@ -13,6 +13,7 @@ const (
 	DialogWorktreeResume                   // worktree-resume-prompt (prompt only for existing)
 	DialogKeybindHelp                      // keybind-help overlay (Telescope style)
 	DialogSearch                           // inline "/" search on active panel
+	DialogConnect                          // connect-input for remote host
 )
 
 // DialogState groups all input dialog state into a single struct,
@@ -72,6 +73,8 @@ func (a *App) dialogFocusView() string {
 		return "keybind-help-input"
 	case DialogSearch:
 		return "search-input"
+	case DialogConnect:
+		return "connect-input"
 	default:
 		return ""
 	}

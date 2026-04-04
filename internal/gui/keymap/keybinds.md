@@ -89,6 +89,13 @@ Start a PM (Project Manager) orchestration session.
 The PM session coordinates multiple Claude Code workers,
 dispatching tasks and reviewing results via the MCP server.
 
+## connect_remote
+
+Connect to a remote host running a lazyclaude daemon.
+Opens a hostname input dialog. On Enter, establishes an SSH tunnel
+to the daemon, sets up tmux socket forwarding, and registers the
+remote sessions in the session list.
+
 ## send_key
 
 Send a quick response to the selected session.
