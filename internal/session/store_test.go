@@ -112,7 +112,7 @@ func TestStore_GenerateName_Simple(t *testing.T) {
 	t.Parallel()
 	s := session.NewStore("")
 
-	name := s.GenerateName("/home/user/my-app", "")
+	name := s.GenerateName("/home/user/my-app")
 	assert.Equal(t, "my-app", name)
 }
 
@@ -121,7 +121,7 @@ func TestStore_GenerateName_Dedup(t *testing.T) {
 	s := session.NewStore("")
 	s.Add(newTestSession("id-1", "my-app", "/path1"), "")
 
-	name := s.GenerateName("/other/path/my-app", "")
+	name := s.GenerateName("/other/path/my-app")
 	assert.Equal(t, "my-app-2", name)
 }
 
@@ -131,15 +131,15 @@ func TestStore_GenerateName_Dedup_Multiple(t *testing.T) {
 	s.Add(newTestSession("id-1", "my-app", "/path1"), "")
 	s.Add(newTestSession("id-2", "my-app-2", "/path2"), "")
 
-	name := s.GenerateName("/other/my-app", "")
+	name := s.GenerateName("/other/my-app")
 	assert.Equal(t, "my-app-3", name)
 }
 
-func TestStore_GenerateName_Remote(t *testing.T) {
+func TestStore_GenerateName_PathOnly(t *testing.T) {
 	t.Parallel()
 	s := session.NewStore("")
 
-	name := s.GenerateName("/home/user/work", "srv1")
+	name := s.GenerateName("/home/user/work")
 	assert.Equal(t, "work", name)
 }
 

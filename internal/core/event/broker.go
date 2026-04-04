@@ -1,6 +1,5 @@
 // Package event provides a generic, thread-safe pub/sub event broker.
-// It is designed for LOCAL in-process communication (e.g. server → GUI)
-// and complements the file-based notify queue used for SSH remote compatibility.
+// It is designed for LOCAL in-process communication (e.g. server → GUI).
 package event
 
 import "sync"

@@ -225,13 +225,7 @@ func TestE2E_SSH_RemotePopupFullFlow(t *testing.T) {
 		return true
 	}, 5*time.Second, 200*time.Millisecond, "lock file with token should appear")
 
-	// 4) Write pending-window file so MCP server accepts remote ide_connected.
-	//    In production, Manager.Create writes this when creating SSH sessions.
-	pendingFile := filepath.Join(os.TempDir(), "lazyclaude-pending-window")
-	require.NoError(t, os.WriteFile(pendingFile, []byte("remote-test"), 0o600))
-	t.Cleanup(func() { os.Remove(pendingFile) })
-
-	// 5) Write lock file on remote + run mock client with --notify
+	// 4) Write lock file on remote + run mock client with --notify
 	tunnelPort := mcpPort
 	writeRemoteLockFile(t, host, tunnelPort, token)
 

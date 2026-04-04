@@ -69,7 +69,7 @@ func TestManager_Create_SecondSession(t *testing.T) {
 	assert.Len(t, all, 2)
 }
 
-// setupMCPInfo writes port file and lock file so Manager.Create can build SSH commands.
+// setupMCPInfo writes port file and lock file needed for PM and worker session tests.
 func setupMCPInfo(t *testing.T, paths config.Paths, port int, token string) {
 	t.Helper()
 	// Write port file

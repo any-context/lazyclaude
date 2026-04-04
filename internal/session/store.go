@@ -397,7 +397,7 @@ func (s *Store) MarkAllStatus(status Status) {
 }
 
 // GenerateName creates a unique session name from a directory path.
-func (s *Store) GenerateName(dirPath, host string) string {
+func (s *Store) GenerateName(dirPath string) string {
 	base := filepath.Base(dirPath)
 
 	s.mu.RLock()

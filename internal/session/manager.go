@@ -160,7 +160,7 @@ func (m *Manager) EnsureClaudeConfigured(dirPath string) {
 func (m *Manager) Create(ctx context.Context, dirPath string) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	name := m.store.GenerateName(dirPath, "")
+	name := m.store.GenerateName(dirPath)
 	id := uuid.New().String()
 	m.log.Info("create.start", "name", name, "id", id[:8], "path", dirPath)
 
