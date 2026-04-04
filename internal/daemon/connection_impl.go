@@ -294,15 +294,11 @@ func (rc *RemoteConnection) reconnect(ctx context.Context) {
 
 	for {
 		rc.mu.Lock()
-		exhausted := rc.backoff.Exhausted()
-		rc.mu.Unlock()
-
-		if exhausted {
+		if rc.backoff.Exhausted() {
+			rc.mu.Unlock()
 			rc.setState(ConnectionError)
 			return
 		}
-
-		rc.mu.Lock()
 		delay := rc.backoff.Next()
 		rc.mu.Unlock()
 

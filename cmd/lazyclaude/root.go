@@ -141,7 +141,7 @@ func newRootCmd() *cobra.Command {
 			connectRemoteHost := func(host string) error {
 				remoteConn := daemon.NewRemoteConnection(host, lifecycleMgr, clientFactory)
 				if connErr := remoteConn.Connect(context.Background()); connErr != nil {
-					return fmt.Errorf("lazyclaude not found on %s. Run: lazyclaude deploy %s", host, host)
+					return fmt.Errorf("lazyclaude not found on %s (run: lazyclaude deploy %s): %w", host, host, connErr)
 				}
 
 				remoteProvider := daemon.NewRemoteProvider(host, remoteConn)
@@ -155,14 +155,14 @@ func newRootCmd() *cobra.Command {
 				} else {
 					remoteProvider.SetTmuxClient(sockTunnel.TmuxClient())
 					lc.Register("sock-tunnel-"+host, func() { sockTunnel.Stop() })
-					sockChecker.add(host, sockTunnel, remoteProvider)
+					sockChecker.set(host, sockTunnel, remoteProvider)
 
 					// Re-establish socket tunnel on reconnection.
 					remoteConn.OnReconnect(func() {
 						newSock := daemon.NewSocketTunnel(host, sockPath, "")
 						if err := newSock.Start(context.Background()); err == nil {
 							remoteProvider.SetTmuxClient(newSock.TmuxClient())
-							sockChecker.add(host, newSock, remoteProvider)
+							sockChecker.set(host, newSock, remoteProvider)
 						}
 					})
 				}
@@ -177,16 +177,13 @@ func newRootCmd() *cobra.Command {
 			}
 
 			// Auto-detect SSH host from the originating pane.
+			// startupError is displayed on the first tick (no goroutine leak).
+			var startupError string
+
 			if sshHost := gui.DetectSSHHost(); sshHost != "" {
 				if connErr := connectRemoteHost(sshHost); connErr != nil {
 					fmt.Fprintf(os.Stderr, "warning: %v\n", connErr)
-					go func() {
-						time.Sleep(200 * time.Millisecond)
-						app.Gui().Update(func(g *gocui.Gui) error {
-							app.ShowError(g, connErr.Error())
-							return nil
-						})
-					}()
+					startupError = connErr.Error()
 				}
 			}
 
@@ -253,6 +250,15 @@ func newRootCmd() *cobra.Command {
 			app.SetOnTick(func() {
 				ctrlMgr.ensureConnected()
 				sockChecker.check()
+				// Display startup error on the first tick (avoids goroutine leak).
+				if startupError != "" {
+					msg := startupError
+					startupError = ""
+					app.Gui().Update(func(g *gocui.Gui) error {
+						app.ShowError(g, msg)
+						return nil
+					})
+				}
 			})
 			lc.Register("control-client", ctrlMgr.close)
 
@@ -746,24 +752,29 @@ func (a *sessionAdapter) AttachSession(id string) error {
 // socketHealthEntry tracks a socket tunnel and its associated remote provider
 // for periodic health checking and reconnection.
 type socketHealthEntry struct {
-	host     string
 	tunnel   *daemon.SocketTunnel
 	provider *daemon.RemoteProvider
 }
 
 // socketHealthChecker periodically checks socket tunnel health and reconnects.
 // Designed to be called from the GUI ticker (every 100ms); internally throttles
-// to ~5s intervals using a counter.
+// to ~5s intervals using a counter. Uses host-keyed map to prevent stale entries
+// from accumulating across reconnections.
 type socketHealthChecker struct {
 	mu      sync.Mutex
-	entries []socketHealthEntry
-	counter int // ticker call counter for throttling
+	entries map[string]socketHealthEntry // host -> entry
+	counter int                          // ticker call counter for throttling
 }
 
-func (s *socketHealthChecker) add(host string, tunnel *daemon.SocketTunnel, provider *daemon.RemoteProvider) {
+// set registers or replaces the socket tunnel for a host.
+// Replaces any previous entry for the same host.
+func (s *socketHealthChecker) set(host string, tunnel *daemon.SocketTunnel, provider *daemon.RemoteProvider) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.entries = append(s.entries, socketHealthEntry{host: host, tunnel: tunnel, provider: provider})
+	if s.entries == nil {
+		s.entries = make(map[string]socketHealthEntry)
+	}
+	s.entries[host] = socketHealthEntry{tunnel: tunnel, provider: provider}
 }
 
 // check is called from the ticker. Throttles to roughly every 5 seconds
@@ -776,19 +787,28 @@ func (s *socketHealthChecker) check() {
 		return
 	}
 	s.counter = 0
-	entries := make([]socketHealthEntry, len(s.entries))
-	copy(entries, s.entries)
+
+	// Snapshot entries under lock.
+	type snapshot struct {
+		host  string
+		entry socketHealthEntry
+	}
+	snaps := make([]snapshot, 0, len(s.entries))
+	for host, e := range s.entries {
+		snaps = append(snaps, snapshot{host: host, entry: e})
+	}
 	s.mu.Unlock()
 
-	for i, e := range entries {
-		if e.tunnel != nil && !e.tunnel.IsAlive() {
-			sockPath := daemon.SocketTunnelLocalPath(e.host)
-			newTunnel := daemon.NewSocketTunnel(e.host, sockPath, "")
+	for _, snap := range snaps {
+		if snap.entry.tunnel != nil && !snap.entry.tunnel.IsAlive() {
+			sockPath := daemon.SocketTunnelLocalPath(snap.host)
+			newTunnel := daemon.NewSocketTunnel(snap.host, sockPath, "")
 			if err := newTunnel.Start(context.Background()); err == nil {
-				e.provider.SetTmuxClient(newTunnel.TmuxClient())
+				snap.entry.provider.SetTmuxClient(newTunnel.TmuxClient())
 				s.mu.Lock()
-				if i < len(s.entries) {
-					s.entries[i].tunnel = newTunnel
+				s.entries[snap.host] = socketHealthEntry{
+					tunnel:   newTunnel,
+					provider: snap.entry.provider,
 				}
 				s.mu.Unlock()
 			}
