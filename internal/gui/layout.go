@@ -213,11 +213,7 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 	if render, ok := a.previewByScope[a.panelManager.ActivePanel().Scope()]; ok {
 		render(v3, previewW, previewH)
 	} else {
-		var items []SessionItem
-		if a.sessions != nil {
-			items = a.sessions.Sessions()
-		}
-		a.renderPreview(v3, items, previewW, previewH)
+		a.renderPreview(v3, a.cachedSessionItems, previewW, previewH)
 	}
 
 	// Options bar (bottom, frameless) — dynamic per focused panel
@@ -330,10 +326,7 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 	v.Clear()
 
 	// Render preview content (same pipeline as split-panel mode)
-	var items []SessionItem
-	if a.sessions != nil {
-		items = a.sessions.Sessions()
-	}
+	items := a.cachedSessionItems
 	// Find the full-screen target session
 	targetIdx := -1
 	for i, item := range items {

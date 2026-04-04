@@ -129,8 +129,10 @@ type App struct {
 	// All reads/writes happen on the gocui event loop goroutine (gui.Update callbacks
 	// and layout), so no mutex is needed.
 	windowActivity   map[string]WindowActivityEntry
-	connectionStatus ConnectionStatusProvider // remote connection status for options bar
-	connectFn        func(host string) error  // connects to a remote host (injected from root.go)
+	connectionStatus   ConnectionStatusProvider // remote connection status for options bar
+	connectFn          func(host string) error  // connects to a remote host (injected from root.go)
+	cachedSessionItems []SessionItem            // cached session list; refreshed asynchronously
+	sessionRefreshing  bool                     // true while a background refresh is in flight
 }
 
 
@@ -318,6 +320,10 @@ func (a *App) Run() error {
 				}
 				a.notify.OnTick()
 				a.gui.Update(func(g *gocui.Gui) error {
+					// Refresh the session list cache asynchronously so layout
+					// never blocks on remote API calls.
+					a.refreshSessionsAsync()
+
 					// When broker is wired (in-process server), notifications
 					// arrive via brokerCh — skip file polling to avoid duplicates.
 					if a.sessions != nil && !a.notify.HasBroker() {
@@ -474,6 +480,24 @@ func stopReasonToActivity(reason string) model.ActivityState {
 	}
 }
 
+// refreshSessionsAsync fetches the session list in a background goroutine and
+// updates the cached items via gui.Update. Skipped if a refresh is already in
+// flight or no SessionProvider is wired.
+func (a *App) refreshSessionsAsync() {
+	if a.sessions == nil || a.sessionRefreshing {
+		return
+	}
+	a.sessionRefreshing = true
+	go func() {
+		items := a.sessions.Sessions()
+		a.gui.Update(func(g *gocui.Gui) error {
+			a.cachedSessionItems = items
+			a.sessionRefreshing = false
+			return nil
+		})
+	}()
+}
+
 // Gui returns the underlying gocui.Gui (for testing).
 func (a *App) Gui() *gocui.Gui {
 	return a.gui
@@ -483,6 +507,15 @@ func (a *App) Gui() *gocui.Gui {
 // Public wrapper for callers outside the gui package (e.g. root.go via gui.Update).
 func (a *App) ShowError(g *gocui.Gui, msg string) {
 	a.showError(g, msg)
+}
+
+// ScheduleError queues an error message to be displayed on the next event loop
+// cycle. Safe to call from any goroutine (e.g. adapter error callbacks).
+func (a *App) ScheduleError(msg string) {
+	a.gui.Update(func(g *gocui.Gui) error {
+		a.showError(g, msg)
+		return nil
+	})
 }
 
 func (a *App) setStatus(g *gocui.Gui, msg string) {

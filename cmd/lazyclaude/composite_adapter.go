@@ -261,6 +261,9 @@ type guiCompositeAdapter struct {
 	connectFn   func(string) error // connectRemoteHost from root.go
 	connectMu   sync.Mutex
 	connecting  map[string]*lazyConn // one entry per host
+
+	// onError reports errors to the GUI via showError. Wired in root.go.
+	onError func(msg string)
 }
 
 // Compile-time check.
@@ -306,7 +309,9 @@ func (a *guiCompositeAdapter) RefreshPendingFrom(notifications []*model.ToolNoti
 func (a *guiCompositeAdapter) Sessions() []gui.SessionItem {
 	sessions, err := a.cp.Sessions()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: composite sessions: %v\n", err)
+		if a.onError != nil {
+			a.onError(fmt.Sprintf("Session list error: %v", err))
+		}
 		return nil
 	}
 	items := make([]gui.SessionItem, len(sessions))

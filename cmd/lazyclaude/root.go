@@ -187,6 +187,7 @@ func newRootCmd() *cobra.Command {
 				connectFn:   connectRemoteHost,
 			}
 			compositeAdapter.windowActivityFn = app.WindowActivityMap
+			compositeAdapter.onError = app.ScheduleError
 			app.SetSessions(compositeAdapter)
 
 			// Wire connection status for the options bar.
