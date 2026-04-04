@@ -209,8 +209,7 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 	v3.Editable = false
 	// Skip preview rendering while an error is actively displayed so the
 	// error message is not overwritten by the next layout cycle.
-	a.clearExpiredError()
-	if !a.hasActiveError() {
+	if !a.isErrorActive() {
 		v3.Clear()
 		previewW := l.Main.Width() - 1
 		previewH := l.Main.Height() - 2
@@ -328,7 +327,13 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 		a.editor = &inputEditor{app: a}
 	}
 	v.Editor = a.editor
-	v.Clear()
+
+	// Skip preview rendering while an error is actively displayed so the
+	// error message is not overwritten by the next layout cycle.
+	errorActive := a.isErrorActive()
+	if !errorActive {
+		v.Clear()
+	}
 
 	// Render preview content (same pipeline as split-panel mode)
 	items := a.cachedSessionItems
@@ -348,13 +353,15 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 	previewW := l.Main.Width() - 1
 	previewH := l.Main.Height() - 1
 
-	if a.scroll.IsActive() {
-		v.Editable = false
-		a.renderScrollContent(v)
-	} else {
-		a.renderPreview(v, items, previewW, previewH)
-		// Scroll offset for mouse scroll
-		v.SetOrigin(0, a.fullscreen.ScrollY())
+	if !errorActive {
+		if a.scroll.IsActive() {
+			v.Editable = false
+			a.renderScrollContent(v)
+		} else {
+			a.renderPreview(v, items, previewW, previewH)
+			// Scroll offset for mouse scroll
+			v.SetOrigin(0, a.fullscreen.ScrollY())
+		}
 	}
 
 	// Status bar

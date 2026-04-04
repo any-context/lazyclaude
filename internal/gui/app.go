@@ -536,14 +536,18 @@ func (a *App) setStatus(g *gocui.Gui, msg string) {
 	a.logRender.modTime = -1
 }
 
+// errorDisplayDuration is how long showError holds the main panel before
+// allowing the preview to overwrite it.
+const errorDisplayDuration = 5 * time.Second
+
 // showError displays an error in both the logs panel and the main panel
 // so it is immediately visible regardless of which panel the user is viewing.
-// The error is held for 5 seconds so that the next layout cycle does not
-// overwrite it with the preview content.
+// The error is held for errorDisplayDuration so that the next layout cycle
+// does not overwrite it with the preview content.
 func (a *App) showError(g *gocui.Gui, msg string) {
 	a.setStatus(g, msg)
 	a.errorMsg = msg
-	a.errorExpiry = time.Now().Add(5 * time.Second)
+	a.errorExpiry = time.Now().Add(errorDisplayDuration)
 	if v, err := g.View("main"); err == nil {
 		v.Clear()
 		fmt.Fprintln(v, "")
@@ -551,14 +555,16 @@ func (a *App) showError(g *gocui.Gui, msg string) {
 	}
 }
 
-// hasActiveError reports whether an error message is currently being displayed.
-func (a *App) hasActiveError() bool {
-	return a.errorMsg != "" && time.Now().Before(a.errorExpiry)
-}
-
-// clearExpiredError resets the error state once the display period has elapsed.
-func (a *App) clearExpiredError() {
-	if a.errorMsg != "" && time.Now().After(a.errorExpiry) {
-		a.errorMsg = ""
+// isErrorActive clears expired error state and reports whether an error
+// message is still being displayed. Called once per layout cycle.
+func (a *App) isErrorActive() bool {
+	if a.errorMsg == "" {
+		return false
 	}
+	if time.Now().After(a.errorExpiry) {
+		a.errorMsg = ""
+		a.errorExpiry = time.Time{}
+		return false
+	}
+	return true
 }
