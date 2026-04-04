@@ -44,9 +44,9 @@ func writeRemoteScript(sess Session, mcpPort int, token string, opts *remoteScri
 	b.WriteString("LOCKEOF\n")
 	b.WriteString(fmt.Sprintf("trap 'rm -f \"%s\"' EXIT\n", lockFile))
 
-	// Write shell function to temp file and set BASH_ENV for auto-sourcing.
-	// export -f is bash-only and does not survive exec "$SHELL" when $SHELL is zsh.
-	writeLazyClaudeShellRC(&b, mcpPort, token, sess.ID[:8])
+	// Install lazyclaude as an executable script in PATH so it works
+	// regardless of the remote shell (bash, zsh, etc.).
+	writeLazyClaude(&b, mcpPort, token)
 
 	// Write hooks settings file so activity state (Running, NeedsInput, etc.)
 	// is reported back to the TUI via MCP hook events.

@@ -206,19 +206,19 @@ func TestWriteRemoteScript_MCPEnvAndShellFunc(t *testing.T) {
 	require.NoError(t, err)
 	script := string(content)
 
-	// Shell function and MCP env vars written to BASH_ENV temp file
-	assert.Contains(t, script, "SHELLRCEOF")
-	assert.Contains(t, script, "export BASH_ENV='/tmp/lazyclaude/shellrc-testmcp0.sh'")
+	// lazyclaude installed as executable script in PATH
+	assert.Contains(t, script, "LCBINEOF")
+	assert.Contains(t, script, "chmod +x '/tmp/lazyclaude/bin/lazyclaude'")
+	assert.Contains(t, script, `export PATH="/tmp/lazyclaude/bin:$PATH"`)
 	assert.Contains(t, script, "export _LC_MCP_PORT=54321")
 	assert.Contains(t, script, "export _LC_MCP_TOKEN='my-mcp-token'")
 	assert.Contains(t, script, "lazyclaude()")
-	assert.Contains(t, script, "_lc_json_esc()")
 
-	// BASH_ENV export must appear before exec $SHELL
-	bashEnvIdx := strings.Index(script, "export BASH_ENV=")
+	// PATH export must appear before exec $SHELL
+	pathIdx := strings.Index(script, `export PATH="/tmp/lazyclaude/bin`)
 	execIdx := strings.Index(script, `exec "$SHELL"`)
 	require.Greater(t, execIdx, 0, "exec $SHELL not found in script")
-	assert.Less(t, bashEnvIdx, execIdx, "BASH_ENV must be set before exec $SHELL")
+	assert.Less(t, pathIdx, execIdx, "PATH must be set before exec $SHELL")
 }
 
 // --- buildSSHCommand tests ---
