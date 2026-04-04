@@ -207,13 +207,18 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 	setRoundedFrame(v3)
 	v3.Wrap = false
 	v3.Editable = false
-	v3.Clear()
-	previewW := l.Main.Width() - 1
-	previewH := l.Main.Height() - 2
-	if render, ok := a.previewByScope[a.panelManager.ActivePanel().Scope()]; ok {
-		render(v3, previewW, previewH)
-	} else {
-		a.renderPreview(v3, a.cachedSessionItems, previewW, previewH)
+	// Skip preview rendering while an error is actively displayed so the
+	// error message is not overwritten by the next layout cycle.
+	a.clearExpiredError()
+	if !a.hasActiveError() {
+		v3.Clear()
+		previewW := l.Main.Width() - 1
+		previewH := l.Main.Height() - 2
+		if render, ok := a.previewByScope[a.panelManager.ActivePanel().Scope()]; ok {
+			render(v3, previewW, previewH)
+		} else {
+			a.renderPreview(v3, a.cachedSessionItems, previewW, previewH)
+		}
 	}
 
 	// Options bar (bottom, frameless) — dynamic per focused panel
