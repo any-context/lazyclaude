@@ -2,13 +2,11 @@ package session
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -159,10 +157,10 @@ func (m *Manager) EnsureClaudeConfigured(dirPath string) {
 
 // Create creates a new session with a tmux window.
 // Holds the manager mutex throughout to prevent GC from orphaning the new session.
-func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, error) {
+func (m *Manager) Create(ctx context.Context, dirPath string) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	name := m.store.GenerateName(dirPath, host)
+	name := m.store.GenerateName(dirPath, "")
 	id := uuid.New().String()
 	m.log.Info("create.start", "name", name, "id", id[:8], "path", dirPath)
 
@@ -170,40 +168,11 @@ func (m *Manager) Create(ctx context.Context, dirPath, host string) (*Session, e
 		ID:        id,
 		Name:      name,
 		Path:      dirPath,
-		Host:      host,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 
-	// Read MCP info for environment variable injection.
-	mcpPort, mcpToken, mcpErr := m.readMCPInfo()
-
-	var claudeCmd string
-	if host != "" {
-		if mcpErr != nil {
-			return nil, fmt.Errorf("read MCP server info for SSH session: %w", mcpErr)
-		}
-		hooksJSON, hooksErr := config.BuildHooksJSON()
-		if hooksErr != nil {
-			return nil, fmt.Errorf("build hooks JSON for SSH session: %w", hooksErr)
-		}
-		var sshErr error
-		claudeCmd, sshErr = buildSSHCommand(sess, mcpPort, mcpToken, &remoteScriptOpts{
-			HooksJSON: hooksJSON,
-		})
-		if sshErr != nil {
-			return nil, fmt.Errorf("build SSH command: %w", sshErr)
-		}
-
-		// Write pending window file so the MCP server can associate
-		// the remote ide_connected PID with this tmux window.
-		pendingFile := filepath.Join(m.paths.RuntimeDir, "lazyclaude-pending-window")
-		if writeErr := os.WriteFile(pendingFile, []byte(sess.WindowName()), 0o600); writeErr != nil {
-			m.log.Warn("create.pending-window.write", "err", writeErr)
-		}
-	} else {
-		claudeCmd = m.buildClaudeCommand(sess)
-	}
+	claudeCmd := m.buildClaudeCommand(sess)
 
 	absPath, err := filepath.Abs(sess.Path)
 	if err != nil {
@@ -220,9 +189,8 @@ type worktreeOpts struct {
 	WtPath      string // explicit worktree path (set for ResumeWorktree; empty = derive from projectRoot)
 	UserPrompt  string
 	ProjectRoot string
-	Host        string // SSH host; empty for local sessions
-	Role        Role   // RoleNone for regular worktree, RoleWorker for worker sessions
-	SkipGitAdd  bool   // true for ResumeWorktree (directory already exists)
+	Role        Role // RoleNone for regular worktree, RoleWorker for worker sessions
+	SkipGitAdd  bool // true for ResumeWorktree (directory already exists)
 }
 
 // createWorktreeSession is the shared implementation for CreateWorktree,
@@ -234,7 +202,7 @@ func (m *Manager) createWorktreeSession(ctx context.Context, opts worktreeOpts) 
 		}
 	}
 
-	runner := NewGitRunner(opts.Host)
+	runner := &LocalRunner{}
 
 	if opts.SkipGitAdd && opts.WtPath != "" {
 		exists, err := runner.Exists(ctx, opts.WtPath)
@@ -245,9 +213,6 @@ func (m *Manager) createWorktreeSession(ctx context.Context, opts worktreeOpts) 
 			return nil, fmt.Errorf("worktree path does not exist: %s", opts.WtPath)
 		}
 	}
-
-	// Read MCP info outside the lock (file I/O).
-	mcpPort, mcpToken, _ := m.readMCPInfo()
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -267,30 +232,28 @@ func (m *Manager) createWorktreeSession(ctx context.Context, opts worktreeOpts) 
 		}
 	}
 
-	return m.launchWorktreeSession(ctx, opts.Name, wtPath, opts.UserPrompt, opts.ProjectRoot, opts.Host, opts.Role, mcpPort, mcpToken)
+	return m.launchWorktreeSession(ctx, opts.Name, wtPath, opts.UserPrompt, opts.ProjectRoot, opts.Role)
 }
 
 // CreateWorktree creates a git worktree and launches Claude Code with an initial prompt.
 // The worktree is placed at {projectRoot}/.lazyclaude/worktrees/{name}/.
-func (m *Manager) CreateWorktree(ctx context.Context, name, userPrompt, projectRoot, host string) (*Session, error) {
+func (m *Manager) CreateWorktree(ctx context.Context, name, userPrompt, projectRoot string) (*Session, error) {
 	return m.createWorktreeSession(ctx, worktreeOpts{
 		Name:        name,
 		UserPrompt:  userPrompt,
 		ProjectRoot: projectRoot,
-		Host:        host,
 		Role:        RoleWorker,
 	})
 }
 
 // ResumeWorktree launches Claude Code in an existing worktree directory.
 // Unlike CreateWorktree, it does not run `git worktree add`.
-func (m *Manager) ResumeWorktree(ctx context.Context, worktreePath, userPrompt, projectRoot, host string) (*Session, error) {
+func (m *Manager) ResumeWorktree(ctx context.Context, worktreePath, userPrompt, projectRoot string) (*Session, error) {
 	return m.createWorktreeSession(ctx, worktreeOpts{
 		Name:        filepath.Base(worktreePath),
 		WtPath:      worktreePath,
 		UserPrompt:  userPrompt,
 		ProjectRoot: projectRoot,
-		Host:        host,
 		Role:        RoleWorker,
 		SkipGitAdd:  true,
 	})
@@ -348,21 +311,20 @@ func (m *Manager) launchSession(ctx context.Context, sess Session, claudeCmd, st
 // launchWorktreeSession is the shared logic for creating a tmux window
 // running Claude Code in a worktree directory. Called by CreateWorktree,
 // ResumeWorktree, and CreateWorkerSession. Caller must hold m.mu.
-func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userPrompt, projectRoot, host string, role Role, mcpPort int, mcpToken string) (*Session, error) {
+func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userPrompt, projectRoot string, role Role) (*Session, error) {
 	id := uuid.New().String()
-	systemPrompt := BuildWorkerPrompt(ctx, wtPath, projectRoot, id, host)
+	systemPrompt := BuildWorkerPrompt(ctx, wtPath, projectRoot, id)
 
 	sess := Session{
 		ID:        id,
 		Name:      name,
 		Path:      wtPath,
-		Host:      host,
 		Role:      role,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 
-	claudeCmd, startDir, cleanupFn, err := m.buildLaunchCommand(sess, systemPrompt, userPrompt, mcpPort, mcpToken)
+	claudeCmd, startDir, cleanupFn, err := m.buildLaunchCommand(sess, systemPrompt, userPrompt)
 	if err != nil {
 		return m.launchErrorSession(ctx, sess, err)
 	}
@@ -396,122 +358,16 @@ func (m *Manager) launchErrorSession(ctx context.Context, sess Session, buildErr
 	return result, nil
 }
 
-// writeSSHLauncher writes a two-phase SSH launcher script:
-//  1. Transfer the base64-encoded remote script to a temp file on the remote
-//  2. exec an interactive SSH session that runs the script with bash
-//
-// This avoids both tmux's command length limit (~2KB) and shell quoting issues.
-// The first SSH is non-interactive (file transfer); the second has -t for TTY.
-func writeSSHLauncher(host, scriptContent, sessionID string, mcpPort int) (string, error) {
-	encoded := base64.StdEncoding.EncodeToString([]byte(scriptContent))
-	sshHost, port := splitHostPort(host)
-
-	portFlag := ""
-	if port != "" {
-		portFlag = fmt.Sprintf("-p %s ", port)
+// buildLaunchCommand builds the tmux command for launching Claude Code
+// in a worktree session. Writes a temp launcher script and returns
+// the command, start directory, optional cleanup function, and error.
+func (m *Manager) buildLaunchCommand(sess Session, systemPrompt, userPrompt string) (claudeCmd string, startDir string, cleanup func(), err error) {
+	launcher, launcherErr := writeWorktreeLauncher(systemPrompt, userPrompt, m.paths.RuntimeDir)
+	if launcherErr != nil {
+		return "", "", nil, fmt.Errorf("write launcher: %w", launcherErr)
 	}
-
-	remoteScript := fmt.Sprintf("/tmp/lazyclaude/remote-%s.sh", sessionID[:8])
-
-	f, err := os.CreateTemp("", "lazyclaude-ssh-*.sh")
-	if err != nil {
-		return "", fmt.Errorf("create temp file: %w", err)
-	}
-
-	var sb strings.Builder
-	sb.WriteString("#!/bin/bash\n")
-	sb.WriteString("rm -f \"$0\"\n")
-	// Phase 1: write decoded script to remote temp file (non-interactive).
-	sb.WriteString(fmt.Sprintf("ssh %s%s 'mkdir -p /tmp/lazyclaude && printf \"%%s\" \"%s\" | base64 -d > %s' 2>/dev/null\n",
-		portFlag, sshHost, encoded, remoteScript))
-	// Phase 2: interactive SSH with TTY, reverse tunnel, and bash execution.
-	sb.WriteString(fmt.Sprintf("exec ssh -t -o ServerAliveInterval=30 -o ServerAliveCountMax=3 %s-R %d:127.0.0.1:%d %s 'bash %s; rm -f %s'\n",
-		portFlag, mcpPort, mcpPort, sshHost, remoteScript, remoteScript))
-
-	if _, err := f.WriteString(sb.String()); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", fmt.Errorf("write SSH launcher: %w", err)
-	}
-	f.Close()
-	return f.Name(), nil
-}
-
-// buildLaunchCommand builds the tmux command for launching Claude Code.
-// Returns: claudeCmd, startDir, optional cleanup function, error.
-// For SSH: writes a two-phase launcher script (cleanup on failure).
-// For local: writes temp launcher script (cleanup on failure).
-func (m *Manager) buildLaunchCommand(sess Session, systemPrompt, userPrompt string, mcpPort int, mcpToken string) (claudeCmd string, startDir string, cleanup func(), err error) {
-	hooksJSON, hooksErr := config.BuildHooksJSON()
-	if hooksErr != nil {
-		return "", "", nil, fmt.Errorf("build hooks JSON: %w", hooksErr)
-	}
-
-	cfg := ScriptConfig{
-		SessionID:    sess.ID,
-		WorkDir:      sess.Path,
-		Flags:        sess.Flags,
-		SystemPrompt: systemPrompt,
-		UserPrompt:   userPrompt,
-		HooksJSON:    hooksJSON,
-	}
-
-	if sess.Host != "" {
-		cfg.MCP = &MCPConfig{Port: mcpPort, Token: mcpToken}
-		cfg.WindowName = sess.WindowName()
-		scriptContent, buildErr := BuildScript(cfg)
-		if buildErr != nil {
-			return "", "", nil, fmt.Errorf("build script: %w", buildErr)
-		}
-
-		// Write a two-phase SSH launcher to avoid tmux command length limits
-		// and shell quoting issues with long base64 payloads.
-		launcher, launcherErr := writeSSHLauncher(sess.Host, scriptContent, sess.ID, mcpPort)
-		if launcherErr != nil {
-			return "", "", nil, fmt.Errorf("write SSH launcher: %w", launcherErr)
-		}
-
-		// Write pending window file for MCP server association.
-		pendingFile := filepath.Join(m.paths.RuntimeDir, "lazyclaude-pending-window")
-		if writeErr := os.WriteFile(pendingFile, []byte(sess.WindowName()), 0o600); writeErr != nil {
-			m.log.Warn("buildLaunchCommand.pending-window.write", "err", writeErr)
-		}
-
-		abs, absErr := filepath.Abs(".")
-		if absErr != nil {
-			abs = "."
-		}
-		return fmt.Sprintf("exec bash %s", shell.Quote(launcher)), abs, func() { os.Remove(launcher) }, nil
-	}
-
-	// Local: write BuildScript output to a temp file.
-	cfg.SelfDelete = true
-	scriptContent, buildErr := BuildScript(cfg)
-	if buildErr != nil {
-		return "", "", nil, fmt.Errorf("build script: %w", buildErr)
-	}
-	f, fErr := os.CreateTemp("", "lazyclaude-wt-*.sh")
-	if fErr != nil {
-		return "", "", nil, fmt.Errorf("create temp script: %w", fErr)
-	}
-	if _, wErr := f.WriteString(scriptContent); wErr != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", "", nil, fmt.Errorf("write launcher script: %w", wErr)
-	}
-	f.Close()
-
-	launcher := f.Name()
 	claudeCmd = fmt.Sprintf("exec \"$SHELL\" -lic 'exec bash %s'", shell.Quote(launcher))
 	return claudeCmd, sess.Path, func() { os.Remove(launcher) }, nil
-}
-
-
-// posixQuote wraps a string in POSIX single quotes with proper escaping.
-// Any embedded single quotes are replaced with '\'' (end single quote,
-// escaped single quote, start single quote).
-func posixQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // writeWorktreeLauncher writes a shell script that launches claude with
@@ -624,31 +480,6 @@ func (m *Manager) ToggleProjectExpanded(projectID string) {
 	m.store.ToggleProjectExpanded(projectID)
 }
 
-// readMCPInfo reads the MCP server port and auth token from disk.
-// The port file contains the port number; the lock file contains the auth token.
-func (m *Manager) readMCPInfo() (int, string, error) {
-	portData, err := os.ReadFile(m.paths.PortFile())
-	if err != nil {
-		return 0, "", fmt.Errorf("read port file %s: %w", m.paths.PortFile(), err)
-	}
-	port, err := strconv.Atoi(strings.TrimSpace(string(portData)))
-	if err != nil {
-		return 0, "", fmt.Errorf("parse port from %s: %w", m.paths.PortFile(), err)
-	}
-
-	lockData, err := os.ReadFile(m.paths.LockFile(port))
-	if err != nil {
-		return 0, "", fmt.Errorf("read lock file %s: %w", m.paths.LockFile(port), err)
-	}
-	var lock struct {
-		AuthToken string `json:"authToken"`
-	}
-	if err := json.Unmarshal(lockData, &lock); err != nil {
-		return 0, "", fmt.Errorf("parse lock file: %w", err)
-	}
-	return port, lock.AuthToken, nil
-}
-
 func (m *Manager) buildClaudeCommand(sess Session) string {
 	claudeArgs := "claude"
 
@@ -724,19 +555,14 @@ func termSize() (int, int) {
 // CreatePMSession creates a PM (Project Manager) session for the given projectRoot.
 // Returns an error if a PM session already exists for this projectRoot.
 // Holds the manager mutex throughout to prevent races.
-func (m *Manager) CreatePMSession(ctx context.Context, projectRoot, host string) (*Session, error) {
-	// Read MCP info outside the lock (file I/O).
-	mcpPort, mcpToken, mcpErr := m.readMCPInfo()
-
+func (m *Manager) CreatePMSession(ctx context.Context, projectRoot string) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Check that no PM session already exists for this projectRoot.
 	if p := m.store.FindProjectByPath(projectRoot); p != nil && p.PM != nil {
 		return nil, fmt.Errorf("pm session already exists for %q", projectRoot)
 	}
 
-	// Build worker list string from existing worker sessions in this project.
 	var workerLines []string
 	if p := m.store.FindProjectByPath(projectRoot); p != nil {
 		for _, s := range p.Sessions {
@@ -748,28 +574,23 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot, host string)
 	workerList := strings.Join(workerLines, "\n")
 
 	id := uuid.New().String()
-	systemPrompt := BuildPMPrompt(ctx, projectRoot, id, workerList, host)
+	systemPrompt := BuildPMPrompt(ctx, projectRoot, id, workerList)
 
 	sess := Session{
 		ID:        id,
 		Name:      "pm",
 		Path:      projectRoot,
-		Host:      host,
 		Role:      RolePM,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 
-	if host != "" && mcpErr != nil {
-		return nil, fmt.Errorf("read MCP server info for SSH PM session: %w", mcpErr)
-	}
-
-	claudeCmd, startDir, cleanupFn, buildErr := m.buildLaunchCommand(sess, systemPrompt, "", mcpPort, mcpToken)
+	claudeCmd, startDir, cleanupFn, buildErr := m.buildLaunchCommand(sess, systemPrompt, "")
 	if buildErr != nil {
 		return m.launchErrorSession(ctx, sess, buildErr)
 	}
 
-	m.log.Info("createPMSession", "id", id[:8], "path", projectRoot, "host", host)
+	m.log.Info("createPMSession", "id", id[:8], "path", projectRoot)
 
 	if cleanupFn != nil {
 		launchSuccess := false
@@ -789,12 +610,11 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot, host string)
 
 // CreateWorkerSession creates a git worktree and launches Claude Code with the
 // Worker role and MCP-integrated system prompt.
-func (m *Manager) CreateWorkerSession(ctx context.Context, name, userPrompt, projectRoot, host string) (*Session, error) {
+func (m *Manager) CreateWorkerSession(ctx context.Context, name, userPrompt, projectRoot string) (*Session, error) {
 	return m.createWorktreeSession(ctx, worktreeOpts{
 		Name:        name,
 		UserPrompt:  userPrompt,
 		ProjectRoot: projectRoot,
-		Host:        host,
 		Role:        RoleWorker,
 	})
 }

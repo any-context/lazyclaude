@@ -9,9 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -263,24 +261,9 @@ func (s *Server) enrichWithActivity(sessions []SessionInfo) {
 			sessions[i].Activity = model.ActivityUnknown.String()
 			continue
 		}
-		// Local sessions: activityMap is keyed by tmux window ID (e.g. "@43"),
-		// resolved from local PID walks in resolveNotifyWindow.
 		if e, ok := s.activityMap[sessions[i].Window]; ok {
 			sessions[i].Activity = e.State.String()
 			continue
-		}
-		// SSH sessions: activityMap is keyed by window NAME (e.g. "lc-2c86ae79"),
-		// resolved from the pending window file. Compute the window name from
-		// session ID and check as fallback. Mirrors session.WindowName() logic.
-		if id := sessions[i].ID; id != "" {
-			wName := "lc-" + id
-			if len(id) > 8 {
-				wName = "lc-" + id[:8]
-			}
-			if e, ok := s.activityMap[wName]; ok {
-				sessions[i].Activity = e.State.String()
-				continue
-			}
 		}
 		sessions[i].Activity = model.ActivityUnknown.String()
 	}
@@ -351,7 +334,6 @@ func (s *Server) serveConn(ctx context.Context, conn *websocket.Conn, connID str
 type notifyRequest struct {
 	Type      string          `json:"type,omitempty"`       // "tool_info" or "" (permission_prompt)
 	PID       int             `json:"pid"`
-	Window    string          `json:"window,omitempty"`     // from _LC_WINDOW env (SSH sessions)
 	ToolName  string          `json:"tool_name,omitempty"`
 	ToolInput json.RawMessage `json:"tool_input,omitempty"` // object from Claude Code hooks
 	Input     string          `json:"input,omitempty"`      // string (backward compat with curl tests)
@@ -401,13 +383,7 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// SSH sessions pass _LC_WINDOW so hooks identify their window directly.
-	// This avoids PID-based resolution (unreliable for remote sessions where
-	// each hook spawns a new process with a different PID).
-	window := req.Window
-	if window == "" {
-		window = s.resolveNotifyWindow(r.Context(), req.PID)
-	}
+	window := s.resolveNotifyWindow(r.Context(), req.PID)
 	if window == "" && req.Type != "tool_info" {
 		// Fallback for permission_prompt: hook processes may have different PIDs
 		// from the earlier PreToolUse hook. Use the most recent pending window.
@@ -475,28 +451,14 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 }
 
 // resolveNotifyWindow determines which tmux window a /notify request belongs to.
-// It checks the state cache first, then falls back to local PID walk, then to
-// the pending-window file written for SSH remote sessions.
+// It checks the state cache first, then falls back to local PID walk.
 func (s *Server) resolveNotifyWindow(ctx context.Context, pid int) string {
 	if window := s.state.WindowForPID(pid); window != "" {
 		return window
 	}
 
-	// Try local tmux PID resolution
 	if w2, err := tmux.FindWindowForPid(ctx, s.tmux, pid); err == nil && w2 != nil {
 		return w2.ID
-	}
-
-	// Fallback for remote SSH sessions: read pending window file.
-	// Keep the file — SSH hooks spawn new processes with varying PIDs,
-	// so the file serves as a persistent fallback until overwritten by
-	// the next session creation (Manager.Create).
-	pending := filepath.Join(s.config.RuntimeDir, pendingWindowFile)
-	if data, err := os.ReadFile(pending); err == nil {
-		if w := strings.TrimSpace(string(data)); w != "" {
-			s.log.Printf("notify: using pending remote window %q for pid %d", w, pid)
-			return w
-		}
 	}
 
 	return ""
@@ -570,7 +532,6 @@ func (s *Server) writePortFile(port int) error {
 
 type stopRequest struct {
 	PID        int    `json:"pid"`
-	Window     string `json:"window,omitempty"` // from _LC_WINDOW env (SSH sessions)
 	StopReason string `json:"stop_reason"`
 	SessionID  string `json:"session_id"`
 }
@@ -594,14 +555,10 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	window := req.Window
-	if window == "" {
-		window = s.resolveNotifyWindow(r.Context(), req.PID)
-	}
+	window := s.resolveNotifyWindow(r.Context(), req.PID)
 	if window == "" {
 		window = s.state.LastPendingWindow()
 	}
-	// Cache PID→window so subsequent hooks with the same PID resolve instantly.
 	if window != "" && req.PID > 0 {
 		s.state.SetConn(fmt.Sprintf("hook-%d", req.PID), &ConnState{PID: req.PID, Window: window})
 	}
@@ -623,7 +580,6 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 
 type sessionStartRequest struct {
 	PID       int    `json:"pid"`
-	Window    string `json:"window,omitempty"` // from _LC_WINDOW env (SSH sessions)
 	SessionID string `json:"session_id"`
 }
 
@@ -646,14 +602,10 @@ func (s *Server) handleSessionStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	window := req.Window
-	if window == "" {
-		window = s.resolveNotifyWindow(r.Context(), req.PID)
-	}
+	window := s.resolveNotifyWindow(r.Context(), req.PID)
 	if window == "" {
 		window = s.state.LastPendingWindow()
 	}
-	// Cache PID→window so subsequent hooks with the same PID resolve instantly.
 	if window != "" && req.PID > 0 {
 		s.state.SetConn(fmt.Sprintf("hook-%d", req.PID), &ConnState{PID: req.PID, Window: window})
 	}
@@ -674,7 +626,6 @@ func (s *Server) handleSessionStart(w http.ResponseWriter, r *http.Request) {
 
 type promptSubmitRequest struct {
 	PID       int    `json:"pid"`
-	Window    string `json:"window,omitempty"` // from _LC_WINDOW env (SSH sessions)
 	SessionID string `json:"session_id"`
 }
 
@@ -697,10 +648,7 @@ func (s *Server) handlePromptSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	window := req.Window
-	if window == "" {
-		window = s.resolveNotifyWindow(r.Context(), req.PID)
-	}
+	window := s.resolveNotifyWindow(r.Context(), req.PID)
 	if window == "" {
 		window = s.state.LastPendingWindow()
 	}
@@ -709,7 +657,6 @@ func (s *Server) handlePromptSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "window not found", http.StatusNotFound)
 		return
 	}
-	// Cache PID→window so subsequent hooks with the same PID resolve instantly.
 	if req.PID > 0 {
 		s.state.SetConn(fmt.Sprintf("hook-%d", req.PID), &ConnState{PID: req.PID, Window: window})
 	}

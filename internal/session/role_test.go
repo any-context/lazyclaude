@@ -58,7 +58,7 @@ func TestRole_IsValid(t *testing.T) {
 func TestBuildPMPrompt_ContainsRequiredFields(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	prompt := session.BuildPMPrompt(context.Background(), root, "sess-abc123", "worker-1, worker-2", "")
+	prompt := session.BuildPMPrompt(context.Background(), root, "sess-abc123", "worker-1, worker-2")
 
 	cases := []struct {
 		desc    string
@@ -86,7 +86,7 @@ func TestBuildPMPrompt_ContainsRequiredFields(t *testing.T) {
 func TestBuildPMPrompt_NoPollInstructions(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	prompt := session.BuildPMPrompt(context.Background(), root, "sess-xyz", "", "")
+	prompt := session.BuildPMPrompt(context.Background(), root, "sess-xyz", "")
 	if strings.Contains(prompt, "/msg/poll") {
 		t.Error("BuildPMPrompt should not contain /msg/poll (push-based, no polling needed)")
 	}
@@ -95,7 +95,7 @@ func TestBuildPMPrompt_NoPollInstructions(t *testing.T) {
 func TestBuildPMPrompt_EmptyWorkerList(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	prompt := session.BuildPMPrompt(context.Background(), root, "sess-xyz", "", "")
+	prompt := session.BuildPMPrompt(context.Background(), root, "sess-xyz", "")
 	if !strings.Contains(prompt, "lazyclaude sessions") {
 		t.Error("BuildPMPrompt with empty worker list should still contain lazyclaude sessions")
 	}
@@ -104,7 +104,7 @@ func TestBuildPMPrompt_EmptyWorkerList(t *testing.T) {
 func TestBuildPMPrompt_UsesCLINotCurl(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	prompt := session.BuildPMPrompt(context.Background(), root, "sess-pm", "", "")
+	prompt := session.BuildPMPrompt(context.Background(), root, "sess-pm", "")
 
 	if strings.Contains(prompt, "curl -s") {
 		t.Error("prompt should use lazyclaude CLI, not curl")
@@ -121,7 +121,7 @@ func TestBuildWorkerPrompt_ContainsRequiredFields(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "feat-x")
-	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sess-worker-99", "")
+	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sess-worker-99")
 
 	cases := []struct {
 		desc    string
@@ -150,7 +150,7 @@ func TestBuildWorkerPrompt_NoPollInstructions(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "feat-x")
-	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sess-worker-99", "")
+	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sess-worker-99")
 	if strings.Contains(prompt, "/msg/poll") {
 		t.Error("BuildWorkerPrompt should not contain /msg/poll (push-based, no polling needed)")
 	}
@@ -160,7 +160,7 @@ func TestBuildWorkerPrompt_PathIsolation(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "my-task")
-	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "id-1", "")
+	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "id-1")
 
 	if !strings.Contains(prompt, wtPath) {
 		t.Errorf("BuildWorkerPrompt missing worktree path %q", wtPath)
@@ -174,7 +174,7 @@ func TestBuildWorkerPrompt_UsesCLINotCurl(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "feat-x")
-	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sess-worker-99", "")
+	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sess-worker-99")
 
 	if strings.Contains(prompt, "curl -s") {
 		t.Error("prompt should use lazyclaude CLI, not curl")
@@ -191,7 +191,7 @@ func TestBuildWorkerPrompt_SessionIDInFromFlag(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "feat-x")
-	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sess-worker-99", "")
+	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sess-worker-99")
 
 	if !strings.Contains(prompt, "--from sess-worker-99") {
 		t.Error("worker prompt should contain --from <session-id> in msg send examples")
@@ -201,7 +201,7 @@ func TestBuildWorkerPrompt_SessionIDInFromFlag(t *testing.T) {
 func TestBuildPMPrompt_SessionIDInFromFlag(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	prompt := session.BuildPMPrompt(context.Background(), root, "sess-pm-42", "workers", "")
+	prompt := session.BuildPMPrompt(context.Background(), root, "sess-pm-42", "workers")
 
 	if !strings.Contains(prompt, "--from sess-pm-42") {
 		t.Error("PM prompt should contain --from <session-id> in msg send examples")
@@ -223,7 +223,7 @@ func TestBuildPMPrompt_UsesProjectCustomPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prompt := session.BuildPMPrompt(context.Background(), root, "sid-1", "w1", "")
+	prompt := session.BuildPMPrompt(context.Background(), root, "sid-1", "w1")
 	if !strings.Contains(prompt, "Custom PM prompt") {
 		t.Error("expected custom PM prompt to be used")
 	}
@@ -246,7 +246,7 @@ func TestBuildWorkerPrompt_UsesProjectCustomPrompt(t *testing.T) {
 	}
 
 	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "feat-x")
-	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sid-2", "")
+	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sid-2")
 	if !strings.Contains(prompt, "Custom Worker") {
 		t.Error("expected custom Worker prompt to be used")
 	}
@@ -281,7 +281,7 @@ func TestBuildWorkerPrompt_WorktreeCustomTakesPriority(t *testing.T) {
 	}
 
 	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", branch)
-	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sid-3", "")
+	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sid-3")
 	if !strings.Contains(prompt, "Worktree level") {
 		t.Error("expected worktree-level custom prompt to take priority over project-level")
 	}
@@ -294,7 +294,7 @@ func TestBuildPMPrompt_FallsBackToEmbedded(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 
-	prompt := session.BuildPMPrompt(context.Background(), root, "sid-4", "w1", "")
+	prompt := session.BuildPMPrompt(context.Background(), root, "sid-4", "w1")
 	if !strings.Contains(prompt, "PM") {
 		t.Error("expected embedded default prompt when no custom found")
 	}
@@ -308,7 +308,7 @@ func TestBuildWorkerPrompt_FallsBackToEmbedded(t *testing.T) {
 	root := t.TempDir()
 	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "feat-y")
 
-	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sid-5", "")
+	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sid-5")
 	if !strings.Contains(prompt, "Worker") {
 		t.Error("expected embedded default prompt when no custom found")
 	}
@@ -330,7 +330,7 @@ func TestBuildWorkerPrompt_SkipsEmptyCustomFile(t *testing.T) {
 	}
 
 	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "feat-z")
-	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sid-6", "")
+	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sid-6")
 	if !strings.Contains(prompt, "Worker") {
 		t.Error("expected fallback to embedded prompt for empty custom file")
 	}
@@ -339,7 +339,7 @@ func TestBuildWorkerPrompt_SkipsEmptyCustomFile(t *testing.T) {
 func TestResolvePrompt_RelativeRootFallsBack(t *testing.T) {
 	t.Parallel()
 	// Relative projectRoot should fall back to embedded default
-	prompt := session.BuildPMPrompt(context.Background(), "relative/path", "sid-7", "w1", "")
+	prompt := session.BuildPMPrompt(context.Background(), "relative/path", "sid-7", "w1")
 	if !strings.Contains(prompt, "PM") {
 		t.Error("expected embedded fallback for relative projectRoot")
 	}
@@ -361,7 +361,7 @@ func TestBuildWorkerPrompt_PathTraversalInBranch(t *testing.T) {
 
 	// Craft a worktree path with ".." in the branch name
 	wtPath := filepath.Join(root, ".lazyclaude", "worktrees", "../../..")
-	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sid-8", "")
+	prompt := session.BuildWorkerPrompt(context.Background(), wtPath, root, "sid-8")
 	if strings.Contains(prompt, "Escaped") {
 		t.Error("path traversal via branch name should be blocked")
 	}

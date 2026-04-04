@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -333,31 +332,6 @@ func TestServer_Notify_UnknownPID(t *testing.T) {
 	resp := postNotify(t, port, body)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
-}
-
-func TestServer_Notify_PendingWindowFallback(t *testing.T) {
-	t.Parallel()
-	srv, port, _ := startTestServer(t)
-
-	// Write pending-window file (simulates Manager.Create for SSH session)
-	pendingPath := filepath.Join(srv.RuntimeDir(), "lazyclaude-pending-window")
-	require.NoError(t, os.MkdirAll(srv.RuntimeDir(), 0o700))
-	require.NoError(t, os.WriteFile(pendingPath, []byte("@42\n"), 0o600))
-
-	body, _ := json.Marshal(map[string]any{"pid": 9999, "tool_name": "Bash"})
-	resp := postNotify(t, port, body)
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	var result map[string]string
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
-	assert.Equal(t, "@42", result["window"])
-
-	// Pending file is kept as a persistent fallback for SSH sessions.
-	// SSH hooks spawn new processes with varying PIDs, so the file must
-	// remain readable across multiple hook invocations.
-	_, err := os.Stat(pendingPath)
-	assert.NoError(t, err, "pending file should be preserved for subsequent hook calls")
 }
 
 func TestServer_Notify_BadJSON(t *testing.T) {
@@ -719,168 +693,6 @@ func TestServer_Activity_ToolInfoSetsRunning(t *testing.T) {
 		state, toolName := srv.WindowActivity("@24")
 		return state.String() == "running" && toolName == "Read"
 	}, 2*time.Second, 10*time.Millisecond)
-}
-
-// TestServer_PendingWindow_SurvivesMultipleHooks verifies that the pending
-// window file is preserved across multiple hook invocations with varying PIDs.
-// This simulates SSH sessions where each hook spawns a new process with a
-// different parent PID.
-func TestServer_PendingWindow_SurvivesMultipleHooks(t *testing.T) {
-	t.Parallel()
-	srv, port, _ := startTestServer(t)
-
-	pendingPath := filepath.Join(srv.RuntimeDir(), "lazyclaude-pending-window")
-	require.NoError(t, os.MkdirAll(srv.RuntimeDir(), 0o700))
-	require.NoError(t, os.WriteFile(pendingPath, []byte("@50\n"), 0o600))
-
-	// 1st hook: session-start with PID 1001 (simulates first hook invocation)
-	body, _ := json.Marshal(map[string]any{"pid": 1001, "session_id": "sess-1"})
-	resp := postEndpoint(t, port, "/session-start", body)
-	resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	state, _ := srv.WindowActivity("@50")
-	assert.Equal(t, "running", state.String(), "session-start should set activity via pending file")
-
-	// 2nd hook: notify (tool_info) with different PID 1002
-	body, _ = json.Marshal(map[string]any{"type": "tool_info", "pid": 1002, "tool_name": "Bash"})
-	resp = postNotify(t, port, body)
-	resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "second hook should resolve via persistent pending file")
-
-	state, toolName := srv.WindowActivity("@50")
-	assert.Equal(t, "running", state.String())
-	assert.Equal(t, "Bash", toolName)
-
-	// 3rd hook: stop with yet another PID 1003
-	body, _ = json.Marshal(map[string]any{"pid": 1003, "stop_reason": "end_turn", "session_id": "sess-1"})
-	resp = postEndpoint(t, port, "/stop", body)
-	resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "third hook should resolve via persistent pending file")
-
-	state, _ = srv.WindowActivity("@50")
-	assert.Equal(t, "idle", state.String())
-
-	// 4th hook: prompt-submit with PID 1004
-	body, _ = json.Marshal(map[string]any{"pid": 1004, "session_id": "sess-1"})
-	resp = postEndpoint(t, port, "/prompt-submit", body)
-	resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "fourth hook should resolve via persistent pending file")
-
-	state, _ = srv.WindowActivity("@50")
-	assert.Equal(t, "running", state.String())
-
-	// Pending file should still exist
-	_, err := os.Stat(pendingPath)
-	assert.NoError(t, err, "pending file should survive all hook calls")
-}
-
-// TestServer_SessionStart_CachesPID verifies that handleSessionStart caches
-// the PID→window mapping for subsequent lookups.
-func TestServer_SessionStart_CachesPID(t *testing.T) {
-	t.Parallel()
-	srv, port, _ := startTestServer(t)
-
-	pendingPath := filepath.Join(srv.RuntimeDir(), "lazyclaude-pending-window")
-	require.NoError(t, os.MkdirAll(srv.RuntimeDir(), 0o700))
-	require.NoError(t, os.WriteFile(pendingPath, []byte("@51\n"), 0o600))
-
-	// session-start resolves via pending file and caches PID
-	body, _ := json.Marshal(map[string]any{"pid": 2222, "session_id": "sess-cache"})
-	resp := postEndpoint(t, port, "/session-start", body)
-	resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	// Same PID should now be cached in state
-	window := srv.State().WindowForPID(2222)
-	assert.Equal(t, "@51", window, "PID should be cached after session-start")
-}
-
-// TestServer_EnrichActivity_SSHWindowNameFallback verifies that enrichWithActivity
-// matches SSH sessions by window NAME when the activityMap is keyed by window name
-// (e.g. "lc-2c86ae79") instead of window ID (e.g. "@43").
-func TestServer_EnrichActivity_SSHWindowNameFallback(t *testing.T) {
-	t.Parallel()
-	srv, port, _ := startTestServer(t)
-
-	// Simulate SSH hook: activityMap keyed by window NAME "lc-abcdef01"
-	// (from pendingWindowFile, which stores sess.WindowName())
-	pendingPath := filepath.Join(srv.RuntimeDir(), "lazyclaude-pending-window")
-	require.NoError(t, os.MkdirAll(srv.RuntimeDir(), 0o700))
-	require.NoError(t, os.WriteFile(pendingPath, []byte("lc-abcdef01\n"), 0o600))
-
-	body, _ := json.Marshal(map[string]any{"pid": 5001, "session_id": "sess-ssh"})
-	resp := postEndpoint(t, port, "/session-start", body)
-	resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	// SessionInfo.Window is the tmux window ID (different from the name)
-	sessions := []server.SessionInfo{
-		{ID: "abcdef01-2345-6789-abcd-ef0123456789", Name: "remote-worker", Role: "worker", Path: "/work", Window: "@55"},
-	}
-	srv.SetSessionLister(&fakeSessionLister{sessions: sessions})
-
-	sessResp := msgSessions(t, port, "test-token")
-	defer sessResp.Body.Close()
-	require.Equal(t, http.StatusOK, sessResp.StatusCode)
-
-	var result []server.SessionInfo
-	require.NoError(t, json.NewDecoder(sessResp.Body).Decode(&result))
-	require.Len(t, result, 1)
-	assert.Equal(t, "running", result[0].Activity, "should resolve via window name fallback lc-abcdef01")
-}
-
-// TestServer_WindowField_BypassesPIDResolution verifies that hooks with the
-// "window" field (from _LC_WINDOW env) bypass PID-based resolution entirely.
-// This is the primary mechanism for SSH sessions with multiple concurrent sessions.
-func TestServer_WindowField_BypassesPIDResolution(t *testing.T) {
-	t.Parallel()
-	srv, port, _ := startTestServer(t)
-
-	// session-start with explicit window field — no pending file, no PID cache needed
-	body, _ := json.Marshal(map[string]any{
-		"pid": 99999, "window": "lc-aabbccdd", "session_id": "sess-w1",
-	})
-	resp := postEndpoint(t, port, "/session-start", body)
-	resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	state, _ := srv.WindowActivity("lc-aabbccdd")
-	assert.Equal(t, "running", state.String(), "session-start should set running via window field")
-
-	// stop with explicit window field
-	body, _ = json.Marshal(map[string]any{
-		"pid": 99998, "window": "lc-aabbccdd", "stop_reason": "end_turn", "session_id": "sess-w1",
-	})
-	resp = postEndpoint(t, port, "/stop", body)
-	resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	state, _ = srv.WindowActivity("lc-aabbccdd")
-	assert.Equal(t, "idle", state.String(), "stop end_turn should set idle via window field")
-
-	// notify (tool_info) with explicit window field
-	body, _ = json.Marshal(map[string]any{
-		"type": "tool_info", "pid": 99997, "window": "lc-eeff0011", "tool_name": "Read",
-	})
-	resp = postNotify(t, port, body)
-	resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	state, toolName := srv.WindowActivity("lc-eeff0011")
-	assert.Equal(t, "running", state.String(), "tool_info should set running via window field")
-	assert.Equal(t, "Read", toolName)
-
-	// prompt-submit with explicit window field
-	body, _ = json.Marshal(map[string]any{
-		"pid": 99996, "window": "lc-eeff0011", "session_id": "sess-w2",
-	})
-	resp = postEndpoint(t, port, "/prompt-submit", body)
-	resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	state, _ = srv.WindowActivity("lc-eeff0011")
-	assert.Equal(t, "running", state.String(), "prompt-submit should set running via window field")
 }
 
 func TestServer_Activity_UnknownWindowReturnsUnknown(t *testing.T) {

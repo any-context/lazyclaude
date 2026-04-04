@@ -61,21 +61,13 @@ func TestLocalRunner_MkdirAll(t *testing.T) {
 	assert.True(t, info.IsDir())
 }
 
-// --- NewGitRunner tests ---
+// --- LocalRunner factory tests ---
 
-func TestNewGitRunner_Local(t *testing.T) {
+func TestLocalRunner_IsDefaultRunner(t *testing.T) {
 	t.Parallel()
-	r := NewGitRunner("")
-	_, ok := r.(*LocalRunner)
+	r := &LocalRunner{}
+	_, ok := interface{}(r).(GitRunner)
 	assert.True(t, ok)
-}
-
-func TestNewGitRunner_SSH(t *testing.T) {
-	t.Parallel()
-	r := NewGitRunner("user@host")
-	ssh, ok := r.(*SSHRunner)
-	assert.True(t, ok)
-	assert.Equal(t, "user@host", ssh.Host)
 }
 
 // --- CreateWorktreeWithRunner tests (local) ---

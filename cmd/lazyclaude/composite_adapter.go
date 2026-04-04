@@ -60,7 +60,7 @@ func (p *localDaemonProvider) Create(path string) error {
 		}
 		path = abs
 	}
-	_, err := p.mgr.Create(context.Background(), path, "")
+	_, err := p.mgr.Create(context.Background(), path)
 	return err
 }
 
@@ -191,17 +191,17 @@ func (p *localDaemonProvider) LaunchLazygit(path string) error {
 }
 
 func (p *localDaemonProvider) CreateWorktree(name, prompt, projectRoot string) error {
-	_, err := p.mgr.CreateWorktree(context.Background(), name, prompt, projectRoot, "")
+	_, err := p.mgr.CreateWorktree(context.Background(), name, prompt, projectRoot)
 	return err
 }
 
 func (p *localDaemonProvider) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
-	_, err := p.mgr.ResumeWorktree(context.Background(), worktreePath, prompt, projectRoot, "")
+	_, err := p.mgr.ResumeWorktree(context.Background(), worktreePath, prompt, projectRoot)
 	return err
 }
 
 func (p *localDaemonProvider) ListWorktrees(projectRoot string) ([]daemon.WorktreeInfo, error) {
-	items, err := session.ListWorktrees(context.Background(), projectRoot, "")
+	items, err := session.ListWorktrees(context.Background(), projectRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -213,12 +213,12 @@ func (p *localDaemonProvider) ListWorktrees(projectRoot string) ([]daemon.Worktr
 }
 
 func (p *localDaemonProvider) CreatePMSession(projectRoot string) error {
-	_, err := p.mgr.CreatePMSession(context.Background(), projectRoot, "")
+	_, err := p.mgr.CreatePMSession(context.Background(), projectRoot)
 	return err
 }
 
 func (p *localDaemonProvider) CreateWorkerSession(name, prompt, projectRoot string) error {
-	_, err := p.mgr.CreateWorkerSession(context.Background(), name, prompt, projectRoot, "")
+	_, err := p.mgr.CreateWorkerSession(context.Background(), name, prompt, projectRoot)
 	return err
 }
 
@@ -294,8 +294,8 @@ func (a *guiCompositeAdapter) ToggleProjectExpanded(projectID string) {
 	a.localMgr.ToggleProjectExpanded(projectID)
 }
 
-func (a *guiCompositeAdapter) Create(path, host string) error {
-	return a.cp.Create(path, host)
+func (a *guiCompositeAdapter) Create(path string) error {
+	return a.cp.Create(path, "")
 }
 
 func (a *guiCompositeAdapter) Delete(id string) error {
@@ -350,20 +350,20 @@ func (a *guiCompositeAdapter) AttachSession(id string) error {
 	return a.cp.AttachSession(id)
 }
 
-func (a *guiCompositeAdapter) LaunchLazygit(path, host string) error {
-	return a.cp.LaunchLazygit(path, host)
+func (a *guiCompositeAdapter) LaunchLazygit(path string) error {
+	return a.cp.LaunchLazygit(path, "")
 }
 
-func (a *guiCompositeAdapter) CreateWorktree(name, prompt, projectRoot, host string) error {
-	return a.cp.CreateWorktree(name, prompt, projectRoot, host)
+func (a *guiCompositeAdapter) CreateWorktree(name, prompt, projectRoot string) error {
+	return a.cp.CreateWorktree(name, prompt, projectRoot, "")
 }
 
-func (a *guiCompositeAdapter) ResumeWorktree(worktreePath, prompt, projectRoot, host string) error {
-	return a.cp.ResumeWorktree(worktreePath, prompt, projectRoot, host)
+func (a *guiCompositeAdapter) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
+	return a.cp.ResumeWorktree(worktreePath, prompt, projectRoot, "")
 }
 
-func (a *guiCompositeAdapter) ListWorktrees(projectRoot, host string) ([]gui.WorktreeInfo, error) {
-	items, err := a.cp.ListWorktrees(projectRoot, host)
+func (a *guiCompositeAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeInfo, error) {
+	items, err := a.cp.ListWorktrees(projectRoot, "")
 	if err != nil {
 		return nil, err
 	}
@@ -374,12 +374,12 @@ func (a *guiCompositeAdapter) ListWorktrees(projectRoot, host string) ([]gui.Wor
 	return result, nil
 }
 
-func (a *guiCompositeAdapter) CreatePMSession(projectRoot, host string) error {
-	return a.cp.CreatePMSession(projectRoot, host)
+func (a *guiCompositeAdapter) CreatePMSession(projectRoot string) error {
+	return a.cp.CreatePMSession(projectRoot, "")
 }
 
-func (a *guiCompositeAdapter) CreateWorkerSession(name, prompt, projectRoot, host string) error {
-	return a.cp.CreateWorkerSession(name, prompt, projectRoot, host)
+func (a *guiCompositeAdapter) CreateWorkerSession(name, prompt, projectRoot string) error {
+	return a.cp.CreateWorkerSession(name, prompt, projectRoot, "")
 }
 
 // daemonInfoToGUIItem converts daemon.SessionInfo to gui.SessionItem.

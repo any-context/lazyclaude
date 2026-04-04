@@ -12,7 +12,7 @@ type Service interface {
 	Sync(ctx context.Context) error
 
 	// Create creates a new session with a tmux window.
-	Create(ctx context.Context, dirPath, host string) (*Session, error)
+	Create(ctx context.Context, dirPath string) (*Session, error)
 
 	// Delete removes a session and kills its tmux window.
 	Delete(ctx context.Context, id string) error

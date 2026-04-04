@@ -184,26 +184,6 @@ func (a *App) syncPluginProject() {
 	}
 }
 
-// currentSessionHost returns the SSH host of the currently selected tree node.
-// Returns "" for local sessions.
-func (a *App) currentSessionHost() string {
-	node := a.currentNode()
-	if node == nil {
-		return ""
-	}
-	switch node.Kind {
-	case SessionNode:
-		if node.Session != nil {
-			return node.Session.Host
-		}
-	case ProjectNode:
-		if node.Project != nil {
-			return node.Project.Host
-		}
-	}
-	return ""
-}
-
 // --- Path helpers ---
 
 // currentProjectRoot returns the project root path for the currently selected
@@ -280,15 +260,7 @@ func (a *App) createSession(localPath string) {
 	if a.sessions == nil {
 		return
 	}
-	host := DetectSSHHost()
-	path := localPath
-	if host != "" {
-		path = "."
-		if rp := DetectRemotePath(); rp != "" {
-			path = rp
-		}
-	}
-	if err := a.sessions.Create(path, host); err != nil {
+	if err := a.sessions.Create(localPath); err != nil {
 		a.gui.Update(func(g *gocui.Gui) error {
 			a.showError(g, fmt.Sprintf("Error: %v", err))
 			return nil
@@ -343,7 +315,7 @@ func (a *App) LaunchLazygit() {
 		})
 		return
 	}
-	launchErr := a.sessions.LaunchLazygit(sess.Path, sess.Host)
+	launchErr := a.sessions.LaunchLazygit(sess.Path)
 	if err := g.Resume(); err != nil {
 		return
 	}
@@ -417,9 +389,8 @@ func (a *App) StartPMSession() {
 		return
 	}
 	projectRoot := a.currentProjectRoot()
-	host := a.currentSessionHost()
 	go func() {
-		err := a.sessions.CreatePMSession(projectRoot, host)
+		err := a.sessions.CreatePMSession(projectRoot)
 		a.gui.Update(func(g *gocui.Gui) error {
 			if err != nil {
 				a.showError(g, fmt.Sprintf("PM error: %v", err))
@@ -448,9 +419,8 @@ func (a *App) SelectWorktree() {
 		return
 	}
 	projectRoot := a.currentProjectRoot()
-	host := a.currentSessionHost()
 	go func() {
-		items, err := a.sessions.ListWorktrees(projectRoot, host)
+		items, err := a.sessions.ListWorktrees(projectRoot)
 		a.gui.Update(func(g *gocui.Gui) error {
 			if err != nil {
 				a.showError(g, fmt.Sprintf("Error: %v", err))

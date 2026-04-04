@@ -21,7 +21,7 @@ func TestGC_RemovesDeadSessions(t *testing.T) {
 	mock := tmux.NewMockClient()
 	mgr := session.NewManager(store, mock, paths, nil)
 
-	sess, err := mgr.Create(context.Background(), "/home/user/app", "")
+	sess, err := mgr.Create(context.Background(), "/home/user/app")
 	require.NoError(t, err)
 
 	// Backdate past GC grace period
@@ -56,7 +56,7 @@ func TestGC_RemovesOrphanSessions(t *testing.T) {
 	mock := tmux.NewMockClient()
 	mgr := session.NewManager(store, mock, paths, nil)
 
-	sess, err := mgr.Create(context.Background(), "/home/user/app", "")
+	sess, err := mgr.Create(context.Background(), "/home/user/app")
 	require.NoError(t, err)
 
 	// Backdate past GC grace period
@@ -84,7 +84,7 @@ func TestGC_KeepsRunningSessions(t *testing.T) {
 	mock := tmux.NewMockClient()
 	mgr := session.NewManager(store, mock, paths, nil)
 
-	sess, err := mgr.Create(context.Background(), "/home/user/app", "")
+	sess, err := mgr.Create(context.Background(), "/home/user/app")
 	require.NoError(t, err)
 
 	// Mock: pane is alive
@@ -116,7 +116,7 @@ func TestGC_GracePeriodSkipsNewSessions(t *testing.T) {
 	mgr := session.NewManager(store, mock, paths, nil)
 
 	// Create a session (CreatedAt = now, within grace period)
-	sess, err := mgr.Create(context.Background(), "/home/user/app", "")
+	sess, err := mgr.Create(context.Background(), "/home/user/app")
 	require.NoError(t, err)
 
 	// Mock: tmux session exists but window name doesn't match (simulating automatic-rename)
@@ -151,7 +151,7 @@ func TestGC_DeletesAfterGracePeriod(t *testing.T) {
 	mgr := session.NewManager(store, mock, paths, nil)
 
 	// Create a session and backdate CreatedAt to be outside grace period
-	_, err := mgr.Create(context.Background(), "/home/user/app", "")
+	_, err := mgr.Create(context.Background(), "/home/user/app")
 	require.NoError(t, err)
 
 	// Backdate the session to make it older than grace period

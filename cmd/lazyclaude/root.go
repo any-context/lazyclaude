@@ -324,7 +324,7 @@ func (a *sessionCreatorAdapter) FindProjectForSession(id string) *server.Session
 }
 
 func (a *sessionCreatorAdapter) CreateWorkerSession(ctx context.Context, name, prompt, projectRoot string) (*server.SessionCreateResult, error) {
-	sess, err := a.mgr.CreateWorkerSession(ctx, name, prompt, projectRoot, "")
+	sess, err := a.mgr.CreateWorkerSession(ctx, name, prompt, projectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("create worker session: %w", err)
 	}
@@ -340,7 +340,7 @@ func (a *sessionCreatorAdapter) CreateWorkerSession(ctx context.Context, name, p
 // CreateLocalSession creates a plain session at projectPath and renames it
 // to the caller-specified name.
 func (a *sessionCreatorAdapter) CreateLocalSession(ctx context.Context, name, projectPath string) (*server.SessionCreateResult, error) {
-	sess, err := a.mgr.Create(ctx, projectPath, "")
+	sess, err := a.mgr.Create(ctx, projectPath)
 	if err != nil {
 		return nil, fmt.Errorf("create local session: %w", err)
 	}
@@ -587,7 +587,7 @@ func (a *sessionAdapter) HistorySize(id string) (int, error) {
 	return n, nil
 }
 
-func (a *sessionAdapter) Create(path, host string) error {
+func (a *sessionAdapter) Create(path string) error {
 	if path == "." {
 		abs, err := filepath.Abs(".")
 		if err != nil {
@@ -595,7 +595,7 @@ func (a *sessionAdapter) Create(path, host string) error {
 		}
 		path = abs
 	}
-	_, err := a.mgr.Create(context.Background(), path, host)
+	_, err := a.mgr.Create(context.Background(), path)
 	return err
 }
 
@@ -623,28 +623,28 @@ func (a *sessionAdapter) SendChoice(window string, c gui.Choice) error {
 	return tmuxadapter.SendToPane(context.Background(), a.tmux, window, c)
 }
 
-func (a *sessionAdapter) CreateWorktree(name, prompt, projectRoot, host string) error {
-	_, err := a.mgr.CreateWorktree(context.Background(), name, prompt, projectRoot, host)
+func (a *sessionAdapter) CreateWorktree(name, prompt, projectRoot string) error {
+	_, err := a.mgr.CreateWorktree(context.Background(), name, prompt, projectRoot)
 	return err
 }
 
-func (a *sessionAdapter) ResumeWorktree(worktreePath, prompt, projectRoot, host string) error {
-	_, err := a.mgr.ResumeWorktree(context.Background(), worktreePath, prompt, projectRoot, host)
+func (a *sessionAdapter) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
+	_, err := a.mgr.ResumeWorktree(context.Background(), worktreePath, prompt, projectRoot)
 	return err
 }
 
-func (a *sessionAdapter) CreatePMSession(projectRoot, host string) error {
-	_, err := a.mgr.CreatePMSession(context.Background(), projectRoot, host)
+func (a *sessionAdapter) CreatePMSession(projectRoot string) error {
+	_, err := a.mgr.CreatePMSession(context.Background(), projectRoot)
 	return err
 }
 
-func (a *sessionAdapter) CreateWorkerSession(name, prompt, projectRoot, host string) error {
-	_, err := a.mgr.CreateWorkerSession(context.Background(), name, prompt, projectRoot, host)
+func (a *sessionAdapter) CreateWorkerSession(name, prompt, projectRoot string) error {
+	_, err := a.mgr.CreateWorkerSession(context.Background(), name, prompt, projectRoot)
 	return err
 }
 
-func (a *sessionAdapter) ListWorktrees(projectRoot, host string) ([]gui.WorktreeInfo, error) {
-	items, err := session.ListWorktrees(context.Background(), projectRoot, host)
+func (a *sessionAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeInfo, error) {
+	items, err := session.ListWorktrees(context.Background(), projectRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -655,15 +655,7 @@ func (a *sessionAdapter) ListWorktrees(projectRoot, host string) ([]gui.Worktree
 	return result, nil
 }
 
-func (a *sessionAdapter) LaunchLazygit(path, host string) error {
-	if host != "" {
-		bin, args := session.BuildLazygitSSHArgs(host, path)
-		cmd := exec.Command(bin, args...)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
-	}
+func (a *sessionAdapter) LaunchLazygit(path string) error {
 	if _, err := exec.LookPath("lazygit"); err != nil {
 		return fmt.Errorf("lazygit is not installed")
 	}

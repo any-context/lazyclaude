@@ -32,7 +32,7 @@ func TestManager_Create_FirstSession(t *testing.T) {
 	mgr, _ := newTestManager(t)
 	ctx := context.Background()
 
-	sess, err := mgr.Create(ctx, "/home/user/my-app", "")
+	sess, err := mgr.Create(ctx, "/home/user/my-app")
 	require.NoError(t, err)
 	require.NotNil(t, sess)
 
@@ -52,7 +52,7 @@ func TestManager_Create_SecondSession(t *testing.T) {
 	ctx := context.Background()
 
 	// First creates the tmux session
-	_, err := mgr.Create(ctx, "/home/user/app1", "")
+	_, err := mgr.Create(ctx, "/home/user/app1")
 	require.NoError(t, err)
 
 	// Mock: session now exists
@@ -61,7 +61,7 @@ func TestManager_Create_SecondSession(t *testing.T) {
 	}
 
 	// Second adds a window
-	sess2, err := mgr.Create(ctx, "/home/user/app2", "")
+	sess2, err := mgr.Create(ctx, "/home/user/app2")
 	require.NoError(t, err)
 	assert.Equal(t, "app2", sess2.Name)
 
@@ -82,27 +82,14 @@ func setupMCPInfo(t *testing.T, paths config.Paths, port int, token string) {
 	require.NoError(t, os.WriteFile(paths.LockFile(port), lockData, 0o600))
 }
 
-func TestManager_Create_RemoteSession(t *testing.T) {
+func TestManager_Create_LocalSession(t *testing.T) {
 	t.Parallel()
-	tmp := t.TempDir()
-	paths := config.TestPaths(tmp)
-	setupMCPInfo(t, paths, 12345, "test-token")
+	mgr, _ := newTestManager(t)
 
-	store := session.NewStore(filepath.Join(paths.DataDir, "state.json"))
-	mock := tmux.NewMockClient()
-	mgr := session.NewManager(store, mock, paths, nil)
-
-	sess, err := mgr.Create(context.Background(), "/home/user/work", "srv1")
+	sess, err := mgr.Create(context.Background(), "/home/user/work")
 	require.NoError(t, err)
 	assert.Equal(t, "work", sess.Name)
-	assert.Equal(t, "srv1", sess.Host)
-
-	// Verify SSH command was passed to tmux
-	lastCmd := mock.LastNewSessionOpts.Command
-	assert.Contains(t, lastCmd, "ssh")
-	assert.Contains(t, lastCmd, "srv1")
-	assert.Contains(t, lastCmd, "-R")
-	assert.Contains(t, lastCmd, "base64 -d")
+	assert.Empty(t, sess.Host)
 }
 
 func TestManager_Delete(t *testing.T) {
@@ -110,7 +97,7 @@ func TestManager_Delete(t *testing.T) {
 	mgr, _ := newTestManager(t)
 	ctx := context.Background()
 
-	sess, err := mgr.Create(ctx, "/home/user/app", "")
+	sess, err := mgr.Create(ctx, "/home/user/app")
 	require.NoError(t, err)
 
 	err = mgr.Delete(ctx, sess.ID)
@@ -131,7 +118,7 @@ func TestManager_Rename(t *testing.T) {
 	t.Parallel()
 	mgr, _ := newTestManager(t)
 
-	sess, err := mgr.Create(context.Background(), "/home/user/app", "")
+	sess, err := mgr.Create(context.Background(), "/home/user/app")
 	require.NoError(t, err)
 
 	err = mgr.Rename(sess.ID, "renamed-app")
@@ -148,8 +135,8 @@ func TestManager_PurgeOrphans(t *testing.T) {
 	ctx := context.Background()
 
 	// Create two sessions
-	s1, _ := mgr.Create(ctx, "/home/user/app1", "")
-	s2, _ := mgr.Create(ctx, "/home/user/app2", "")
+	s1, _ := mgr.Create(ctx, "/home/user/app1")
+	s2, _ := mgr.Create(ctx, "/home/user/app2")
 
 	// Manually set one as orphan
 	all := mgr.Store().All()
@@ -175,7 +162,7 @@ func TestManager_Sync_WithTmux(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a session
-	sess, err := mgr.Create(ctx, "/home/user/app", "")
+	sess, err := mgr.Create(ctx, "/home/user/app")
 	require.NoError(t, err)
 
 	// Set up mock tmux state
@@ -202,7 +189,7 @@ func TestManager_Sync_HasSessionError_DoesNotOrphan(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a session
-	_, err := mgr.Create(ctx, "/home/user/app", "")
+	_, err := mgr.Create(ctx, "/home/user/app")
 	require.NoError(t, err)
 
 	// Inject a transient error into HasSession
@@ -222,7 +209,7 @@ func TestManager_Sync_ConsecutiveFailCount(t *testing.T) {
 	mgr, mock := newTestManager(t)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "/home/user/app", "")
+	_, err := mgr.Create(ctx, "/home/user/app")
 	require.NoError(t, err)
 
 	// Remove the lazyclaude session from mock so HasSession returns false
@@ -259,7 +246,7 @@ func TestManager_Sync_FailCountResetsOnSuccess(t *testing.T) {
 	mgr, mock := newTestManager(t)
 	ctx := context.Background()
 
-	sess, err := mgr.Create(ctx, "/home/user/app", "")
+	sess, err := mgr.Create(ctx, "/home/user/app")
 	require.NoError(t, err)
 
 	// Remove session so HasSession returns false
@@ -302,7 +289,7 @@ func TestManager_CleanSessionCommands_ExitEmpty(t *testing.T) {
 	mgr, mock := newTestManager(t)
 
 	// Create a session to trigger cleanSessionCommands via PostCommands
-	_, err := mgr.Create(context.Background(), "/home/user/app", "")
+	_, err := mgr.Create(context.Background(), "/home/user/app")
 	require.NoError(t, err)
 
 	// Verify exit-empty off is in PostCommands
@@ -320,7 +307,7 @@ func TestManager_Create_PostCommands_NoWindowFlag(t *testing.T) {
 	t.Parallel()
 	mgr, mock := newTestManager(t)
 
-	_, err := mgr.Create(context.Background(), "/home/user/app", "")
+	_, err := mgr.Create(context.Background(), "/home/user/app")
 	require.NoError(t, err)
 
 	// Verify automatic-rename and remain-on-exit are session-level (no -w flag).
@@ -361,7 +348,7 @@ func TestManager_Persistence(t *testing.T) {
 	mock := tmux.NewMockClient()
 	mgr1 := session.NewManager(store1, mock, paths, nil)
 
-	_, err := mgr1.Create(context.Background(), "/home/user/app", "")
+	_, err := mgr1.Create(context.Background(), "/home/user/app")
 	require.NoError(t, err)
 
 	// Load in a new manager
@@ -397,7 +384,7 @@ func TestManager_CreateWorktree_Basic(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	initGitRepo(t, projectRoot)
-	sess, err := mgr.CreateWorktree(ctx, "fix-popup", "Fix the bug", projectRoot, "")
+	sess, err := mgr.CreateWorktree(ctx, "fix-popup", "Fix the bug", projectRoot)
 	require.NoError(t, err)
 	require.NotNil(t, sess)
 
@@ -435,7 +422,7 @@ func TestManager_CreateWorktree_InvalidName(t *testing.T) {
 
 	cases := []string{"", "  ", "foo/bar", "foo..bar", "-leading"}
 	for _, name := range cases {
-		_, err := mgr.CreateWorktree(ctx, name, "prompt", "/tmp/project", "")
+		_, err := mgr.CreateWorktree(ctx, name, "prompt", "/tmp/project")
 		assert.Error(t, err, "should reject name %q", name)
 	}
 }
@@ -446,7 +433,7 @@ func TestManager_CreateWorktree_NotAGitRepo(t *testing.T) {
 	ctx := context.Background()
 
 	projectRoot := t.TempDir() // no git init
-	_, err := mgr.CreateWorktree(ctx, "test", "prompt", projectRoot, "")
+	_, err := mgr.CreateWorktree(ctx, "test", "prompt", projectRoot)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not a git repository")
 }
@@ -458,7 +445,7 @@ func TestManager_CreateWorktree_EmptyPrompt(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	initGitRepo(t, projectRoot)
-	sess, err := mgr.CreateWorktree(ctx, "no-prompt", "", projectRoot, "")
+	sess, err := mgr.CreateWorktree(ctx, "no-prompt", "", projectRoot)
 	require.NoError(t, err)
 	require.NotNil(t, sess)
 
@@ -479,7 +466,7 @@ func TestManager_CreateWorktree_ExistingDir(t *testing.T) {
 	require.NoError(t, os.MkdirAll(wtDir, 0o755))
 
 	// Should succeed even if directory already exists (reuse)
-	sess, err := mgr.CreateWorktree(ctx, "reuse-me", "Reuse this", projectRoot, "")
+	sess, err := mgr.CreateWorktree(ctx, "reuse-me", "Reuse this", projectRoot)
 	require.NoError(t, err)
 	assert.Equal(t, "reuse-me", sess.Name)
 }
@@ -491,13 +478,13 @@ func TestManager_CreateWorktree_LauncherScriptContents(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	initGitRepo(t, projectRoot)
-	_, err := mgr.CreateWorktree(ctx, "test-script", "Fix the bug", projectRoot, "")
+	_, err := mgr.CreateWorktree(ctx, "test-script", "Fix the bug", projectRoot)
 	require.NoError(t, err)
 
 	// The launcher script is self-deleting, but we can verify through the command
 	// by checking that --append-system-prompt is used (not --initial-prompt)
 	// Create another worktree to inspect the script before it runs
-	sess2, err := mgr.CreateWorktree(ctx, "inspect-me", "日本語プロンプト\n改行あり", projectRoot, "")
+	sess2, err := mgr.CreateWorktree(ctx, "inspect-me", "日本語プロンプト\n改行あり", projectRoot)
 	require.NoError(t, err)
 	_ = sess2
 
@@ -514,11 +501,11 @@ func TestManager_CreateWorktree_DuplicateName(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	initGitRepo(t, projectRoot)
-	_, err := mgr.CreateWorktree(ctx, "dup-name", "first", projectRoot, "")
+	_, err := mgr.CreateWorktree(ctx, "dup-name", "first", projectRoot)
 	require.NoError(t, err)
 
 	// Second call with same name should fail
-	_, err = mgr.CreateWorktree(ctx, "dup-name", "second", projectRoot, "")
+	_, err = mgr.CreateWorktree(ctx, "dup-name", "second", projectRoot)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists")
 }
@@ -529,7 +516,7 @@ func TestManager_CreateWorktree_AddsWindowToExistingSession(t *testing.T) {
 	ctx := context.Background()
 
 	// Create first session to establish tmux session
-	_, err := mgr.Create(ctx, "/home/user/app1", "")
+	_, err := mgr.Create(ctx, "/home/user/app1")
 	require.NoError(t, err)
 
 	// Mock: session now exists
@@ -539,7 +526,7 @@ func TestManager_CreateWorktree_AddsWindowToExistingSession(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	initGitRepo(t, projectRoot)
-	sess, err := mgr.CreateWorktree(ctx, "second-wt", "task 2", projectRoot, "")
+	sess, err := mgr.CreateWorktree(ctx, "second-wt", "task 2", projectRoot)
 	require.NoError(t, err)
 	assert.Equal(t, "second-wt", sess.Name)
 
@@ -572,7 +559,7 @@ func TestManager_CreatePMSession_Basic(t *testing.T) {
 	ctx := context.Background()
 
 	projectRoot := t.TempDir()
-	sess, err := mgr.CreatePMSession(ctx, projectRoot, "")
+	sess, err := mgr.CreatePMSession(ctx, projectRoot)
 	require.NoError(t, err)
 	require.NotNil(t, sess)
 
@@ -603,11 +590,11 @@ func TestManager_CreatePMSession_DuplicateError(t *testing.T) {
 	ctx := context.Background()
 
 	projectRoot := t.TempDir()
-	_, err := mgr.CreatePMSession(ctx, projectRoot, "")
+	_, err := mgr.CreatePMSession(ctx, projectRoot)
 	require.NoError(t, err)
 
 	// Second call for same projectRoot should fail
-	_, err = mgr.CreatePMSession(ctx, projectRoot, "")
+	_, err = mgr.CreatePMSession(ctx, projectRoot)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "pm")
 }
@@ -621,11 +608,11 @@ func TestManager_CreatePMSession_WithExistingWorkers(t *testing.T) {
 	initGitRepo(t, projectRoot)
 
 	// Create a worker session first
-	_, err := mgr.CreateWorkerSession(ctx, "feat-a", "build feature a", projectRoot, "")
+	_, err := mgr.CreateWorkerSession(ctx, "feat-a", "build feature a", projectRoot)
 	require.NoError(t, err)
 
 	// Create PM session — should list the worker in its prompt
-	sess, err := mgr.CreatePMSession(ctx, projectRoot, "")
+	sess, err := mgr.CreatePMSession(ctx, projectRoot)
 	require.NoError(t, err)
 	require.NotNil(t, sess)
 	assert.Equal(t, session.RolePM, sess.Role)
@@ -639,7 +626,7 @@ func TestManager_CreateWorkerSession_Basic(t *testing.T) {
 	projectRoot := t.TempDir()
 	initGitRepo(t, projectRoot)
 
-	sess, err := mgr.CreateWorkerSession(ctx, "feat-x", "implement feature x", projectRoot, "")
+	sess, err := mgr.CreateWorkerSession(ctx, "feat-x", "implement feature x", projectRoot)
 	require.NoError(t, err)
 	require.NotNil(t, sess)
 
@@ -679,7 +666,7 @@ func TestManager_CreateWorkerSession_InvalidName(t *testing.T) {
 
 	cases := []string{"", "  ", "foo/bar", "foo..bar", "-leading"}
 	for _, name := range cases {
-		_, err := mgr.CreateWorkerSession(ctx, name, "prompt", "/tmp/project", "")
+		_, err := mgr.CreateWorkerSession(ctx, name, "prompt", "/tmp/project")
 		assert.Error(t, err, "should reject name %q", name)
 	}
 }
@@ -692,11 +679,11 @@ func TestManager_CreateWorkerSession_DuplicateName(t *testing.T) {
 	projectRoot := t.TempDir()
 	initGitRepo(t, projectRoot)
 
-	_, err := mgr.CreateWorkerSession(ctx, "dup-worker", "first task", projectRoot, "")
+	_, err := mgr.CreateWorkerSession(ctx, "dup-worker", "first task", projectRoot)
 	require.NoError(t, err)
 
 	// Second call with same name should fail
-	_, err = mgr.CreateWorkerSession(ctx, "dup-worker", "second task", projectRoot, "")
+	_, err = mgr.CreateWorkerSession(ctx, "dup-worker", "second task", projectRoot)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists")
 }
@@ -709,7 +696,7 @@ func TestManager_CreateWorktree_SetsWorkerRole(t *testing.T) {
 	projectRoot := t.TempDir()
 	initGitRepo(t, projectRoot)
 
-	sess, err := mgr.CreateWorktree(ctx, "wt-worker", "task", projectRoot, "")
+	sess, err := mgr.CreateWorktree(ctx, "wt-worker", "task", projectRoot)
 	require.NoError(t, err)
 	require.NotNil(t, sess)
 
@@ -731,7 +718,7 @@ func TestManager_launchWorktreeSession_RoleWorker_UsesWorkerPrompt(t *testing.T)
 	initGitRepo(t, projectRoot)
 
 	// CreateWorkerSession uses RoleWorker
-	sess, err := mgr.CreateWorkerSession(ctx, "worker-prompt-test", "task", projectRoot, "")
+	sess, err := mgr.CreateWorkerSession(ctx, "worker-prompt-test", "task", projectRoot)
 	require.NoError(t, err)
 	require.NotNil(t, sess)
 

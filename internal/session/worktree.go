@@ -58,9 +58,8 @@ type WorktreeInfo struct {
 
 // ListWorktrees returns existing git worktrees under .lazyclaude/worktrees/.
 // Returns nil (not error) if projectRoot is not a git repo.
-// When host is non-empty, the git command is executed on the remote host via SSH.
-func ListWorktrees(ctx context.Context, projectRoot, host string) ([]WorktreeInfo, error) {
-	return ListWorktreesWithRunner(ctx, NewGitRunner(host), projectRoot)
+func ListWorktrees(ctx context.Context, projectRoot string) ([]WorktreeInfo, error) {
+	return ListWorktreesWithRunner(ctx, &LocalRunner{}, projectRoot)
 }
 
 // parseWorktreePorcelain parses `git worktree list --porcelain` output

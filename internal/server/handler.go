@@ -5,17 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/any-context/lazyclaude/internal/core/model"
 	"github.com/any-context/lazyclaude/internal/core/tmux"
 	"github.com/any-context/lazyclaude/internal/notify"
 )
-
-const pendingWindowFile = "lazyclaude-pending-window"
 
 // Handler processes MCP protocol messages.
 type Handler struct {
@@ -104,19 +100,6 @@ func (h *Handler) handleIDEConnected(ctx context.Context, connID string, req *Re
 	window, err := h.resolveWindow(ctx, params.PID)
 	if err != nil {
 		h.log.Printf("ide_connected: local resolve failed for pid %d: %v", params.PID, err)
-	}
-
-	// Fallback for remote SSH sessions: read pending window file.
-	// Written by session.Manager.Create() when creating SSH sessions.
-	// Keep the file — SSH hooks spawn new processes with varying PIDs,
-	// so the file serves as a persistent fallback until overwritten by
-	// the next session creation (Manager.Create).
-	if window == "" && h.runtimeDir != "" {
-		pending := filepath.Join(h.runtimeDir, pendingWindowFile)
-		if data, readErr := os.ReadFile(pending); readErr == nil {
-			window = strings.TrimSpace(string(data))
-			h.log.Printf("ide_connected: using pending remote window %q for pid %d", window, params.PID)
-		}
 	}
 
 	if window == "" {

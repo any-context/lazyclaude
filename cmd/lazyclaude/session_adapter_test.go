@@ -279,7 +279,7 @@ func TestSessionListerAdapter_SingleSession(t *testing.T) {
 	t.Parallel()
 	adapter, mgr := newTestSessionListerAdapter(t)
 
-	sess, err := mgr.Create(t.Context(), "/home/user/project", "")
+	sess, err := mgr.Create(t.Context(), "/home/user/project")
 	require.NoError(t, err)
 
 	result := adapter.Sessions()
@@ -296,7 +296,7 @@ func TestSessionListerAdapter_PMRole(t *testing.T) {
 	t.Parallel()
 	adapter, mgr := newTestSessionListerAdapter(t)
 
-	sess, err := mgr.Create(t.Context(), "/home/user/pm-project", "")
+	sess, err := mgr.Create(t.Context(), "/home/user/pm-project")
 	require.NoError(t, err)
 	// Verify the role field is correctly mapped regardless of role value
 	_ = sess
@@ -315,14 +315,14 @@ func TestSessionListerAdapter_MultipleSessions(t *testing.T) {
 	t.Parallel()
 	adapter, mgr := newTestSessionListerAdapter(t)
 
-	_, err := mgr.Create(t.Context(), "/home/user/app1", "")
+	_, err := mgr.Create(t.Context(), "/home/user/app1")
 	require.NoError(t, err)
 
 	// Second session needs tmux session to exist
 	mock := tmux.NewMockClient()
 	_ = mock
 
-	_, err = mgr.Create(t.Context(), "/home/user/app2", "")
+	_, err = mgr.Create(t.Context(), "/home/user/app2")
 	require.NoError(t, err)
 
 	result := adapter.Sessions()
@@ -334,7 +334,7 @@ func TestSessionListerAdapter_FieldMapping(t *testing.T) {
 	t.Parallel()
 	adapter, mgr := newTestSessionListerAdapter(t)
 
-	sess, err := mgr.Create(t.Context(), "/home/user/my-app", "")
+	sess, err := mgr.Create(t.Context(), "/home/user/my-app")
 	require.NoError(t, err)
 
 	result := adapter.Sessions()
@@ -353,7 +353,7 @@ func TestSessionListerAdapter_WindowField(t *testing.T) {
 	t.Parallel()
 	adapter, mgr := newTestSessionListerAdapter(t)
 
-	sess, err := mgr.Create(t.Context(), "/home/user/windowed-app", "")
+	sess, err := mgr.Create(t.Context(), "/home/user/windowed-app")
 	require.NoError(t, err)
 
 	// Inject a TmuxWindow value directly into the store to test mapping.
@@ -369,7 +369,7 @@ func TestSessionListerAdapter_StatusField(t *testing.T) {
 	t.Parallel()
 	adapter, mgr := newTestSessionListerAdapter(t)
 
-	_, err := mgr.Create(t.Context(), "/home/user/status-app", "")
+	_, err := mgr.Create(t.Context(), "/home/user/status-app")
 	require.NoError(t, err)
 
 	result := adapter.Sessions()
@@ -384,7 +384,7 @@ func TestSessionListerAdapter_RunningStatus(t *testing.T) {
 	t.Parallel()
 	adapter, mgr := newTestSessionListerAdapter(t)
 
-	sess, err := mgr.Create(t.Context(), "/home/user/running-app", "")
+	sess, err := mgr.Create(t.Context(), "/home/user/running-app")
 	require.NoError(t, err)
 
 	mgr.Store().SetStatus(sess.ID, session.StatusRunning)

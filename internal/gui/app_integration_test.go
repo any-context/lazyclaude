@@ -44,7 +44,7 @@ func (m *mockSessionProvider) Projects() []gui.ProjectItem {
 	}}
 }
 func (m *mockSessionProvider) ToggleProjectExpanded(_ string) {}
-func (m *mockSessionProvider) Create(_, _ string) error { return nil }
+func (m *mockSessionProvider) Create(_ string) error { return nil }
 func (m *mockSessionProvider) Delete(_ string) error    { return nil }
 func (m *mockSessionProvider) Rename(_, _ string) error { return nil }
 func (m *mockSessionProvider) PurgeOrphans() (int, error) { return 0, nil }
@@ -76,12 +76,12 @@ func (m *mockSessionProvider) SendChoice(window string, choice gui.Choice) error
 	return nil
 }
 func (m *mockSessionProvider) AttachSession(_ string) error                       { return nil }
-func (m *mockSessionProvider) LaunchLazygit(_, _ string) error                    { return nil }
-func (m *mockSessionProvider) CreateWorktree(_, _, _, _ string) error               { return nil }
-func (m *mockSessionProvider) ResumeWorktree(_, _, _, _ string) error               { return nil }
-func (m *mockSessionProvider) ListWorktrees(_, _ string) ([]gui.WorktreeInfo, error) { return nil, nil }
-func (m *mockSessionProvider) CreatePMSession(_, _ string) error                     { return nil }
-func (m *mockSessionProvider) CreateWorkerSession(_, _, _, _ string) error           { return nil }
+func (m *mockSessionProvider) LaunchLazygit(_ string) error                       { return nil }
+func (m *mockSessionProvider) CreateWorktree(_, _, _ string) error                { return nil }
+func (m *mockSessionProvider) ResumeWorktree(_, _, _ string) error                { return nil }
+func (m *mockSessionProvider) ListWorktrees(_ string) ([]gui.WorktreeInfo, error) { return nil, nil }
+func (m *mockSessionProvider) CreatePMSession(_ string) error                     { return nil }
+func (m *mockSessionProvider) CreateWorkerSession(_, _, _ string) error           { return nil }
 
 func (m *mockSessionProvider) getSentChoices() []sentChoice {
 	m.mu.Lock()

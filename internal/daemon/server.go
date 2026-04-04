@@ -228,13 +228,13 @@ func (s *DaemonServer) handleSessionCreate(w http.ResponseWriter, r *http.Reques
 
 	switch req.SessionType {
 	case "plain", "":
-		sess, err = s.mgr.Create(ctx, req.Path, "")
+		sess, err = s.mgr.Create(ctx, req.Path)
 	case "worktree":
-		sess, err = s.mgr.CreateWorktree(ctx, req.Name, req.Prompt, req.ProjectRoot, "")
+		sess, err = s.mgr.CreateWorktree(ctx, req.Name, req.Prompt, req.ProjectRoot)
 	case "pm":
-		sess, err = s.mgr.CreatePMSession(ctx, req.ProjectRoot, "")
+		sess, err = s.mgr.CreatePMSession(ctx, req.ProjectRoot)
 	case "worker":
-		sess, err = s.mgr.CreateWorkerSession(ctx, req.Name, req.Prompt, req.ProjectRoot, "")
+		sess, err = s.mgr.CreateWorkerSession(ctx, req.Name, req.Prompt, req.ProjectRoot)
 	default:
 		http.Error(w, "invalid session_type", http.StatusBadRequest)
 		return
@@ -461,7 +461,7 @@ func (s *DaemonServer) handleWorktreeCreate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	sess, err := s.mgr.CreateWorktree(r.Context(), req.Name, req.Prompt, req.ProjectRoot, "")
+	sess, err := s.mgr.CreateWorktree(r.Context(), req.Name, req.Prompt, req.ProjectRoot)
 	if err != nil {
 		s.log.Printf("worktree/create: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -483,7 +483,7 @@ func (s *DaemonServer) handleWorktreeResume(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	sess, err := s.mgr.ResumeWorktree(r.Context(), req.WorktreePath, req.Prompt, req.ProjectRoot, "")
+	sess, err := s.mgr.ResumeWorktree(r.Context(), req.WorktreePath, req.Prompt, req.ProjectRoot)
 	if err != nil {
 		s.log.Printf("worktree/resume: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -500,7 +500,7 @@ func (s *DaemonServer) handleWorktreeList(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	items, err := session.ListWorktrees(r.Context(), projectRoot, "")
+	items, err := session.ListWorktrees(r.Context(), projectRoot)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -598,9 +598,9 @@ func (s *DaemonServer) handleMsgCreate(w http.ResponseWriter, r *http.Request) {
 
 	switch req.Type {
 	case "worker":
-		sess, err = s.mgr.CreateWorkerSession(ctx, req.Name, req.Prompt, project.Path, "")
+		sess, err = s.mgr.CreateWorkerSession(ctx, req.Name, req.Prompt, project.Path)
 	case "pm":
-		sess, err = s.mgr.CreatePMSession(ctx, project.Path, "")
+		sess, err = s.mgr.CreatePMSession(ctx, project.Path)
 	default:
 		http.Error(w, "type must be worker or pm", http.StatusBadRequest)
 		return

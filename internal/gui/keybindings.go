@@ -132,7 +132,6 @@ func (a *App) setupGlobalKeybindings() error {
 			return nil
 		}
 
-		host := a.currentSessionHost()
 		projectRoot := a.currentProjectRoot()
 		a.closeWorktreeDialog(g)
 
@@ -140,7 +139,7 @@ func (a *App) setupGlobalKeybindings() error {
 			if a.sessions == nil {
 				return
 			}
-			if err := a.sessions.CreateWorktree(branchName, userPrompt, projectRoot, host); err != nil {
+			if err := a.sessions.CreateWorktree(branchName, userPrompt, projectRoot); err != nil {
 				a.gui.Update(func(g *gocui.Gui) error {
 					a.showError(g, fmt.Sprintf("Error: %v", err))
 					return nil
@@ -270,7 +269,6 @@ func (a *App) setupGlobalKeybindings() error {
 	if err := a.gui.SetKeybinding("worktree-resume-prompt", gocui.KeyEnter, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		userPrompt := v.TextArea.GetContent()
 		wtPath := a.dialog.SelectedPath
-		host := a.currentSessionHost()
 		projectRoot := a.currentProjectRoot()
 		a.closeWorktreeResumePrompt(g)
 
@@ -278,7 +276,7 @@ func (a *App) setupGlobalKeybindings() error {
 			if a.sessions == nil {
 				return
 			}
-			if err := a.sessions.ResumeWorktree(wtPath, userPrompt, projectRoot, host); err != nil {
+			if err := a.sessions.ResumeWorktree(wtPath, userPrompt, projectRoot); err != nil {
 				a.gui.Update(func(g *gocui.Gui) error {
 					a.showError(g, fmt.Sprintf("Error: %v", err))
 					return nil

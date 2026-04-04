@@ -39,7 +39,7 @@ type SessionProvider interface {
 	Sessions() []SessionItem
 	Projects() []ProjectItem
 	ToggleProjectExpanded(projectID string)
-	Create(path, host string) error
+	Create(path string) error
 	Delete(id string) error
 	Rename(id, newName string) error
 	PurgeOrphans() (int, error)
@@ -49,12 +49,12 @@ type SessionProvider interface {
 	PendingNotifications() []*model.ToolNotification
 	SendChoice(window string, choice Choice) error
 	AttachSession(id string) error
-	LaunchLazygit(path, host string) error
-	CreateWorktree(name, prompt, projectRoot, host string) error
-	ResumeWorktree(worktreePath, prompt, projectRoot, host string) error
-	ListWorktrees(projectRoot, host string) ([]WorktreeInfo, error)
-	CreatePMSession(projectRoot, host string) error
-	CreateWorkerSession(name, prompt, projectRoot, host string) error
+	LaunchLazygit(path string) error
+	CreateWorktree(name, prompt, projectRoot string) error
+	ResumeWorktree(worktreePath, prompt, projectRoot string) error
+	ListWorktrees(projectRoot string) ([]WorktreeInfo, error)
+	CreatePMSession(projectRoot string) error
+	CreateWorkerSession(name, prompt, projectRoot string) error
 }
 
 // WorktreeInfo describes an existing worktree for the chooser.

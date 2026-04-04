@@ -48,51 +48,6 @@ func (r *LocalRunner) MkdirAll(ctx context.Context, path string) error {
 	return os.MkdirAll(path, 0o755)
 }
 
-// SSHRunner executes commands on a remote host via SSH.
-type SSHRunner struct {
-	Host string
-}
-
-func (r *SSHRunner) Run(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	if len(args) == 0 {
-		return nil, fmt.Errorf("no command specified")
-	}
-	// Build the command string: cd <dir> && <args...>
-	var cmdParts []string
-	for _, a := range args {
-		cmdParts = append(cmdParts, posixQuote(a))
-	}
-	remoteCmd := strings.Join(cmdParts, " ")
-	if dir != "" {
-		remoteCmd = fmt.Sprintf("cd %s && %s", posixQuote(dir), remoteCmd)
-	}
-	return RunSSHCommand(ctx, r.Host, remoteCmd)
-}
-
-func (r *SSHRunner) Exists(ctx context.Context, path string) (bool, error) {
-	cmd := fmt.Sprintf("test -d %s && echo exists || echo missing", posixQuote(path))
-	out, err := RunSSHCommand(ctx, r.Host, cmd)
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(string(out)) == "exists", nil
-}
-
-func (r *SSHRunner) MkdirAll(ctx context.Context, path string) error {
-	cmd := fmt.Sprintf("mkdir -p %s", posixQuote(path))
-	_, err := RunSSHCommand(ctx, r.Host, cmd)
-	return err
-}
-
-// NewGitRunner returns the appropriate GitRunner for the given host.
-// Empty host returns a LocalRunner; non-empty returns an SSHRunner.
-func NewGitRunner(host string) GitRunner {
-	if host == "" {
-		return &LocalRunner{}
-	}
-	return &SSHRunner{Host: host}
-}
-
 // CreateWorktreeWithRunner creates a git worktree using the provided runner.
 // Replaces both createGitWorktree (local) and createGitWorktreeRemote (SSH).
 func CreateWorktreeWithRunner(ctx context.Context, runner GitRunner, projectRoot, wtPath, branch string) error {
