@@ -256,21 +256,22 @@ func (a *App) CreateSessionAtCWD() { a.createSession(".") }
 
 // createSession is the shared implementation for CreateSession and CreateSessionAtCWD.
 // localPath is the fallback directory for non-SSH sessions.
+// Runs asynchronously to avoid blocking the GUI thread during remote operations.
 func (a *App) createSession(localPath string) {
 	if a.sessions == nil {
 		return
 	}
-	if err := a.sessions.Create(localPath); err != nil {
+	go func() {
+		err := a.sessions.Create(localPath)
 		a.gui.Update(func(g *gocui.Gui) error {
-			a.showError(g, fmt.Sprintf("Error: %v", err))
+			if err != nil {
+				a.showError(g, fmt.Sprintf("Error: %v", err))
+			} else {
+				a.setStatus(g, "Session created")
+			}
 			return nil
 		})
-		return
-	}
-	a.gui.Update(func(g *gocui.Gui) error {
-		a.setStatus(g, "Session created")
-		return nil
-	})
+	}()
 }
 
 func (a *App) DeleteSession() {
@@ -281,21 +282,22 @@ func (a *App) DeleteSession() {
 	if sess == nil {
 		return
 	}
-	if err := a.sessions.Delete(sess.ID); err != nil {
+	sessID := sess.ID
+	go func() {
+		err := a.sessions.Delete(sessID)
 		a.gui.Update(func(g *gocui.Gui) error {
-			a.showError(g, fmt.Sprintf("Error: %v", err))
+			if err != nil {
+				a.showError(g, fmt.Sprintf("Error: %v", err))
+				return nil
+			}
+			nodes := a.treeNodes()
+			if a.cursor > 0 && a.cursor >= len(nodes) {
+				a.cursor--
+			}
+			a.setStatus(g, "Session deleted")
 			return nil
 		})
-		return
-	}
-	nodes := a.treeNodes()
-	if a.cursor > 0 && a.cursor >= len(nodes) {
-		a.cursor--
-	}
-	a.gui.Update(func(g *gocui.Gui) error {
-		a.setStatus(g, "Session deleted")
-		return nil
-	})
+	}()
 }
 
 func (a *App) LaunchLazygit() {
@@ -456,18 +458,17 @@ func (a *App) PurgeOrphans() {
 	if a.sessions == nil {
 		return
 	}
-	count, err := a.sessions.PurgeOrphans()
-	if err != nil {
+	go func() {
+		count, err := a.sessions.PurgeOrphans()
 		a.gui.Update(func(g *gocui.Gui) error {
-			a.showError(g, fmt.Sprintf("Error: %v", err))
+			if err != nil {
+				a.showError(g, fmt.Sprintf("Error: %v", err))
+			} else {
+				a.setStatus(g, fmt.Sprintf("Purged %d orphans", count))
+			}
 			return nil
 		})
-		return
-	}
-	a.gui.Update(func(g *gocui.Gui) error {
-		a.setStatus(g, fmt.Sprintf("Purged %d orphans", count))
-		return nil
-	})
+	}()
 }
 
 // --- Popup ---
