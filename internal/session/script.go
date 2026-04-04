@@ -127,7 +127,8 @@ func BuildScript(cfg ScriptConfig) (string, error) {
 	return b.String(), nil
 }
 
-// writeMCPSetup writes the MCP lock file creation and cleanup trap.
+// writeMCPSetup writes the MCP lock file creation and cleanup trap,
+// and installs the lazyclaude executable script to PATH.
 func writeMCPSetup(b *strings.Builder, mcp *MCPConfig, windowName string) error {
 	lockDir := "$HOME/.claude/ide"
 	lockFile := fmt.Sprintf("%s/%d.lock", lockDir, mcp.Port)
@@ -148,15 +149,12 @@ func writeMCPSetup(b *strings.Builder, mcp *MCPConfig, windowName string) error 
 	b.WriteString("LOCKEOF\n")
 	b.WriteString(fmt.Sprintf("trap 'rm -f \"%s\"' EXIT\n", lockFile))
 
-	// Export MCP connection info so the lazyclaude shell function can reach
-	// the MCP server via the SSH reverse tunnel.
-	b.WriteString(fmt.Sprintf("export _LC_MCP_PORT=%d\n", mcp.Port))
-	b.WriteString(fmt.Sprintf("export _LC_MCP_TOKEN=%s\n", posixQuote(mcp.Token)))
 	// Export window name so hooks can identify their tmux window directly.
 	if windowName != "" {
 		b.WriteString(fmt.Sprintf("export _LC_WINDOW=%s\n", posixQuote(windowName)))
 	}
-	b.WriteString(lazyClaudeShellFunc())
+	// Install lazyclaude as an executable script in PATH.
+	writeLazyClaude(b, mcp.Port, mcp.Token)
 	return nil
 }
 
@@ -277,6 +275,23 @@ lazyclaude() {
     *) echo "lazyclaude: unknown command '$1'" >&2; return 1;;
   esac
 }
-export -f _lc_json_esc lazyclaude
 `
+}
+
+// writeLazyClaude writes an executable lazyclaude script to /tmp/lazyclaude/bin/
+// and prepends it to PATH. This makes the lazyclaude command available in any
+// shell (bash, zsh, etc.) that Claude Code's Bash tool may use.
+func writeLazyClaude(b *strings.Builder, port int, token string) {
+	binDir := "/tmp/lazyclaude/bin"
+	binPath := binDir + "/lazyclaude"
+	b.WriteString(fmt.Sprintf("mkdir -p '%s'\n", binDir))
+	b.WriteString(fmt.Sprintf("cat > '%s' << 'LCBINEOF'\n", binPath))
+	b.WriteString("#!/bin/bash\n")
+	b.WriteString(fmt.Sprintf("export _LC_MCP_PORT=%d\n", port))
+	b.WriteString(fmt.Sprintf("export _LC_MCP_TOKEN=%s\n", posixQuote(token)))
+	b.WriteString(lazyClaudeShellFunc())
+	b.WriteString("lazyclaude \"$@\"\n")
+	b.WriteString("LCBINEOF\n")
+	b.WriteString(fmt.Sprintf("chmod +x '%s'\n", binPath))
+	b.WriteString(fmt.Sprintf("export PATH=\"%s:$PATH\"\n", binDir))
 }

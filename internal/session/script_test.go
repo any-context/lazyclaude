@@ -259,9 +259,11 @@ func TestBuildScript_SSHWorktree_Full(t *testing.T) {
 	assert.Contains(t, script, "--append-system-prompt")
 	assert.Contains(t, script, `exec "$SHELL" -lic`)
 
-	// lazyclaude shell function present for SSH sessions
+	// lazyclaude installed as executable script in PATH
 	assert.Contains(t, script, "lazyclaude()")
-	assert.Contains(t, script, "export -f _lc_json_esc lazyclaude")
+	assert.Contains(t, script, "LCBINEOF")
+	assert.Contains(t, script, "chmod +x '/tmp/lazyclaude/bin/lazyclaude'")
+	assert.Contains(t, script, `export PATH="/tmp/lazyclaude/bin:$PATH"`)
 	assert.Contains(t, script, "export _LC_MCP_PORT=9876")
 
 	// No raw quotes from prompts (all base64-encoded to files)

@@ -206,19 +206,19 @@ func TestWriteRemoteScript_MCPEnvAndShellFunc(t *testing.T) {
 	require.NoError(t, err)
 	script := string(content)
 
-	// MCP environment variables must be exported
+	// lazyclaude installed as executable script in PATH
+	assert.Contains(t, script, "LCBINEOF")
+	assert.Contains(t, script, "chmod +x '/tmp/lazyclaude/bin/lazyclaude'")
+	assert.Contains(t, script, `export PATH="/tmp/lazyclaude/bin:$PATH"`)
 	assert.Contains(t, script, "export _LC_MCP_PORT=54321")
 	assert.Contains(t, script, "export _LC_MCP_TOKEN='my-mcp-token'")
-
-	// lazyclaude shell function must be defined
 	assert.Contains(t, script, "lazyclaude()")
-	assert.Contains(t, script, "_lc_json_esc()")
 
-	// Shell function must appear before exec $SHELL (otherwise it's never loaded)
-	funcIdx := strings.Index(script, "lazyclaude()")
+	// PATH export must appear before exec $SHELL
+	pathIdx := strings.Index(script, `export PATH="/tmp/lazyclaude/bin`)
 	execIdx := strings.Index(script, `exec "$SHELL"`)
 	require.Greater(t, execIdx, 0, "exec $SHELL not found in script")
-	assert.Less(t, funcIdx, execIdx, "lazyclaude() must be defined before exec $SHELL")
+	assert.Less(t, pathIdx, execIdx, "PATH must be set before exec $SHELL")
 }
 
 // --- buildSSHCommand tests ---
