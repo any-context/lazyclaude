@@ -3,7 +3,6 @@ package daemon
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 )
 
 // DaemonInfoDir returns the directory for daemon runtime files.
@@ -15,7 +14,3 @@ func DaemonInfoDir() string {
 	return "/tmp/lazyclaude"
 }
 
-// DaemonInfoPath returns the full path to the daemon.json file.
-func DaemonInfoPath() string {
-	return filepath.Join(DaemonInfoDir(), "daemon.json")
-}

@@ -72,7 +72,9 @@ func newDaemonCmd() *cobra.Command {
 
 			// Print JSON to stdout so parseDaemonOutput can parse it.
 			// daemon.json is also written to disk for file-based discovery.
-			json.NewEncoder(os.Stdout).Encode(daemon.DaemonInfo{Port: actualPort, Token: token})
+			if err := json.NewEncoder(os.Stdout).Encode(daemon.DaemonInfo{Port: actualPort, Token: token}); err != nil {
+				return fmt.Errorf("write daemon info to stdout: %w", err)
+			}
 
 			// Wait for signal or shutdown request
 			sigCh := make(chan os.Signal, 1)

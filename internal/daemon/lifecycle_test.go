@@ -9,7 +9,7 @@ import (
 
 func TestStartRemoteDaemon_Success(t *testing.T) {
 	ssh := newMockSSH()
-	cmd := "nohup lazyclaude daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & sleep 2 && cat /tmp/lazyclaude-$(whoami)/daemon.json"
+	cmd := "nohup lazyclaude daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & for i in $(seq 1 20); do sleep 0.5 && [ -f /tmp/lazyclaude-$(whoami)/daemon.json ] && cat /tmp/lazyclaude-$(whoami)/daemon.json && exit 0; done; exit 1"
 	ssh.onRun(cmd, `{"port":12345,"token":"abc123"}`, nil)
 
 	lm := NewLifecycleManager(ssh)
@@ -30,7 +30,7 @@ func TestStartRemoteDaemon_Success(t *testing.T) {
 
 func TestStartRemoteDaemon_SSHError(t *testing.T) {
 	ssh := newMockSSH()
-	cmd := "nohup lazyclaude daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & sleep 2 && cat /tmp/lazyclaude-$(whoami)/daemon.json"
+	cmd := "nohup lazyclaude daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & for i in $(seq 1 20); do sleep 0.5 && [ -f /tmp/lazyclaude-$(whoami)/daemon.json ] && cat /tmp/lazyclaude-$(whoami)/daemon.json && exit 0; done; exit 1"
 	ssh.onRun(cmd, "", fmt.Errorf("connection refused"))
 
 	lm := NewLifecycleManager(ssh)
@@ -45,7 +45,7 @@ func TestStartRemoteDaemon_SSHError(t *testing.T) {
 
 func TestStartRemoteDaemon_InvalidOutput(t *testing.T) {
 	ssh := newMockSSH()
-	cmd := "nohup lazyclaude daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & sleep 2 && cat /tmp/lazyclaude-$(whoami)/daemon.json"
+	cmd := "nohup lazyclaude daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & for i in $(seq 1 20); do sleep 0.5 && [ -f /tmp/lazyclaude-$(whoami)/daemon.json ] && cat /tmp/lazyclaude-$(whoami)/daemon.json && exit 0; done; exit 1"
 	ssh.onRun(cmd, "not json at all", nil)
 
 	lm := NewLifecycleManager(ssh)

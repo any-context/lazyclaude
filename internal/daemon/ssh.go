@@ -35,7 +35,6 @@ func (e *ExecSSHExecutor) Copy(ctx context.Context, host, localPath, remotePath 
 	}
 	args = append(args, localPath, sshHost+":"+remotePath)
 	cmd := exec.CommandContext(ctx, "scp", args...)
-	cmd.Stderr = nil
 	return cmd.Run()
 }
 

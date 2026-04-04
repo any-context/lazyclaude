@@ -31,7 +31,8 @@ func NewLifecycleManager(ssh SSHExecutor) *LifecycleManager {
 // background and then read daemon.json which contains the port and token.
 func (lm *LifecycleManager) StartRemoteDaemon(ctx context.Context, host string) (*DaemonInfo, error) {
 	cmd := "nohup lazyclaude daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & " +
-		"sleep 2 && cat /tmp/lazyclaude-$(whoami)/daemon.json"
+		"for i in $(seq 1 20); do sleep 0.5 && [ -f /tmp/lazyclaude-$(whoami)/daemon.json ] && " +
+		"cat /tmp/lazyclaude-$(whoami)/daemon.json && exit 0; done; exit 1"
 	output, err := lm.ssh.Run(ctx, host, cmd)
 	if err != nil {
 		return nil, fmt.Errorf("lazyclaude is not installed on %s: %w", host, err)
