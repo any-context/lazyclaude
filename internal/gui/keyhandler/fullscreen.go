@@ -46,6 +46,10 @@ func (h *FullScreenHandler) HandleKey(ev KeyEvent, actions FullScreenActions) Ha
 		actions.ForwardSpecialKey("Down")
 	case keymap.ActionForwardUp:
 		actions.ForwardSpecialKey("Up")
+	case keymap.ActionDismissError:
+		actions.DismissError()
+	case keymap.ActionCopyError:
+		actions.CopyError()
 	default:
 		return Unhandled
 	}

@@ -425,7 +425,7 @@ func Default() *Registry {
 		DocSection:  "connect_remote",
 	})
 
-	// --- Error display actions (session panel) ---
+	// --- Error display actions (session + fullscreen) ---
 	r.Register(ActionDef{
 		Action:      ActionDismissError,
 		Bindings:    []KeyBinding{{Key: gocui.KeyEsc}},
@@ -437,6 +437,22 @@ func Default() *Registry {
 		Action:      ActionCopyError,
 		Bindings:    []KeyBinding{{Key: gocui.KeyCtrlV}},
 		Scope:       ScopeSession,
+		HintLabel:   "copy err",
+		HintKey:     "C-v",
+		Description: "Copy error message to clipboard",
+		DocSection:  "copy_error",
+	})
+	r.Register(ActionDef{
+		Action:      ActionDismissError,
+		Bindings:    []KeyBinding{{Key: gocui.KeyEsc}},
+		Scope:       ScopeFullScreen,
+		Description: "Dismiss error message",
+		DocSection:  "dismiss_error",
+	})
+	r.Register(ActionDef{
+		Action:      ActionCopyError,
+		Bindings:    []KeyBinding{{Key: gocui.KeyCtrlV}},
+		Scope:       ScopeFullScreen,
 		HintLabel:   "copy err",
 		HintKey:     "C-v",
 		Description: "Copy error message to clipboard",

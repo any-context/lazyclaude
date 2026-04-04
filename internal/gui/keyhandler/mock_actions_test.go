@@ -77,6 +77,8 @@ type mockFullScreenActions struct {
 func (m *mockFullScreenActions) IsFullScreen() bool           { return m.fullScreen }
 func (m *mockFullScreenActions) ExitFullScreen()              { m.record("ExitFullScreen") }
 func (m *mockFullScreenActions) ForwardSpecialKey(key string) { m.record("ForwardSpecialKey:" + key) }
+func (m *mockFullScreenActions) DismissError()               { m.record("DismissError") }
+func (m *mockFullScreenActions) CopyError()                  { m.record("CopyError") }
 func (m *mockFullScreenActions) IsScrollMode() bool           { return m.scrollMode }
 func (m *mockFullScreenActions) ScrollModeEnter()             { m.record("ScrollModeEnter") }
 func (m *mockFullScreenActions) ScrollModeExit()              { m.record("ScrollModeExit") }
