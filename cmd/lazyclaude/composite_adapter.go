@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/any-context/lazyclaude/internal/adapter/tmuxadapter"
@@ -244,19 +245,59 @@ func sessionToDaemonInfo(s session.Session) daemon.SessionInfo {
 // This bridges the daemon's type system (daemon.SessionInfo etc.) to the GUI's
 // type system (gui.SessionItem etc.).
 type guiCompositeAdapter struct {
-	cp      *daemon.CompositeProvider
+	cp       *daemon.CompositeProvider
 	localMgr *session.Manager
-	paths   config.Paths
+	paths    config.Paths
 
 	// windowActivityFn provides window->activity mapping from the App layer.
 	windowActivityFn func() map[string]gui.WindowActivityEntry
 
 	// cachedPending is refreshed once per layout cycle.
 	cachedPending map[string]bool
+
+	// Lazy remote connection: pendingHost is set once at construction and never
+	// mutated. connectFn is the root.go connectRemoteHost closure.
+	pendingHost string             // SSH host detected at startup (immutable after construction)
+	connectFn   func(string) error // connectRemoteHost from root.go
+	connectMu   sync.Mutex
+	connecting  map[string]*lazyConn // one entry per host
 }
 
 // Compile-time check.
 var _ gui.SessionProvider = (*guiCompositeAdapter)(nil)
+
+// lazyConn ensures a remote host is connected exactly once.
+// If the initial connect fails, subsequent callers see the cached error
+// without retrying (connectRemoteHost leaves no side effects on failure).
+type lazyConn struct {
+	once sync.Once
+	err  error
+}
+
+// ensureRemoteConnected lazily establishes a remote connection on first use.
+// Returns nil if host is empty (local operation) or already connected.
+// Uses sync.Once per host to guarantee exactly one connectFn call.
+func (a *guiCompositeAdapter) ensureRemoteConnected(host string) error {
+	if host == "" || a.connectFn == nil {
+		return nil
+	}
+
+	a.connectMu.Lock()
+	if a.connecting == nil {
+		a.connecting = make(map[string]*lazyConn)
+	}
+	lc, ok := a.connecting[host]
+	if !ok {
+		lc = &lazyConn{}
+		a.connecting[host] = lc
+	}
+	a.connectMu.Unlock()
+
+	lc.once.Do(func() {
+		lc.err = a.connectFn(host)
+	})
+	return lc.err
+}
 
 func (a *guiCompositeAdapter) RefreshPendingFrom(notifications []*model.ToolNotification) {
 	a.cachedPending = pendingWindowSet(notifications)
@@ -295,7 +336,11 @@ func (a *guiCompositeAdapter) ToggleProjectExpanded(projectID string) {
 }
 
 func (a *guiCompositeAdapter) Create(path string) error {
-	return a.cp.Create(path, "")
+	host := a.pendingHost
+	if err := a.ensureRemoteConnected(host); err != nil {
+		return err
+	}
+	return a.cp.Create(path, host)
 }
 
 func (a *guiCompositeAdapter) Delete(id string) error {
@@ -355,15 +400,27 @@ func (a *guiCompositeAdapter) LaunchLazygit(path string) error {
 }
 
 func (a *guiCompositeAdapter) CreateWorktree(name, prompt, projectRoot string) error {
-	return a.cp.CreateWorktree(name, prompt, projectRoot, "")
+	host := a.pendingHost
+	if err := a.ensureRemoteConnected(host); err != nil {
+		return err
+	}
+	return a.cp.CreateWorktree(name, prompt, projectRoot, host)
 }
 
 func (a *guiCompositeAdapter) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
-	return a.cp.ResumeWorktree(worktreePath, prompt, projectRoot, "")
+	host := a.pendingHost
+	if err := a.ensureRemoteConnected(host); err != nil {
+		return err
+	}
+	return a.cp.ResumeWorktree(worktreePath, prompt, projectRoot, host)
 }
 
 func (a *guiCompositeAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeInfo, error) {
-	items, err := a.cp.ListWorktrees(projectRoot, "")
+	host := a.pendingHost
+	if err := a.ensureRemoteConnected(host); err != nil {
+		return nil, err
+	}
+	items, err := a.cp.ListWorktrees(projectRoot, host)
 	if err != nil {
 		return nil, err
 	}
@@ -375,11 +432,19 @@ func (a *guiCompositeAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeI
 }
 
 func (a *guiCompositeAdapter) CreatePMSession(projectRoot string) error {
-	return a.cp.CreatePMSession(projectRoot, "")
+	host := a.pendingHost
+	if err := a.ensureRemoteConnected(host); err != nil {
+		return err
+	}
+	return a.cp.CreatePMSession(projectRoot, host)
 }
 
 func (a *guiCompositeAdapter) CreateWorkerSession(name, prompt, projectRoot string) error {
-	return a.cp.CreateWorkerSession(name, prompt, projectRoot, "")
+	host := a.pendingHost
+	if err := a.ensureRemoteConnected(host); err != nil {
+		return err
+	}
+	return a.cp.CreateWorkerSession(name, prompt, projectRoot, host)
 }
 
 // daemonInfoToGUIItem converts daemon.SessionInfo to gui.SessionItem.

@@ -21,7 +21,6 @@ import (
 	"github.com/any-context/lazyclaude/internal/core/tmux"
 	"github.com/any-context/lazyclaude/internal/daemon"
 	"github.com/any-context/lazyclaude/internal/gui"
-	"github.com/jesseduffield/gocui"
 	"github.com/any-context/lazyclaude/internal/mcp"
 	"github.com/any-context/lazyclaude/internal/notify"
 	"github.com/any-context/lazyclaude/internal/plugin"
@@ -177,20 +176,15 @@ func newRootCmd() *cobra.Command {
 			}
 
 			// Auto-detect SSH host from the originating pane.
-			// startupError is displayed on the first tick (no goroutine leak).
-			var startupError string
-
-			if sshHost := gui.DetectSSHHost(); sshHost != "" {
-				if connErr := connectRemoteHost(sshHost); connErr != nil {
-					fmt.Fprintf(os.Stderr, "warning: %v\n", connErr)
-					startupError = connErr.Error()
-				}
-			}
+			// Connection is deferred until the user performs a remote operation.
+			pendingSSHHost := gui.DetectSSHHost()
 
 			compositeAdapter := &guiCompositeAdapter{
-				cp:       composite,
-				localMgr: mgr,
-				paths:    paths,
+				cp:         composite,
+				localMgr:   mgr,
+				paths:      paths,
+				pendingHost: pendingSSHHost,
+				connectFn:   connectRemoteHost,
 			}
 			compositeAdapter.windowActivityFn = app.WindowActivityMap
 			app.SetSessions(compositeAdapter)
@@ -250,15 +244,6 @@ func newRootCmd() *cobra.Command {
 			app.SetOnTick(func() {
 				ctrlMgr.ensureConnected()
 				sockChecker.check()
-				// Display startup error on the first tick (avoids goroutine leak).
-				if startupError != "" {
-					msg := startupError
-					startupError = ""
-					app.Gui().Update(func(g *gocui.Gui) error {
-						app.ShowError(g, msg)
-						return nil
-					})
-				}
 			})
 			lc.Register("control-client", ctrlMgr.close)
 
