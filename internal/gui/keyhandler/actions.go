@@ -50,8 +50,6 @@ type FullScreenActions interface {
 	IsFullScreen() bool
 	ExitFullScreen()
 	ForwardSpecialKey(tmuxKey string)
-	DismissError()
-	CopyError()
 }
 
 // LogsActions provides logs panel operations.
