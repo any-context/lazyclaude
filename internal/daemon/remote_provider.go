@@ -53,10 +53,20 @@ func NewRemoteProvider(host string, conn ConnectionManager) *RemoteProvider {
 }
 
 // SetTmuxClient sets the forwarded tmux.Client for direct pane operations.
-// When set, CapturePreview, CaptureScrollback, HistorySize, SendChoice,
-// AttachSession, and LaunchLazygit use the forwarded socket directly.
+// When set, CapturePreview, CaptureScrollback, HistorySize, and SendChoice
+// use the forwarded socket directly instead of the daemon API.
+// Must be called before the GUI event loop starts.
 func (rp *RemoteProvider) SetTmuxClient(tc tmux.Client) {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
 	rp.tmuxClient = tc
+}
+
+// getTmuxClient returns the forwarded tmux.Client, or nil if not set.
+func (rp *RemoteProvider) getTmuxClient() tmux.Client {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	return rp.tmuxClient
 }
 
 // StartSSE begins consuming the SSE notification stream in a background
@@ -255,8 +265,8 @@ func (rp *RemoteProvider) resolveTmuxTarget(id string) string {
 }
 
 func (rp *RemoteProvider) CapturePreview(id string, width, height int) (*PreviewResponse, error) {
-	if rp.tmuxClient != nil {
-		return rp.capturePreviewDirect(id, width, height)
+	if tc := rp.getTmuxClient(); tc != nil {
+		return rp.capturePreviewDirect(tc, id, width, height)
 	}
 	client, err := rp.conn.Client()
 	if err != nil {
@@ -266,16 +276,16 @@ func (rp *RemoteProvider) CapturePreview(id string, width, height int) (*Preview
 }
 
 // capturePreviewDirect captures pane content via the forwarded tmux socket.
-func (rp *RemoteProvider) capturePreviewDirect(id string, width, height int) (*PreviewResponse, error) {
+func (rp *RemoteProvider) capturePreviewDirect(tc tmux.Client, id string, width, height int) (*PreviewResponse, error) {
 	target := rp.resolveTmuxTarget(id)
 	ctx := context.Background()
 
 	if width > 0 && height > 0 {
-		_ = rp.tmuxClient.ResizeWindow(ctx, target, width, height)
+		_ = tc.ResizeWindow(ctx, target, width, height)
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	content, err := rp.tmuxClient.CapturePaneANSI(ctx, target)
+	content, err := tc.CapturePaneANSI(ctx, target)
 	if err != nil || width <= 0 {
 		return &PreviewResponse{Content: content}, err
 	}
@@ -291,7 +301,7 @@ func (rp *RemoteProvider) capturePreviewDirect(id string, width, height int) (*P
 	}
 
 	var cursorX, cursorY int
-	if pos, posErr := rp.tmuxClient.ShowMessage(ctx, target, "#{cursor_x},#{cursor_y}"); posErr == nil {
+	if pos, posErr := tc.ShowMessage(ctx, target, "#{cursor_x},#{cursor_y}"); posErr == nil {
 		parts := strings.SplitN(strings.TrimSpace(pos), ",", 2)
 		if len(parts) == 2 {
 			cursorX, _ = strconv.Atoi(parts[0])
@@ -307,8 +317,8 @@ func (rp *RemoteProvider) capturePreviewDirect(id string, width, height int) (*P
 }
 
 func (rp *RemoteProvider) CaptureScrollback(id string, width, startLine, endLine int) (*ScrollbackResponse, error) {
-	if rp.tmuxClient != nil {
-		return rp.captureScrollbackDirect(id, startLine, endLine)
+	if tc := rp.getTmuxClient(); tc != nil {
+		return rp.captureScrollbackDirect(tc, id, startLine, endLine)
 	}
 	client, err := rp.conn.Client()
 	if err != nil {
@@ -317,15 +327,15 @@ func (rp *RemoteProvider) CaptureScrollback(id string, width, startLine, endLine
 	return client.CaptureScrollback(context.Background(), id, width, startLine, endLine)
 }
 
-func (rp *RemoteProvider) captureScrollbackDirect(id string, startLine, endLine int) (*ScrollbackResponse, error) {
+func (rp *RemoteProvider) captureScrollbackDirect(tc tmux.Client, id string, startLine, endLine int) (*ScrollbackResponse, error) {
 	target := rp.resolveTmuxTarget(id)
-	content, err := rp.tmuxClient.CapturePaneANSIRange(context.Background(), target, startLine, endLine)
+	content, err := tc.CapturePaneANSIRange(context.Background(), target, startLine, endLine)
 	return &ScrollbackResponse{Content: content}, err
 }
 
 func (rp *RemoteProvider) HistorySize(id string) (int, error) {
-	if rp.tmuxClient != nil {
-		return rp.historySizeDirect(id)
+	if tc := rp.getTmuxClient(); tc != nil {
+		return rp.historySizeDirect(tc, id)
 	}
 	client, err := rp.conn.Client()
 	if err != nil {
@@ -338,9 +348,9 @@ func (rp *RemoteProvider) HistorySize(id string) (int, error) {
 	return resp.Lines, nil
 }
 
-func (rp *RemoteProvider) historySizeDirect(id string) (int, error) {
+func (rp *RemoteProvider) historySizeDirect(tc tmux.Client, id string) (int, error) {
 	target := rp.resolveTmuxTarget(id)
-	out, err := rp.tmuxClient.ShowMessage(context.Background(), target, "#{history_size}")
+	out, err := tc.ShowMessage(context.Background(), target, "#{history_size}")
 	if err != nil {
 		return 0, err
 	}
@@ -354,8 +364,8 @@ func (rp *RemoteProvider) historySizeDirect(id string) (int, error) {
 // When tmuxClient is set, sends directly via the forwarded socket.
 // Otherwise falls back to the daemon API.
 func (rp *RemoteProvider) SendChoice(window string, choiceVal int) error {
-	if rp.tmuxClient != nil {
-		return tmuxadapter.SendToPane(context.Background(), rp.tmuxClient, window, choice.Choice(choiceVal))
+	if tc := rp.getTmuxClient(); tc != nil {
+		return tmuxadapter.SendToPane(context.Background(), tc, window, choice.Choice(choiceVal))
 	}
 	client, err := rp.conn.Client()
 	if err != nil {

@@ -190,9 +190,10 @@ type SocketTunnel struct {
 	localSock  string // local Unix socket path
 	remoteSock string // remote Unix socket path (detected or provided)
 
-	mu   sync.Mutex
-	cmd  *exec.Cmd
-	done chan error
+	mu     sync.Mutex
+	cmd    *exec.Cmd
+	done   chan error
+	cancel context.CancelFunc // cancels the internal context for the SSH process
 }
 
 // NewSocketTunnel creates a SocketTunnel. The remote socket path is detected
@@ -228,6 +229,9 @@ func DetectRemoteSocket(ctx context.Context, host string) (string, error) {
 
 // Start launches the SSH socket forwarding process.
 // If remoteSock was not provided at construction, it is detected first.
+// The caller-supplied context is used only for the initial remote socket
+// detection. The SSH process itself runs under an internal context controlled
+// by Stop, so it is not terminated when the caller's context is canceled.
 func (st *SocketTunnel) Start(ctx context.Context) error {
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -265,12 +269,18 @@ func (st *SocketTunnel) Start(ctx context.Context) error {
 	}
 	args = append(args, sshHost)
 
-	st.cmd = exec.CommandContext(ctx, "ssh", args...)
+	// Use an internal context so the long-lived SSH process is not killed
+	// when the caller's context is canceled. Stop() cancels this context.
+	intCtx, intCancel := context.WithCancel(context.Background())
+	st.cmd = exec.CommandContext(intCtx, "ssh", args...)
+	st.cancel = intCancel
 	st.done = make(chan error, 1)
 
 	if err := st.cmd.Start(); err != nil {
+		intCancel()
 		st.cmd = nil
 		st.done = nil
+		st.cancel = nil
 		return fmt.Errorf("start socket tunnel: %w", err)
 	}
 
@@ -287,15 +297,15 @@ func (st *SocketTunnel) Stop() error {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 
-	if st.cmd == nil || st.cmd.Process == nil {
-		return nil
+	if st.cancel != nil {
+		st.cancel()
+		st.cancel = nil
 	}
 
-	err := st.cmd.Process.Kill()
-	os.Remove(st.localSock)
-	if err != nil {
-		return fmt.Errorf("kill socket tunnel: %w", err)
+	if err := os.Remove(st.localSock); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "warning: remove socket %s: %v\n", st.localSock, err)
 	}
+
 	return nil
 }
 
@@ -322,6 +332,7 @@ func (st *SocketTunnel) IsAlive() bool {
 }
 
 // Wait returns a channel that receives the tunnel process exit error.
+// Returns nil if the tunnel has not been started or has already been cleaned up.
 func (st *SocketTunnel) Wait() <-chan error {
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -357,8 +368,12 @@ func (st *SocketTunnel) SSHArgs() []string {
 }
 
 // SocketTunnelLocalPath returns the conventional local socket path for a host.
+// The socket lives in /tmp with default permissions. Any local user with
+// filesystem access can connect to it and issue tmux commands against the
+// remote server. This matches the trust model of the port-forwarding Tunnel
+// (also binds to 127.0.0.1) and is acceptable for a developer tool where
+// the local machine is trusted.
 func SocketTunnelLocalPath(host string) string {
-	// Sanitize host for use in file path.
 	safe := strings.NewReplacer("@", "-", ":", "-", "/", "-").Replace(host)
 	return fmt.Sprintf("/tmp/lazyclaude-tmux-%s.sock", safe)
 }

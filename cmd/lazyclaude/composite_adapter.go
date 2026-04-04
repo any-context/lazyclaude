@@ -263,7 +263,11 @@ func (a *guiCompositeAdapter) RefreshPendingFrom(notifications []*model.ToolNoti
 }
 
 func (a *guiCompositeAdapter) Sessions() []gui.SessionItem {
-	sessions, _ := a.cp.Sessions()
+	sessions, err := a.cp.Sessions()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: composite sessions: %v\n", err)
+		return nil
+	}
 	items := make([]gui.SessionItem, len(sessions))
 	activity := a.getWindowActivity()
 	for i, s := range sessions {
