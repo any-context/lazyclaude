@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/any-context/lazyclaude/internal/core/choice"
+	"github.com/any-context/lazyclaude/internal/core/model"
 	"github.com/any-context/lazyclaude/internal/gui/keyhandler"
 	"github.com/any-context/lazyclaude/internal/gui/keymap"
 	"github.com/any-context/lazyclaude/internal/session"
@@ -106,6 +107,7 @@ func (a *App) MoveCursorDown() {
 	if a.cursor < len(nodes)-1 {
 		a.cursor++
 	}
+	a.clearError()
 	a.syncPluginProject()
 }
 
@@ -113,6 +115,7 @@ func (a *App) MoveCursorUp() {
 	if a.cursor > 0 {
 		a.cursor--
 	}
+	a.clearError()
 	a.syncPluginProject()
 }
 
@@ -379,7 +382,35 @@ func (a *App) EnterFullScreen() {
 	if sess == nil {
 		return
 	}
+	// If the session has an error/dead state and no tmux window, show the
+	// error in the main panel instead of entering fullscreen (there is
+	// nothing to attach to).
+	if sess.TmuxWindow == "" && (sess.Activity == model.ActivityError || sess.Status == "Dead") {
+		// gui.Update is needed because showError calls g.View to write the
+		// main panel. The outer EnterFullScreen runs on the gocui event loop
+		// already, but showError requires a *gocui.Gui parameter.
+		a.gui.Update(func(g *gocui.Gui) error {
+			msg := "Session error (no tmux window)"
+			if a.errorMsg != "" {
+				msg = a.errorMsg
+			}
+			a.showError(g, msg)
+			return nil
+		})
+		return
+	}
 	a.enterFullScreen(sess.ID)
+}
+
+func (a *App) DismissError() {
+	a.clearError()
+}
+
+func (a *App) CopyError() {
+	if a.errorMsg == "" {
+		return
+	}
+	copyToClipboard(a.errorMsg)
 }
 
 func (a *App) StartRename() {

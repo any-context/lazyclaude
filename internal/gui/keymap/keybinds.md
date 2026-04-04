@@ -218,3 +218,15 @@ Filter the current panel's items by name.
 Type to filter items in real time (case-insensitive substring match).
 `Enter` confirms the filter and keeps the filtered view.
 `Esc` cancels the search and restores the original list.
+
+## dismiss_error
+
+Dismiss the error message displayed in the main panel.
+`Esc` clears the error so the normal session preview is shown again.
+Errors also clear automatically when you move the cursor to another session.
+
+## copy_error
+
+Copy the current error message to the system clipboard.
+`Ctrl+V` copies the error text using `pbcopy` (macOS) so you can paste it
+into a terminal, bug report, or message.

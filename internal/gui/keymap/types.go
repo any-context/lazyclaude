@@ -67,6 +67,8 @@ const (
 	ActionSendKey2             KeyAction = "send_key_2"
 	ActionSendKey3             KeyAction = "send_key_3"
 	ActionConnectRemote        KeyAction = "connect_remote"
+	ActionDismissError         KeyAction = "dismiss_error"
+	ActionCopyError            KeyAction = "copy_error"
 )
 
 // --- Plugin panel actions ---

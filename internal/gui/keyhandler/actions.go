@@ -29,6 +29,8 @@ type SessionActions interface {
 	CursorIsProject() bool
 	StartSearch()
 	ConnectRemote()
+	DismissError()
+	CopyError()
 }
 
 // PopupActions provides popup management.

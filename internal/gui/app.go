@@ -134,7 +134,6 @@ type App struct {
 	cachedSessionItems []SessionItem            // cached session list; refreshed asynchronously
 	sessionRefreshing  bool                     // true while a background refresh is in flight
 	errorMsg           string                   // currently displayed error message
-	errorExpiry        time.Time                // when the error display expires
 }
 
 
@@ -534,20 +533,22 @@ func (a *App) setStatus(g *gocui.Gui, msg string) {
 	// Invalidate the log render cache so the next layout cycle
 	// re-renders the log content over this status message.
 	a.logRender.modTime = -1
+	// A successful status message clears any lingering error display.
+	a.clearError()
 }
-
-// errorDisplayDuration is how long showError holds the main panel before
-// allowing the preview to overwrite it.
-const errorDisplayDuration = 5 * time.Second
 
 // showError displays an error in both the logs panel and the main panel
 // so it is immediately visible regardless of which panel the user is viewing.
-// The error is held for errorDisplayDuration so that the next layout cycle
-// does not overwrite it with the preview content.
+// The error persists until explicitly cleared by clearError (cursor move,
+// Esc, or a successful setStatus call).
+//
+// Note: setStatus clears errorMsg as a side effect, but showError immediately
+// re-sets it on the next line. This is intentional — setStatus handles the
+// logs panel rendering and cache invalidation, while errorMsg controls the
+// main panel guard in isErrorActive.
 func (a *App) showError(g *gocui.Gui, msg string) {
 	a.setStatus(g, msg)
 	a.errorMsg = msg
-	a.errorExpiry = time.Now().Add(errorDisplayDuration)
 	if v, err := g.View("main"); err == nil {
 		v.Clear()
 		fmt.Fprintln(v, "")
@@ -555,16 +556,14 @@ func (a *App) showError(g *gocui.Gui, msg string) {
 	}
 }
 
-// isErrorActive clears expired error state and reports whether an error
-// message is still being displayed. Called once per layout cycle.
+// clearError removes the current error message so the next layout cycle
+// can render the normal preview again.
+func (a *App) clearError() {
+	a.errorMsg = ""
+}
+
+// isErrorActive reports whether an error message is currently displayed.
+// Called once per layout cycle to guard preview rendering.
 func (a *App) isErrorActive() bool {
-	if a.errorMsg == "" {
-		return false
-	}
-	if time.Now().After(a.errorExpiry) {
-		a.errorMsg = ""
-		a.errorExpiry = time.Time{}
-		return false
-	}
-	return true
+	return a.errorMsg != ""
 }
