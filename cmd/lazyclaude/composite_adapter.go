@@ -257,10 +257,12 @@ type guiCompositeAdapter struct {
 
 	// Lazy remote connection: pendingHost is set once at construction and never
 	// mutated. connectFn is the root.go connectRemoteHost closure.
-	pendingHost string             // SSH host detected at startup (immutable after construction)
-	connectFn   func(string) error // connectRemoteHost from root.go
-	connectMu   sync.Mutex
-	connecting  map[string]*lazyConn // one entry per host
+	pendingHost       string             // SSH host detected at startup (immutable after construction)
+	pendingRemotePath string             // Remote CWD from OSC 7 (immutable after construction)
+	localProjectRoot  string             // Local project root at startup (immutable after construction)
+	connectFn         func(string) error // connectRemoteHost from root.go
+	connectMu         sync.Mutex
+	connecting        map[string]*lazyConn // one entry per host
 
 	// onError reports errors to the GUI via showError. Wired in root.go.
 	// lastErrorMsg deduplicates consecutive identical errors to avoid flooding
@@ -351,7 +353,28 @@ func (a *guiCompositeAdapter) Create(path string) error {
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return err
 	}
+	if host != "" {
+		path = a.resolveRemotePath(path)
+	}
 	return a.cp.Create(path, host)
+}
+
+// resolveRemotePath maps a local path to the detected remote CWD when
+// creating the first session on an SSH pane. Once remote sessions exist,
+// currentProjectRoot() returns the correct remote path from the session
+// tree, so the provided path is returned unchanged.
+func (a *guiCompositeAdapter) resolveRemotePath(path string) string {
+	if a.pendingRemotePath == "" {
+		return path
+	}
+	// "." comes from CreateSessionAtCWD (N key).
+	// localProjectRoot match comes from CreateSession (n key) when no
+	// remote sessions exist yet and currentProjectRoot() falls back to
+	// the local working directory.
+	if path == "." || path == a.localProjectRoot {
+		return a.pendingRemotePath
+	}
+	return path
 }
 
 func (a *guiCompositeAdapter) Delete(id string) error {
@@ -415,6 +438,9 @@ func (a *guiCompositeAdapter) CreateWorktree(name, prompt, projectRoot string) e
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return err
 	}
+	if host != "" {
+		projectRoot = a.resolveRemotePath(projectRoot)
+	}
 	return a.cp.CreateWorktree(name, prompt, projectRoot, host)
 }
 
@@ -423,6 +449,9 @@ func (a *guiCompositeAdapter) ResumeWorktree(worktreePath, prompt, projectRoot s
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return err
 	}
+	if host != "" {
+		projectRoot = a.resolveRemotePath(projectRoot)
+	}
 	return a.cp.ResumeWorktree(worktreePath, prompt, projectRoot, host)
 }
 
@@ -430,6 +459,9 @@ func (a *guiCompositeAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeI
 	host := a.pendingHost
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return nil, err
+	}
+	if host != "" {
+		projectRoot = a.resolveRemotePath(projectRoot)
 	}
 	items, err := a.cp.ListWorktrees(projectRoot, host)
 	if err != nil {
@@ -447,6 +479,9 @@ func (a *guiCompositeAdapter) CreatePMSession(projectRoot string) error {
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return err
 	}
+	if host != "" {
+		projectRoot = a.resolveRemotePath(projectRoot)
+	}
 	return a.cp.CreatePMSession(projectRoot, host)
 }
 
@@ -454,6 +489,9 @@ func (a *guiCompositeAdapter) CreateWorkerSession(name, prompt, projectRoot stri
 	host := a.pendingHost
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return err
+	}
+	if host != "" {
+		projectRoot = a.resolveRemotePath(projectRoot)
 	}
 	return a.cp.CreateWorkerSession(name, prompt, projectRoot, host)
 }

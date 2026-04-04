@@ -175,16 +175,27 @@ func newRootCmd() *cobra.Command {
 				return nil
 			}
 
-			// Auto-detect SSH host from the originating pane.
+			// Auto-detect SSH host and remote CWD from the originating pane.
 			// Connection is deferred until the user performs a remote operation.
 			pendingSSHHost := gui.DetectSSHHost()
+			pendingRemotePath := gui.DetectRemotePath()
+
+			// Snapshot local project root so the adapter can distinguish
+			// local-fallback paths from genuine remote paths.
+			localCWD, err := filepath.Abs(".")
+			if err != nil {
+				localCWD = "."
+			}
+			localProjectRoot := session.InferProjectRoot(localCWD)
 
 			compositeAdapter := &guiCompositeAdapter{
-				cp:         composite,
-				localMgr:   mgr,
-				paths:      paths,
-				pendingHost: pendingSSHHost,
-				connectFn:   connectRemoteHost,
+				cp:                composite,
+				localMgr:          mgr,
+				paths:             paths,
+				pendingHost:       pendingSSHHost,
+				pendingRemotePath: pendingRemotePath,
+				localProjectRoot:  localProjectRoot,
+				connectFn:         connectRemoteHost,
 			}
 			compositeAdapter.windowActivityFn = app.WindowActivityMap
 			compositeAdapter.onError = app.ScheduleError
