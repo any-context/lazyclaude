@@ -70,8 +70,9 @@ func BuildScript(cfg ScriptConfig) (string, error) {
 		b.WriteString("rm -f \"$0\"\n")
 	}
 
-	// 2. MCP lock file setup
-	if cfg.MCP != nil {
+	// 2. MCP lock file setup + lazyclaude executable
+	hasMCP := cfg.MCP != nil
+	if hasMCP {
 		if err := writeMCPSetup(&b, cfg.MCP); err != nil {
 			return "", err
 		}
@@ -116,8 +117,14 @@ func BuildScript(cfg ScriptConfig) (string, error) {
 
 	// 7. Build the claude command and exec line.
 	// Always uses single quotes — prompt content is read from files at runtime.
+	// When MCP is configured, source setup.sh inside the login shell to add
+	// /tmp/lazyclaude/bin to PATH after profile files have been sourced.
 	claudeCmd := buildClaudeCmd(cfg.Flags, hooksPath, sysPromptFile, userPromptFile)
-	b.WriteString(fmt.Sprintf("exec \"$SHELL\" -lic 'exec %s'\n", claudeCmd))
+	setupPrefix := ""
+	if hasMCP {
+		setupPrefix = ". /tmp/lazyclaude/setup.sh; "
+	}
+	b.WriteString(fmt.Sprintf("exec \"$SHELL\" -lic '%sexec %s'\n", setupPrefix, claudeCmd))
 
 	return b.String(), nil
 }
@@ -275,7 +282,10 @@ lazyclaude() {
 func writeLazyClaude(b *strings.Builder, port int, token string) {
 	binDir := "/tmp/lazyclaude/bin"
 	binPath := binDir + "/lazyclaude"
+	setupPath := "/tmp/lazyclaude/setup.sh"
 	b.WriteString(fmt.Sprintf("mkdir -p '%s'\n", binDir))
+
+	// Write the lazyclaude executable script.
 	b.WriteString(fmt.Sprintf("cat > '%s' << 'LCBINEOF'\n", binPath))
 	b.WriteString("#!/bin/bash\n")
 	b.WriteString(fmt.Sprintf("export _LC_MCP_PORT=%d\n", port))
@@ -284,5 +294,11 @@ func writeLazyClaude(b *strings.Builder, port int, token string) {
 	b.WriteString("lazyclaude \"$@\"\n")
 	b.WriteString("LCBINEOF\n")
 	b.WriteString(fmt.Sprintf("chmod +x '%s'\n", binPath))
+
+	// Write a setup script that adds /tmp/lazyclaude/bin to PATH.
+	// This is sourced inside the login shell's -lic argument so it runs
+	// AFTER profile files have set up PATH, ensuring our entry persists.
+	b.WriteString(fmt.Sprintf("cat > '%s' << 'SETUPEOF'\n", setupPath))
 	b.WriteString(fmt.Sprintf("export PATH=\"%s:$PATH\"\n", binDir))
+	b.WriteString("SETUPEOF\n")
 }

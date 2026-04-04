@@ -263,15 +263,15 @@ func TestBuildScript_SSHWorktree_Full(t *testing.T) {
 	assert.Contains(t, script, "lazyclaude()")
 	assert.Contains(t, script, "LCBINEOF")
 	assert.Contains(t, script, "chmod +x '/tmp/lazyclaude/bin/lazyclaude'")
-	assert.Contains(t, script, `export PATH="/tmp/lazyclaude/bin:$PATH"`)
+	assert.Contains(t, script, "SETUPEOF")
 	assert.Contains(t, script, "export _LC_MCP_PORT=9876")
 
 	// No raw quotes from prompts (all base64-encoded to files)
 	assert.NotContains(t, script, "You are a Worker")
 	assert.NotContains(t, script, "Fix the authentication")
 
-	// Exec line always uses single quotes
-	assert.Contains(t, script, `exec "$SHELL" -lic 'exec claude`)
+	// Exec line sources setup.sh inside login shell, then execs claude
+	assert.Contains(t, script, `exec "$SHELL" -lic '. /tmp/lazyclaude/setup.sh; exec claude`)
 }
 
 // --- BuildScript: full local worktree scenario ---

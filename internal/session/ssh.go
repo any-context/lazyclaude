@@ -106,14 +106,19 @@ func writeRemoteScript(sess Session, mcpPort int, token string, opts *remoteScri
 	// exec $SHELL -lc runs in remote's login shell (loads .zprofile/.profile for PATH)
 	// $SHELL is expanded on remote since this script is base64-encoded and eval'd there.
 	//
+	// Source setup.sh inside the login shell to add /tmp/lazyclaude/bin to PATH
+	// AFTER profile files have been sourced. This ensures the lazyclaude command
+	// is findable by Claude Code's Bash tool regardless of shell type (bash/zsh).
+	//
 	// When prompt variables are present, we must use double quotes for the -lic
 	// argument so $-variables expand. The prompt values are base64-decoded into
 	// variables above, so no injection is possible through the prompt content.
 	// When no prompt variables are needed, the single-quote form is used.
+	const setupPrefix = ". /tmp/lazyclaude/setup.sh; "
 	if hasPromptVars {
-		b.WriteString(fmt.Sprintf("%s exec \"$SHELL\" -lic \"exec %s\"\n", envPrefix.String(), claudeArgs))
+		b.WriteString(fmt.Sprintf("%s exec \"$SHELL\" -lic \"%sexec %s\"\n", envPrefix.String(), setupPrefix, claudeArgs))
 	} else {
-		b.WriteString(fmt.Sprintf("%s exec \"$SHELL\" -lic 'exec %s'\n", envPrefix.String(), claudeArgs))
+		b.WriteString(fmt.Sprintf("%s exec \"$SHELL\" -lic '%sexec %s'\n", envPrefix.String(), setupPrefix, claudeArgs))
 	}
 
 	scriptPath := fmt.Sprintf("/tmp/lazyclaude/ssh-%s.sh", sess.ID[:8])
