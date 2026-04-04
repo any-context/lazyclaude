@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
@@ -54,7 +55,7 @@ func newDaemonCmd() *cobra.Command {
 
 			runtimeDir := paths.RuntimeDir
 			if runtimeDir == "" {
-				runtimeDir = fmt.Sprintf("/tmp/lazyclaude-%s", os.Getenv("USER"))
+				runtimeDir = daemon.DaemonInfoDir()
 			}
 
 			cfg := daemon.DaemonConfig{
@@ -69,9 +70,9 @@ func newDaemonCmd() *cobra.Command {
 				return fmt.Errorf("start daemon: %w", err)
 			}
 
-			// Connection info is written to daemon.json (mode 0600) by the server.
-			// Callers read it from there rather than stdout to avoid leaking secrets.
-			fmt.Fprintf(os.Stdout, "port=%d\n", actualPort)
+			// Print JSON to stdout so parseDaemonOutput can parse it.
+			// daemon.json is also written to disk for file-based discovery.
+			json.NewEncoder(os.Stdout).Encode(daemon.DaemonInfo{Port: actualPort, Token: token})
 
 			// Wait for signal or shutdown request
 			sigCh := make(chan os.Signal, 1)

@@ -27,20 +27,22 @@ func NewLifecycleManager(ssh SSHExecutor) *LifecycleManager {
 }
 
 // StartRemoteDaemon starts a lazyclaude daemon on the remote host.
-// It runs "lazyclaude daemon --port 0" which prints a JSON line
-// containing the assigned port and auth token.
+// The daemon runs in the foreground, so we launch it with nohup in the
+// background and then read daemon.json which contains the port and token.
 func (lm *LifecycleManager) StartRemoteDaemon(ctx context.Context, host string) (*DaemonInfo, error) {
-	output, err := lm.ssh.Run(ctx, host, "lazyclaude daemon --port 0")
+	cmd := "nohup lazyclaude daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & " +
+		"sleep 2 && cat /tmp/lazyclaude-$(whoami)/daemon.json"
+	output, err := lm.ssh.Run(ctx, host, cmd)
 	if err != nil {
-		return nil, fmt.Errorf("failed to start daemon on %s: %w", host, err)
+		return nil, fmt.Errorf("lazyclaude is not installed on %s: %w", host, err)
 	}
 
-	info, err := parseDaemonOutput(string(output))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse daemon output on %s: %w", host, err)
+	var info DaemonInfo
+	if err := json.Unmarshal(output, &info); err != nil {
+		return nil, fmt.Errorf("failed to parse daemon info on %s: %w", host, err)
 	}
 	info.Host = host
-	return info, nil
+	return &info, nil
 }
 
 // StopRemoteDaemon stops the lazyclaude daemon on the remote host.
@@ -54,6 +56,7 @@ func (lm *LifecycleManager) StopRemoteDaemon(ctx context.Context, host string) e
 
 // DiscoverRemoteDaemon reads the daemon info file on the remote host.
 // The daemon writes its connection details to /tmp/lazyclaude-$USER/daemon.json.
+// Uses $(whoami) on the remote side so the path matches the daemon's DaemonInfoDir().
 func (lm *LifecycleManager) DiscoverRemoteDaemon(ctx context.Context, host string) (*DaemonInfo, error) {
 	output, err := lm.ssh.Run(ctx, host, "cat /tmp/lazyclaude-$(whoami)/daemon.json")
 	if err != nil {

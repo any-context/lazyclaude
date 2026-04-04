@@ -691,7 +691,7 @@ func (s *DaemonServer) resolveWindowByName(ctx context.Context, windowName strin
 func (s *DaemonServer) writeDaemonInfo(port int) error {
 	dir := s.config.RuntimeDir
 	if dir == "" {
-		dir = fmt.Sprintf("/tmp/lazyclaude-%s", os.Getenv("USER"))
+		dir = DaemonInfoDir()
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create runtime dir: %w", err)
@@ -707,7 +707,7 @@ func (s *DaemonServer) writeDaemonInfo(port int) error {
 func (s *DaemonServer) removeDaemonInfo() {
 	dir := s.config.RuntimeDir
 	if dir == "" {
-		dir = fmt.Sprintf("/tmp/lazyclaude-%s", os.Getenv("USER"))
+		dir = DaemonInfoDir()
 	}
 	os.Remove(filepath.Join(dir, "daemon.json"))
 }

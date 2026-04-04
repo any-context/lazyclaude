@@ -166,7 +166,7 @@ func (rc *RemoteConnection) connectLocked(ctx context.Context) error {
 	if health.APIVersion != APIVersion {
 		tunnel.Stop()
 		rc.setState(ConnectionError)
-		return fmt.Errorf("API version mismatch on %s: local=%d remote=%d (run lazyclaude deploy)",
+		return fmt.Errorf("API version mismatch on %s: local=%d remote=%d (update lazyclaude on remote)",
 			rc.host, APIVersion, health.APIVersion)
 	}
 

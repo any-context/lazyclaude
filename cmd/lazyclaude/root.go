@@ -141,7 +141,7 @@ func newRootCmd() *cobra.Command {
 			connectRemoteHost := func(host string) error {
 				remoteConn := daemon.NewRemoteConnection(host, lifecycleMgr, clientFactory)
 				if connErr := remoteConn.Connect(context.Background()); connErr != nil {
-					return fmt.Errorf("lazyclaude not found on %s (run: lazyclaude deploy %s): %w", host, host, connErr)
+					return fmt.Errorf("lazyclaude is not installed on %s: %w", host, connErr)
 				}
 
 				remoteProvider := daemon.NewRemoteProvider(host, remoteConn)
@@ -273,7 +273,6 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newSetupCmd())
 	cmd.AddCommand(newSessionsCmd())
 	cmd.AddCommand(newMsgCmd())
-	cmd.AddCommand(newDeployCmd())
 	cmd.AddCommand(newDaemonCmd())
 
 	return cmd

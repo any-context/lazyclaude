@@ -9,7 +9,8 @@ import (
 
 func TestStartRemoteDaemon_Success(t *testing.T) {
 	ssh := newMockSSH()
-	ssh.onRun("lazyclaude daemon --port 0", `{"port":12345,"token":"abc123"}`, nil)
+	cmd := "nohup lazyclaude daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & sleep 2 && cat /tmp/lazyclaude-$(whoami)/daemon.json"
+	ssh.onRun(cmd, `{"port":12345,"token":"abc123"}`, nil)
 
 	lm := NewLifecycleManager(ssh)
 	info, err := lm.StartRemoteDaemon(context.Background(), "user@host")
@@ -29,44 +30,31 @@ func TestStartRemoteDaemon_Success(t *testing.T) {
 
 func TestStartRemoteDaemon_SSHError(t *testing.T) {
 	ssh := newMockSSH()
-	ssh.onRun("lazyclaude daemon --port 0", "", fmt.Errorf("connection refused"))
+	cmd := "nohup lazyclaude daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & sleep 2 && cat /tmp/lazyclaude-$(whoami)/daemon.json"
+	ssh.onRun(cmd, "", fmt.Errorf("connection refused"))
 
 	lm := NewLifecycleManager(ssh)
 	_, err := lm.StartRemoteDaemon(context.Background(), "user@host")
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "failed to start daemon") {
-		t.Errorf("error = %q, want to contain 'failed to start daemon'", err)
+	if !strings.Contains(err.Error(), "lazyclaude is not installed on") {
+		t.Errorf("error = %q, want to contain 'lazyclaude is not installed on'", err)
 	}
 }
 
 func TestStartRemoteDaemon_InvalidOutput(t *testing.T) {
 	ssh := newMockSSH()
-	ssh.onRun("lazyclaude daemon --port 0", "not json at all", nil)
+	cmd := "nohup lazyclaude daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & sleep 2 && cat /tmp/lazyclaude-$(whoami)/daemon.json"
+	ssh.onRun(cmd, "not json at all", nil)
 
 	lm := NewLifecycleManager(ssh)
 	_, err := lm.StartRemoteDaemon(context.Background(), "user@host")
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "failed to parse daemon output") {
-		t.Errorf("error = %q, want to contain 'failed to parse daemon output'", err)
-	}
-}
-
-func TestStartRemoteDaemon_OutputWithNoise(t *testing.T) {
-	ssh := newMockSSH()
-	ssh.onRun("lazyclaude daemon --port 0",
-		"some startup log\n{\"port\":9999,\"token\":\"tok\"}\nmore output\n", nil)
-
-	lm := NewLifecycleManager(ssh)
-	info, err := lm.StartRemoteDaemon(context.Background(), "user@host")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if info.Port != 9999 {
-		t.Errorf("Port = %d, want %d", info.Port, 9999)
+	if !strings.Contains(err.Error(), "failed to parse daemon info") {
+		t.Errorf("error = %q, want to contain 'failed to parse daemon info'", err)
 	}
 }
 

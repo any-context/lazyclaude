@@ -9,7 +9,7 @@ import (
 )
 
 // APIVersion is the current daemon API version. Checked at connection time
-// via /health. A mismatch prompts the user to run `lazyclaude deploy`.
+// via /health. A mismatch indicates the remote binary needs updating.
 const APIVersion = 1
 
 // --- Session CRUD ---
