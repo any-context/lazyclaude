@@ -271,9 +271,12 @@ func (s *Server) enrichWithActivity(sessions []SessionInfo) {
 		}
 		// SSH sessions: activityMap is keyed by window NAME (e.g. "lc-2c86ae79"),
 		// resolved from the pending window file. Compute the window name from
-		// session ID and check as fallback.
-		if id := sessions[i].ID; len(id) >= 8 {
-			wName := "lc-" + id[:8]
+		// session ID and check as fallback. Mirrors session.WindowName() logic.
+		if id := sessions[i].ID; id != "" {
+			wName := "lc-" + id
+			if len(id) > 8 {
+				wName = "lc-" + id[:8]
+			}
 			if e, ok := s.activityMap[wName]; ok {
 				sessions[i].Activity = e.State.String()
 				continue
