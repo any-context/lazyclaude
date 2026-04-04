@@ -69,10 +69,8 @@ sessions view.
 | 2 | app_actions.go:689 | `pluginState.errMsg` | Plugins panel only |
 | 3 | app_actions.go:758 | `mcpState.errMsg` | MCP tab only |
 
-**Verdict:** Panel-scoped errors are appropriate for plugin/MCP operations.
-These should NOT be changed to showError because they occur in context-specific
-panels where the user is already looking. Changing them would overwrite the main
-preview.
+**Action required:** Migrate to showError for consistency. Remove panel-scoped
+errMsg display. All errors should appear in both logs and main view.
 
 ### Pattern C: `fmt.Fprintf(os.Stderr)` (invisible in TUI)
 
@@ -131,14 +129,16 @@ a.showError(g, fmt.Sprintf("Error: %v", err))
 // Pattern 3: Status message -- use setStatus for success/info only
 a.setStatus(g, "Operation completed")
 
-// Pattern 4: Panel-scoped errors -- keep as-is for plugin/MCP
-a.pluginState.errMsg = err.Error()
+// Pattern 4: Panel-scoped errors -- migrate to showError
+// Remove pluginState.errMsg / mcpState.errMsg display, use showError instead
+a.showError(g, fmt.Sprintf("Plugin error: %v", err))
 ```
 
 ## Priority
 
 1. **High:** #1 (Rename sync) -- user-initiated operation, blocks GUI
 2. **High:** #7 in Pattern C (composite_adapter Sessions error) -- silently drops errors during TUI
-3. **Medium:** #1-9 in Pattern A -- `setStatus` -> `showError` migration
-4. **Low:** #2-3 (layout Sessions) -- frequent but usually fast locally; blocking only with remote
-5. **Low:** #4-5 (HistorySize) -- only affects scroll mode, brief block
+3. **High:** Pattern B (plugin/MCP errMsg) -- migrate to showError
+4. **Medium:** #1-9 in Pattern A -- `setStatus` -> `showError` migration
+5. **Low:** #2-3 (layout Sessions) -- frequent but usually fast locally; blocking only with remote
+6. **Low:** #4-5 (HistorySize) -- only affects scroll mode, brief block
