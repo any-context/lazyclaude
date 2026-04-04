@@ -5,6 +5,13 @@ import "context"
 // clientAPI compile-time check is deferred to Phase 1 where the concrete
 // implementation is defined.
 
+// CWDQuerier is implemented by providers that can report their daemon's
+// working directory. Used by the composite adapter to resolve remote paths
+// without coupling to concrete provider types.
+type CWDQuerier interface {
+	QueryCWD(ctx context.Context) (string, error)
+}
+
 // ClientAPI defines all operations available on a daemon.
 // Implementations wrap HTTP calls to the daemon REST API.
 type ClientAPI interface {

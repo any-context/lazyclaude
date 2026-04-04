@@ -630,8 +630,6 @@ func (s *DaemonServer) handleMsgSessions(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, MsgSessionsResponse{Sessions: items})
 }
 
-// --- Health handler ---
-
 // --- CWD handler ---
 
 // CWDResponse is the JSON response for GET /cwd.

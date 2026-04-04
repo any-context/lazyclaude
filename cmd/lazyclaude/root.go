@@ -22,12 +22,12 @@ import (
 	"github.com/any-context/lazyclaude/internal/daemon"
 	"github.com/any-context/lazyclaude/internal/gui"
 	"github.com/any-context/lazyclaude/internal/mcp"
-	"github.com/jesseduffield/gocui"
 	"github.com/any-context/lazyclaude/internal/notify"
 	"github.com/any-context/lazyclaude/internal/plugin"
 	"github.com/any-context/lazyclaude/internal/server"
 	"github.com/any-context/lazyclaude/internal/session"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jesseduffield/gocui"
 	"github.com/spf13/cobra"
 )
 

@@ -380,7 +380,9 @@ func (a *guiCompositeAdapter) Create(path string) error {
 		UpdatedAt: time.Now(),
 	}
 	a.localMgr.Store().Add(placeholder, "")
-	_ = a.localMgr.Store().Save()
+	if err := a.localMgr.Store().Save(); err != nil {
+		return fmt.Errorf("save placeholder: %w", err)
+	}
 
 	go a.completeRemoteCreate(placeholder.ID, path, host)
 	return nil
@@ -427,9 +429,11 @@ func (a *guiCompositeAdapter) completeRemoteCreate(placeholderID, localPath, hos
 func (a *guiCompositeAdapter) failPlaceholder(id, msg string) {
 	a.setSessionError(id, msg)
 	a.localMgr.Store().SetStatus(id, session.StatusDead)
-	_ = a.localMgr.Store().Save()
+	if err := a.localMgr.Store().Save(); err != nil && a.onError != nil {
+		a.onError(fmt.Sprintf("save store: %v", err))
+	}
 	if a.onError != nil {
-		a.onError(fmt.Sprintf("Error: %s", msg))
+		a.onError(msg)
 	}
 	a.triggerGUIUpdate()
 }
@@ -508,6 +512,9 @@ func (a *guiCompositeAdapter) resolveRemotePath(path, host string) string {
 	return path
 }
 
+// cwdQueryTimeout is the maximum time to wait for a remote CWD query.
+const cwdQueryTimeout = 10 * time.Second
+
 // queryRemoteCWD fetches the working directory from a connected remote daemon.
 // Returns "" if the query fails (caller should fall back to the original path).
 func (a *guiCompositeAdapter) queryRemoteCWD(host string) string {
@@ -515,15 +522,13 @@ func (a *guiCompositeAdapter) queryRemoteCWD(host string) string {
 	if provider == nil {
 		return ""
 	}
-	rp, ok := provider.(*daemon.RemoteProvider)
+	querier, ok := provider.(daemon.CWDQuerier)
 	if !ok {
 		return ""
 	}
-	client, err := rp.Conn().Client()
-	if err != nil {
-		return ""
-	}
-	cwd, err := client.CWD(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), cwdQueryTimeout)
+	defer cancel()
+	cwd, err := querier.QueryCWD(ctx)
 	if err != nil {
 		return ""
 	}

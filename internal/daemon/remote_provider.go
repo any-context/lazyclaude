@@ -57,6 +57,16 @@ func (rp *RemoteProvider) Conn() ConnectionManager {
 	return rp.conn
 }
 
+// QueryCWD implements CWDQuerier by fetching the working directory from
+// the remote daemon via the GET /cwd API.
+func (rp *RemoteProvider) QueryCWD(ctx context.Context) (string, error) {
+	client, err := rp.conn.Client()
+	if err != nil {
+		return "", fmt.Errorf("query cwd: %w", err)
+	}
+	return client.CWD(ctx)
+}
+
 // SetTmuxClient sets the forwarded tmux.Client for direct pane operations.
 // When set, CapturePreview, CaptureScrollback, HistorySize, and SendChoice
 // use the forwarded socket directly instead of the daemon API.
