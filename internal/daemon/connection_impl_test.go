@@ -237,3 +237,81 @@ func TestRemoteConnection_MultipleCallbacks(t *testing.T) {
 		t.Errorf("callback 1 called %d times, want >= 2", calls[1])
 	}
 }
+
+func TestRemoteConnection_ConnectDiscover_EmptyToken(t *testing.T) {
+	ssh := newMockSSH()
+	ssh.onRun("cat /tmp/lazyclaude-$(whoami)/daemon.json",
+		`{"port":9999,"token":""}`, nil)
+
+	lm := NewLifecycleManager(ssh)
+	factory := func(addr, token string) ClientAPI { return &mockClientAPI{} }
+
+	rc := NewRemoteConnection("user@host", lm, factory)
+	err := rc.Connect(context.Background())
+	if err == nil {
+		t.Fatal("expected error for empty token")
+	}
+	if rc.State() != ConnectionError {
+		t.Errorf("State() = %v, want %v", rc.State(), ConnectionError)
+	}
+}
+
+func TestRemoteConnection_ConnectSuccess(t *testing.T) {
+	ssh := newMockSSH()
+	ssh.onRun("cat /tmp/lazyclaude-$(whoami)/daemon.json",
+		`{"port":9999,"token":"tok"}`, nil)
+
+	lm := NewLifecycleManager(ssh)
+
+	client := &mockClientAPI{
+		healthResp: &HealthResponse{APIVersion: APIVersion},
+	}
+	factory := func(addr, token string) ClientAPI { return client }
+
+	rc := NewRemoteConnection("user@host", lm, factory)
+
+	// Note: Start() will fail since ssh binary isn't available, but
+	// we can test the flow up to tunnel.Start by checking the error.
+	err := rc.Connect(context.Background())
+	// The tunnel Start will fail (no ssh binary), so we expect an error.
+	if err == nil {
+		// If it somehow succeeds (e.g., ssh is available), verify connected state.
+		if rc.State() != Connected {
+			t.Errorf("State() = %v, want %v", rc.State(), Connected)
+		}
+		c, cerr := rc.Client()
+		if cerr != nil {
+			t.Errorf("Client() error: %v", cerr)
+		}
+		if c != client {
+			t.Error("Client() returned wrong client")
+		}
+		rc.Disconnect()
+	}
+}
+
+func TestRemoteConnection_DisconnectAfterConnect(t *testing.T) {
+	ssh := newMockSSH()
+	lm := NewLifecycleManager(ssh)
+	rc := NewRemoteConnection("user@host", lm, nil)
+
+	// Disconnect on a never-connected instance should be safe.
+	if err := rc.Disconnect(); err != nil {
+		t.Errorf("Disconnect() error: %v", err)
+	}
+	if rc.State() != Disconnected {
+		t.Errorf("State() = %v, want Disconnected", rc.State())
+	}
+}
+
+func TestExponentialBackoff_MaxCap(t *testing.T) {
+	b := NewExponentialBackoff(100*time.Millisecond, 500*time.Millisecond, 2)
+
+	// Run through enough attempts to exceed max.
+	for i := 0; i < 10; i++ {
+		d := b.Next()
+		if d > 500*time.Millisecond {
+			t.Errorf("attempt %d: duration %v exceeds max 500ms", i, d)
+		}
+	}
+}

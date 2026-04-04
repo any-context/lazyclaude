@@ -66,6 +66,9 @@ func (lm *LifecycleManager) DiscoverRemoteDaemon(ctx context.Context, host strin
 	if info.Port == 0 {
 		return nil, fmt.Errorf("invalid daemon info on %s: port is 0", host)
 	}
+	if info.Token == "" {
+		return nil, fmt.Errorf("invalid daemon info on %s: empty token", host)
+	}
 	info.Host = host
 	return &info, nil
 }
@@ -73,6 +76,7 @@ func (lm *LifecycleManager) DiscoverRemoteDaemon(ctx context.Context, host strin
 // parseDaemonOutput extracts DaemonInfo from the daemon's stdout.
 // The daemon prints a JSON line like: {"port":12345,"token":"abc..."}
 func parseDaemonOutput(output string) (*DaemonInfo, error) {
+	var lastParseErr error
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -81,11 +85,15 @@ func parseDaemonOutput(output string) (*DaemonInfo, error) {
 		}
 		var info DaemonInfo
 		if err := json.Unmarshal([]byte(line), &info); err != nil {
+			lastParseErr = err
 			continue
 		}
-		if info.Port > 0 {
+		if info.Port > 0 && info.Token != "" {
 			return &info, nil
 		}
+	}
+	if lastParseErr != nil {
+		return nil, fmt.Errorf("no valid daemon info in output (last parse error: %w)", lastParseErr)
 	}
 	return nil, fmt.Errorf("no valid daemon info in output: %s", output)
 }

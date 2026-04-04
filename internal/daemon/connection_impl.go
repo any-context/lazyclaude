@@ -9,6 +9,7 @@ import (
 )
 
 // ExponentialBackoff calculates wait durations with exponential growth.
+// Not safe for concurrent use; callers must synchronise access.
 type ExponentialBackoff struct {
 	initial  time.Duration
 	max      time.Duration
@@ -55,6 +56,10 @@ type RemoteConnection struct {
 	lifecycle     *LifecycleManager
 	clientFactory ClientFactory
 
+	// connMu serialises Connect/Disconnect calls.
+	connMu sync.Mutex
+
+	// mu protects mutable state read by State/Client/OnStateChange.
 	mu        sync.RWMutex
 	tunnel    *Tunnel
 	client    ClientAPI
@@ -62,7 +67,7 @@ type RemoteConnection struct {
 	callbacks []func(ConnectionState)
 	backoff   *ExponentialBackoff
 
-	cancel context.CancelFunc // cancels the reconnection goroutine
+	cancel context.CancelFunc // cancels the monitor/reconnect goroutine
 }
 
 // NewRemoteConnection creates a RemoteConnection for the given host.
@@ -79,6 +84,21 @@ func NewRemoteConnection(host string, lifecycle *LifecycleManager, factory Clien
 // Connect establishes a connection: discovers or starts the remote daemon,
 // opens an SSH tunnel, and verifies the health endpoint.
 func (rc *RemoteConnection) Connect(ctx context.Context) error {
+	rc.connMu.Lock()
+	defer rc.connMu.Unlock()
+	return rc.connectLocked(ctx)
+}
+
+// connectLocked performs the actual connection. Caller must hold connMu.
+func (rc *RemoteConnection) connectLocked(ctx context.Context) error {
+	// Cancel any previous monitor goroutine.
+	rc.mu.Lock()
+	if rc.cancel != nil {
+		rc.cancel()
+		rc.cancel = nil
+	}
+	rc.mu.Unlock()
+
 	rc.setState(Connecting)
 
 	info, err := rc.lifecycle.DiscoverRemoteDaemon(ctx, rc.host)
@@ -86,14 +106,19 @@ func (rc *RemoteConnection) Connect(ctx context.Context) error {
 		info, err = rc.lifecycle.StartRemoteDaemon(ctx, rc.host)
 		if err != nil {
 			rc.setState(ConnectionError)
-			return fmt.Errorf("failed to start daemon on %s: %w", rc.host, err)
+			return fmt.Errorf("connect to %s: %w", rc.host, err)
 		}
+	}
+
+	if info.Token == "" {
+		rc.setState(ConnectionError)
+		return fmt.Errorf("daemon on %s returned empty auth token", rc.host)
 	}
 
 	tunnel := NewTunnel(rc.host, info.Port)
 	if err := tunnel.Start(ctx); err != nil {
 		rc.setState(ConnectionError)
-		return fmt.Errorf("failed to start tunnel to %s: %w", rc.host, err)
+		return fmt.Errorf("start tunnel to %s: %w", rc.host, err)
 	}
 
 	addr := fmt.Sprintf("http://127.0.0.1:%d", tunnel.LocalPort())
@@ -103,7 +128,7 @@ func (rc *RemoteConnection) Connect(ctx context.Context) error {
 	if err != nil {
 		tunnel.Stop()
 		rc.setState(ConnectionError)
-		return fmt.Errorf("health check failed on %s: %w", rc.host, err)
+		return fmt.Errorf("health check on %s: %w", rc.host, err)
 	}
 	if health.APIVersion != APIVersion {
 		tunnel.Stop()
@@ -112,19 +137,18 @@ func (rc *RemoteConnection) Connect(ctx context.Context) error {
 			rc.host, APIVersion, health.APIVersion)
 	}
 
+	// Derive monitor context from caller's ctx so shutdown propagates.
+	monCtx, cancel := context.WithCancel(ctx)
+
 	rc.mu.Lock()
 	rc.tunnel = tunnel
 	rc.client = client
 	rc.backoff.Reset()
+	rc.cancel = cancel
 	rc.mu.Unlock()
 
 	rc.setState(Connected)
 
-	// Start monitoring for tunnel death.
-	monCtx, cancel := context.WithCancel(context.Background())
-	rc.mu.Lock()
-	rc.cancel = cancel
-	rc.mu.Unlock()
 	go rc.monitorTunnel(monCtx)
 
 	return nil
@@ -132,6 +156,9 @@ func (rc *RemoteConnection) Connect(ctx context.Context) error {
 
 // Disconnect tears down the tunnel and releases resources.
 func (rc *RemoteConnection) Disconnect() error {
+	rc.connMu.Lock()
+	defer rc.connMu.Unlock()
+
 	rc.mu.Lock()
 	cancel := rc.cancel
 	tunnel := rc.tunnel
@@ -213,19 +240,19 @@ func (rc *RemoteConnection) monitorTunnel(ctx context.Context) {
 	case <-ctx.Done():
 		return
 	case <-waitCh:
-		// Tunnel died — attempt reconnection.
 		rc.reconnect(ctx)
 	}
 }
 
 // reconnect attempts to re-establish the connection with exponential backoff.
+// It acquires connMu for each attempt to avoid racing with external Connect/Disconnect.
 func (rc *RemoteConnection) reconnect(ctx context.Context) {
 	rc.setState(Reconnecting)
 
 	for {
-		rc.mu.RLock()
+		rc.mu.Lock()
 		delay := rc.backoff.Next()
-		rc.mu.RUnlock()
+		rc.mu.Unlock()
 
 		select {
 		case <-ctx.Done():
@@ -233,7 +260,10 @@ func (rc *RemoteConnection) reconnect(ctx context.Context) {
 		case <-time.After(delay):
 		}
 
-		if err := rc.Connect(ctx); err == nil {
+		rc.connMu.Lock()
+		err := rc.connectLocked(ctx)
+		rc.connMu.Unlock()
+		if err == nil {
 			return
 		}
 

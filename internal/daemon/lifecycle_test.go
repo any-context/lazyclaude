@@ -159,6 +159,21 @@ func TestDiscoverRemoteDaemon_ZeroPort(t *testing.T) {
 	}
 }
 
+func TestDiscoverRemoteDaemon_EmptyToken(t *testing.T) {
+	ssh := newMockSSH()
+	ssh.onRun("cat /tmp/lazyclaude-$(whoami)/daemon.json",
+		`{"port":5555,"token":""}`, nil)
+
+	lm := NewLifecycleManager(ssh)
+	_, err := lm.DiscoverRemoteDaemon(context.Background(), "user@host")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "empty token") {
+		t.Errorf("error = %q, want to contain 'empty token'", err)
+	}
+}
+
 func TestParseDaemonOutput(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -189,6 +204,16 @@ func TestParseDaemonOutput(t *testing.T) {
 		{
 			name:    "port 0",
 			output:  `{"port":0,"token":"abc"}`,
+			wantErr: true,
+		},
+		{
+			name:    "empty token",
+			output:  `{"port":1234,"token":""}`,
+			wantErr: true,
+		},
+		{
+			name:    "malformed JSON with brace prefix",
+			output:  "{bad json}\n",
 			wantErr: true,
 		},
 	}

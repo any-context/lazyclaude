@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
-	"strconv"
 	"sync"
 )
 
@@ -131,32 +130,21 @@ func (t *Tunnel) Wait() <-chan error {
 }
 
 // pickFreePort asks the OS for a free TCP port.
+// Note: there is an inherent TOCTOU race between releasing the port here
+// and the SSH process binding to it. ExitOnForwardFailure=yes ensures the
+// SSH process fails fast if the port is taken.
 func pickFreePort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return 0, err
 	}
 	port := l.Addr().(*net.TCPAddr).Port
-	l.Close()
+	_ = l.Close() // port already captured; close error is not actionable
 	return port, nil
 }
 
-// TunnelCmdBuilder is a function that builds the SSH command for testing.
-// When nil, the default exec.CommandContext is used.
-type TunnelCmdBuilder func(ctx context.Context, name string, args ...string) *exec.Cmd
-
-// TunnelOption configures a Tunnel.
-type TunnelOption func(*Tunnel)
-
-// WithLocalPort sets a fixed local port instead of picking a free one.
-func WithLocalPort(port int) TunnelOption {
-	return func(t *Tunnel) {
-		t.localPort = port
-	}
-}
-
-// NewTunnelWithPort creates a Tunnel with a fixed local port. Alias for
-// NewTunnel + WithLocalPort for readability.
+// NewTunnelWithPort creates a Tunnel with a fixed local port.
+// Used for testing to avoid port allocation.
 func NewTunnelWithPort(host string, remotePort, localPort int) *Tunnel {
 	return &Tunnel{
 		host:       host,
@@ -169,7 +157,7 @@ func NewTunnelWithPort(host string, remotePort, localPort int) *Tunnel {
 // Useful for testing command construction without starting a process.
 func (t *Tunnel) SSHArgs() []string {
 	sshHost, port := splitHostPort(t.host)
-	forwardSpec := strconv.Itoa(t.localPort) + ":127.0.0.1:" + strconv.Itoa(t.remotePort)
+	forwardSpec := fmt.Sprintf("%d:127.0.0.1:%d", t.localPort, t.remotePort)
 
 	args := []string{
 		"-L", forwardSpec,
