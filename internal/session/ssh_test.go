@@ -206,19 +206,16 @@ func TestWriteRemoteScript_MCPEnvAndShellFunc(t *testing.T) {
 	require.NoError(t, err)
 	script := string(content)
 
-	// lazyclaude installed as executable script in PATH
+	// lazyclaude installed as executable script
 	assert.Contains(t, script, "LCBINEOF")
 	assert.Contains(t, script, "chmod +x '/tmp/lazyclaude/bin/lazyclaude'")
-	assert.Contains(t, script, `export PATH="/tmp/lazyclaude/bin:$PATH"`)
 	assert.Contains(t, script, "export _LC_MCP_PORT=54321")
 	assert.Contains(t, script, "export _LC_MCP_TOKEN='my-mcp-token'")
 	assert.Contains(t, script, "lazyclaude()")
 
-	// PATH export must appear before exec $SHELL
-	pathIdx := strings.Index(script, `export PATH="/tmp/lazyclaude/bin`)
-	execIdx := strings.Index(script, `exec "$SHELL"`)
-	require.Greater(t, execIdx, 0, "exec $SHELL not found in script")
-	assert.Less(t, pathIdx, execIdx, "PATH must be set before exec $SHELL")
+	// setup.sh written and sourced inside login shell's -lic argument
+	assert.Contains(t, script, "SETUPEOF")
+	assert.Contains(t, script, `. /tmp/lazyclaude/setup.sh; exec`)
 }
 
 // --- buildSSHCommand tests ---
