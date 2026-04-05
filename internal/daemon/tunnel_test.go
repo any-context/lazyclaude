@@ -1,7 +1,12 @@
 package daemon
 
 import (
+	"context"
+	"fmt"
+	"net"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewTunnel(t *testing.T) {
@@ -226,5 +231,85 @@ func TestSocketTunnel_TmuxClient(t *testing.T) {
 	client := st.TmuxClient()
 	if client == nil {
 		t.Fatal("TmuxClient() returned nil")
+	}
+}
+
+func TestWaitForPort_ImmediateSuccess(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	port := ln.Addr().(*net.TCPAddr).Port
+	done := make(chan error, 1)
+
+	if err := waitForPort(context.Background(), "user@host", port, done); err != nil {
+		t.Errorf("waitForPort() returned error: %v", err)
+	}
+}
+
+func TestWaitForPort_DelayedSuccess(t *testing.T) {
+	port, err := pickFreePort()
+	if err != nil {
+		t.Fatalf("pickFreePort: %v", err)
+	}
+
+	done := make(chan error, 1)
+	ready := make(chan struct{})
+
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		ln, listenErr := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if listenErr != nil {
+			return
+		}
+		// Keep listener alive until test signals completion.
+		<-ready
+		ln.Close()
+	}()
+	t.Cleanup(func() { close(ready) })
+
+	if err := waitForPort(context.Background(), "user@host", port, done); err != nil {
+		t.Errorf("waitForPort() returned error: %v", err)
+	}
+}
+
+func TestWaitForPort_ProcessExit(t *testing.T) {
+	port, err := pickFreePort()
+	if err != nil {
+		t.Fatalf("pickFreePort: %v", err)
+	}
+
+	done := make(chan error, 1)
+	done <- fmt.Errorf("process exited")
+
+	err = waitForPort(context.Background(), "user@host", port, done)
+	if err == nil {
+		t.Fatal("waitForPort() should have returned error when process exits")
+	}
+	if !strings.Contains(err.Error(), "exited before becoming ready") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestWaitForPort_ContextCanceled(t *testing.T) {
+	port, err := pickFreePort()
+	if err != nil {
+		t.Fatalf("pickFreePort: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+
+	// Cancel immediately so waitForPort should return quickly.
+	cancel()
+
+	err = waitForPort(ctx, "user@host", port, done)
+	if err == nil {
+		t.Fatal("waitForPort() should have returned error when context is canceled")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
