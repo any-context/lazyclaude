@@ -246,9 +246,10 @@ func sessionToDaemonInfo(s session.Session) daemon.SessionInfo {
 // This bridges the daemon's type system (daemon.SessionInfo etc.) to the GUI's
 // type system (gui.SessionItem etc.).
 type guiCompositeAdapter struct {
-	cp       *daemon.CompositeProvider
-	localMgr *session.Manager
-	paths    config.Paths
+	cp         *daemon.CompositeProvider
+	localMgr   *session.Manager
+	tmuxClient tmux.Client
+	paths      config.Paths
 
 	// windowActivityFn provides window->activity mapping from the App layer.
 	windowActivityFn func() map[string]gui.WindowActivityEntry
@@ -425,10 +426,40 @@ func (a *guiCompositeAdapter) completeRemoteCreate(placeholderID, localPath, hos
 	a.triggerGUIUpdate()
 }
 
-// failPlaceholder marks a placeholder session as dead and stores the error.
+// failPlaceholder marks a placeholder session as dead and creates a tmux error
+// window so that preview, fullscreen, and visual mode all work normally.
 func (a *guiCompositeAdapter) failPlaceholder(id, msg string) {
 	a.setSessionError(id, msg)
 	a.localMgr.Store().SetStatus(id, session.StatusDead)
+
+	// Create a tmux window that displays the error message.
+	// This makes the error visible via normal pane capture (preview/fullscreen).
+	// The message is passed via environment variable to avoid shell injection
+	// (error messages may contain newlines, quotes, or control characters).
+	sess := a.localMgr.Store().FindByID(id)
+	if sess != nil && a.tmuxClient != nil {
+		windowName := sess.WindowName()
+		const errCmd = "echo 'lazyclaude: session launch failed'; echo; echo \"$LAZYCLAUDE_ERR_MSG\"; echo; echo 'Press Enter to close'; read"
+		abs, err := filepath.Abs(".")
+		if err != nil {
+			abs = "."
+		}
+		ctx := context.Background()
+		if err := a.tmuxClient.NewWindow(ctx, tmux.NewWindowOpts{
+			Session:  "lazyclaude",
+			Name:     windowName,
+			Command:  errCmd,
+			StartDir: abs,
+			Env:      map[string]string{"LAZYCLAUDE_ERR_MSG": msg},
+		}); err != nil {
+			if a.onError != nil {
+				a.onError(fmt.Sprintf("create error window: %v", err))
+			}
+		} else {
+			a.localMgr.Store().SetTmuxWindow(id, "lazyclaude:"+windowName)
+		}
+	}
+
 	if err := a.localMgr.Store().Save(); err != nil && a.onError != nil {
 		a.onError(fmt.Sprintf("save store: %v", err))
 	}
@@ -549,11 +580,6 @@ func (a *guiCompositeAdapter) PurgeOrphans() (int, error) {
 }
 
 func (a *guiCompositeAdapter) CapturePreview(id string, width, height int) (gui.PreviewResult, error) {
-	// Optimistic placeholder with error: return error as preview content.
-	if errMsg := a.sessionError(id); errMsg != "" {
-		return gui.PreviewResult{Content: "\n  " + errMsg}, nil
-	}
-
 	// Optimistic placeholder mapped to a real remote session: route to
 	// the remote session for preview capture.
 	if remoteID := a.remoteMapping(id); remoteID != "" {

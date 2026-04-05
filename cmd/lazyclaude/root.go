@@ -192,6 +192,7 @@ func newRootCmd() *cobra.Command {
 			compositeAdapter := &guiCompositeAdapter{
 				cp:               composite,
 				localMgr:         mgr,
+				tmuxClient:       tmuxClient,
 				paths:            paths,
 				pendingHost:      pendingSSHHost,
 				localProjectRoot: localProjectRoot,

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/any-context/lazyclaude/internal/core/model"
 	"github.com/any-context/lazyclaude/internal/gui/keymap"
 	"github.com/any-context/lazyclaude/internal/gui/presentation"
 	"github.com/any-context/lazyclaude/internal/session"
@@ -208,17 +207,13 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 	setRoundedFrame(v3)
 	v3.Wrap = false
 	v3.Editable = false
-	// Skip preview rendering while an error is actively displayed so the
-	// error message is not overwritten by the next layout cycle.
-	if !a.isErrorActive() {
-		v3.Clear()
-		previewW := l.Main.Width() - 1
-		previewH := l.Main.Height() - 2
-		if render, ok := a.previewByScope[a.panelManager.ActivePanel().Scope()]; ok {
-			render(v3, previewW, previewH)
-		} else {
-			a.renderPreview(v3, a.cachedSessionItems, previewW, previewH)
-		}
+	v3.Clear()
+	previewW := l.Main.Width() - 1
+	previewH := l.Main.Height() - 2
+	if render, ok := a.previewByScope[a.panelManager.ActivePanel().Scope()]; ok {
+		render(v3, previewW, previewH)
+	} else {
+		a.renderPreview(v3, a.cachedSessionItems, previewW, previewH)
 	}
 
 	// Options bar (bottom, frameless) — dynamic per focused panel
@@ -348,13 +343,7 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 	previewH := l.Main.Height() - 1
 
 	v.Clear()
-	// Error sessions without a tmux window: render error text as content
-	// so the existing C-v visual-mode selection/copy works unchanged.
-	target := items[targetIdx]
-	if target.TmuxWindow == "" && target.Activity == model.ActivityError && a.errorMsg != "" {
-		fmt.Fprintln(v, "")
-		fmt.Fprintf(v, "  %s\n", a.errorMsg)
-	} else if a.scroll.IsActive() {
+	if a.scroll.IsActive() {
 		v.Editable = false
 		a.renderScrollContent(v)
 	} else {
