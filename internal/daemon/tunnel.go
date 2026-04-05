@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/any-context/lazyclaude/internal/core/tmux"
 )
@@ -34,7 +35,7 @@ func NewTunnel(host string, remotePort int) *Tunnel {
 }
 
 // Start launches the SSH tunnel process. It picks a free local port, starts
-// the SSH process, and returns once the process has been launched.
+// the SSH process, and waits until the tunnel is connectable before returning.
 // The context controls the lifetime of the SSH process.
 func (t *Tunnel) Start(ctx context.Context) error {
 	t.mu.Lock()
@@ -81,7 +82,43 @@ func (t *Tunnel) Start(ctx context.Context) error {
 		close(t.done)
 	}()
 
+	// Wait for the tunnel to become connectable.
+	if err := t.waitForPort(t.localPort, t.done); err != nil {
+		_ = t.cmd.Process.Kill()
+		return err
+	}
+
 	return nil
+}
+
+// tunnelTimeout is the maximum time to wait for a tunnel to become connectable.
+const tunnelTimeout = 10 * time.Second
+
+// tunnelPollInterval is how often to poll the local port during tunnel startup.
+const tunnelPollInterval = 100 * time.Millisecond
+
+// waitForPort polls the given local port until a TCP connection succeeds,
+// the deadline expires, or the SSH process exits.
+func (t *Tunnel) waitForPort(port int, done <-chan error) error {
+	deadline := time.After(tunnelTimeout)
+	ticker := time.NewTicker(tunnelPollInterval)
+	defer ticker.Stop()
+
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	for {
+		select {
+		case <-deadline:
+			return fmt.Errorf("SSH tunnel to %s timed out after %s", t.host, tunnelTimeout)
+		case err := <-done:
+			return fmt.Errorf("SSH tunnel to %s exited before becoming ready: %w", t.host, err)
+		case <-ticker.C:
+			conn, err := net.DialTimeout("tcp", addr, tunnelPollInterval)
+			if err == nil {
+				conn.Close()
+				return nil
+			}
+		}
+	}
 }
 
 // Stop terminates the SSH tunnel process.
