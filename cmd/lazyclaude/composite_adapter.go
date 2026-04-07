@@ -298,6 +298,7 @@ type lazyConn struct {
 // Returns nil if host is empty (local operation) or already connected.
 // Uses sync.Once per host to guarantee exactly one connectFn call.
 func (a *guiCompositeAdapter) ensureRemoteConnected(host string) error {
+	debugLog("ensureRemoteConnected: host=%q connectFn=%v", host, a.connectFn != nil)
 	if host == "" || a.connectFn == nil {
 		return nil
 	}
@@ -314,7 +315,9 @@ func (a *guiCompositeAdapter) ensureRemoteConnected(host string) error {
 	a.connectMu.Unlock()
 
 	lc.once.Do(func() {
+		debugLog("ensureRemoteConnected: calling connectFn for host=%q", host)
 		lc.err = a.connectFn(host)
+		debugLog("ensureRemoteConnected: connectFn result: %v", lc.err)
 	})
 	return lc.err
 }
@@ -362,6 +365,7 @@ func (a *guiCompositeAdapter) ToggleProjectExpanded(projectID string) {
 
 func (a *guiCompositeAdapter) Create(path string) error {
 	host := a.pendingHost
+	debugLog("Create: path=%q pendingHost=%q", path, host)
 	if host == "" {
 		// Local: synchronous (existing behavior).
 		return a.cp.Create(path, "")
@@ -394,15 +398,19 @@ func (a *guiCompositeAdapter) Create(path string) error {
 // dead and stores the error message. On success it maps the placeholder
 // to the real remote session for preview routing.
 func (a *guiCompositeAdapter) completeRemoteCreate(placeholderID, localPath, host string) {
+	debugLog("completeRemoteCreate: placeholderID=%q localPath=%q host=%q", placeholderID, localPath, host)
 	if err := a.ensureRemoteConnected(host); err != nil {
+		debugLog("completeRemoteCreate: ensureRemoteConnected failed: %v", err)
 		a.failPlaceholder(placeholderID, fmt.Sprintf("Connection failed: %v", err))
 		return
 	}
 
 	// Resolve the local path to the remote CWD now that the connection exists.
 	remotePath := a.resolveRemotePath(localPath, host)
+	debugLog("completeRemoteCreate: resolveRemotePath input=%q output=%q", localPath, remotePath)
 
 	if err := a.cp.Create(remotePath, host); err != nil {
+		debugLog("completeRemoteCreate: cp.Create failed: %v", err)
 		a.failPlaceholder(placeholderID, fmt.Sprintf("Session creation failed: %v", err))
 		return
 	}
@@ -527,17 +535,21 @@ func (a *guiCompositeAdapter) triggerGUIUpdate() {
 // the remote connection to be established first (call ensureRemoteConnected
 // before this method).
 func (a *guiCompositeAdapter) resolveRemotePath(path, host string) string {
+	debugLog("resolveRemotePath: input=%q host=%q", path, host)
 	// Always query the remote daemon for its CWD when the host is set.
 	// Local paths (from currentProjectRoot fallback) are meaningless on
 	// the remote machine.
 	remoteCWD := a.queryRemoteCWD(host)
 	if remoteCWD != "" {
+		debugLog("resolveRemotePath: output=%q (from queryRemoteCWD)", remoteCWD)
 		return remoteCWD
 	}
 	// Fallback: use "." so the daemon uses its own CWD.
 	if host != "" {
+		debugLog("resolveRemotePath: output=%q (fallback dot)", ".")
 		return "."
 	}
+	debugLog("resolveRemotePath: output=%q (passthrough)", path)
 	return path
 }
 
@@ -547,17 +559,21 @@ const cwdQueryTimeout = 10 * time.Second
 // queryRemoteCWD fetches the working directory from a connected remote daemon.
 // Returns "" if the query fails (caller should fall back to the original path).
 func (a *guiCompositeAdapter) queryRemoteCWD(host string) string {
+	debugLog("queryRemoteCWD: host=%q", host)
 	provider := a.cp.RemoteProvider(host)
+	debugLog("queryRemoteCWD: provider=%v", provider != nil)
 	if provider == nil {
 		return ""
 	}
 	querier, ok := provider.(daemon.CWDQuerier)
+	debugLog("queryRemoteCWD: implements CWDQuerier=%v", ok)
 	if !ok {
 		return ""
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cwdQueryTimeout)
 	defer cancel()
 	cwd, err := querier.QueryCWD(ctx)
+	debugLog("queryRemoteCWD: cwd=%q err=%v", cwd, err)
 	if err != nil {
 		return ""
 	}

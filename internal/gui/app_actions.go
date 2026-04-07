@@ -470,12 +470,16 @@ func (a *App) SelectWorktree() {
 }
 
 func (a *App) ConnectRemote() {
+	debugLog("ConnectRemote: triggered hasDialog=%v", a.HasActiveDialog())
 	if a.HasActiveDialog() {
 		return
 	}
 	a.gui.Update(func(g *gocui.Gui) error {
 		if !a.showConnectDialog(g) {
+			debugLog("ConnectRemote: showConnectDialog failed")
 			a.showError(g, "Error: could not open connect dialog")
+		} else {
+			debugLog("ConnectRemote: dialog opened")
 		}
 		return nil
 	})

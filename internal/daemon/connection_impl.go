@@ -117,6 +117,7 @@ func (rc *RemoteConnection) OnReconnect(fn func()) {
 // Connect establishes a connection: discovers or starts the remote daemon,
 // opens an SSH tunnel, and verifies the health endpoint.
 func (rc *RemoteConnection) Connect(ctx context.Context) error {
+	debugLog("RemoteConnection.Connect: host=%q", rc.host)
 	rc.connMu.Lock()
 	defer rc.connMu.Unlock()
 	return rc.connectLocked(ctx)
@@ -134,14 +135,18 @@ func (rc *RemoteConnection) connectLocked(ctx context.Context) error {
 
 	rc.setState(Connecting)
 
+	debugLog("connectLocked: discovering daemon on %s...", rc.host)
 	info, err := rc.lifecycle.DiscoverRemoteDaemon(ctx, rc.host)
 	if err != nil {
+		debugLog("connectLocked: discover failed: %v, starting daemon...", err)
 		info, err = rc.lifecycle.StartRemoteDaemon(ctx, rc.host)
 		if err != nil {
+			debugLog("connectLocked: start failed: %v", err)
 			rc.setState(ConnectionError)
 			return fmt.Errorf("connect to %s: %w", rc.host, err)
 		}
 	}
+	debugLog("connectLocked: daemon info: port=%d token=%q pid=%d", info.Port, info.Token, info.PID)
 
 	if info.Token == "" {
 		rc.setState(ConnectionError)
@@ -149,20 +154,26 @@ func (rc *RemoteConnection) connectLocked(ctx context.Context) error {
 	}
 
 	tunnel := NewTunnel(rc.host, info.Port)
+	debugLog("connectLocked: starting tunnel remotePort=%d", info.Port)
 	if err := tunnel.Start(ctx); err != nil {
+		debugLog("connectLocked: tunnel start failed: %v", err)
 		rc.setState(ConnectionError)
 		return fmt.Errorf("start tunnel to %s: %w", rc.host, err)
 	}
+	debugLog("connectLocked: tunnel started localPort=%d", tunnel.LocalPort())
 
 	addr := fmt.Sprintf("http://127.0.0.1:%d", tunnel.LocalPort())
 	client := rc.clientFactory(addr, info.Token)
 
+	debugLog("connectLocked: health check at %s", addr)
 	health, err := client.Health(ctx)
 	if err != nil {
+		debugLog("connectLocked: health check failed: %v", err)
 		tunnel.Stop()
 		rc.setState(ConnectionError)
 		return fmt.Errorf("health check on %s: %w", rc.host, err)
 	}
+	debugLog("connectLocked: health=%+v", health)
 	if health.APIVersion != APIVersion {
 		tunnel.Stop()
 		rc.setState(ConnectionError)
