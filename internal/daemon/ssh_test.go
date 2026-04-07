@@ -24,9 +24,9 @@ func TestSplitHostPort(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			gotHost, gotPort := splitHostPort(tt.input)
+			gotHost, gotPort := SplitHostPort(tt.input)
 			if gotHost != tt.wantHost || gotPort != tt.wantPort {
-				t.Errorf("splitHostPort(%q) = (%q, %q), want (%q, %q)",
+				t.Errorf("SplitHostPort(%q) = (%q, %q), want (%q, %q)",
 					tt.input, gotHost, gotPort, tt.wantHost, tt.wantPort)
 			}
 		})

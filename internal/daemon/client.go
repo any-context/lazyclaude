@@ -32,33 +32,6 @@ type ClientAPI interface {
 	// PurgeOrphans removes sessions whose tmux windows no longer exist.
 	PurgeOrphans(ctx context.Context) (int, error)
 
-	// --- Preview / Scrollback ---
-
-	// CapturePreview captures the visible pane content for a session.
-	CapturePreview(ctx context.Context, id string, width, height int) (*PreviewResponse, error)
-
-	// CaptureScrollback captures a range of scrollback lines.
-	CaptureScrollback(ctx context.Context, id string, width, startLine, endLine int) (*ScrollbackResponse, error)
-
-	// HistorySize returns the total scrollback line count for a session.
-	HistorySize(ctx context.Context, id string) (*HistorySizeResponse, error)
-
-	// --- Input ---
-
-	// SendKeys sends key names to a session's tmux pane (e.g., "Enter", "Space").
-	SendKeys(ctx context.Context, id, keys string) error
-
-	// SendKeysLiteral sends literal text to a session's tmux pane (send-keys -l).
-	SendKeysLiteral(ctx context.Context, id, text string) error
-
-	// SendChoice sends a permission choice to a session.
-	SendChoice(ctx context.Context, id, window string, choice int) error
-
-	// --- Attach ---
-
-	// AttachSession returns the tmux target string for interactive attach.
-	AttachSession(ctx context.Context, id string) (*AttachResponse, error)
-
 	// --- Worktree ---
 
 	// CreateWorktree creates a new git worktree and associated session.

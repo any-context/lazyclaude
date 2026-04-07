@@ -66,6 +66,15 @@ func (s *Session) WindowName() string {
 	return "lc-" + s.ID[:8]
 }
 
+// MirrorWindowName returns the tmux window name for a remote session's
+// local mirror. Uses "rm-" prefix to distinguish from local "lc-" windows.
+func MirrorWindowName(sessionID string) string {
+	if len(sessionID) > 8 {
+		sessionID = sessionID[:8]
+	}
+	return "rm-" + sessionID
+}
+
 // stateFile is the versioned on-disk format for state.json.
 const stateVersion = 2
 
@@ -526,6 +535,14 @@ func (s *Store) mutateSessionLocked(id string, fn func(*Session)) {
 	}
 }
 
+// UpdateSession applies fn to the session identified by id.
+// Thread-safe; acquires the write lock.
+func (s *Store) UpdateSession(id string, fn func(*Session)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mutateSessionLocked(id, fn)
+}
+
 // SyncWithTmux updates runtime state by comparing with tmux windows.
 func (s *Store) SyncWithTmux(windows []tmux.WindowInfo, panes []tmux.PaneInfo) {
 	s.mu.Lock()
@@ -553,6 +570,11 @@ func (s *Store) SyncWithTmux(windows []tmux.WindowInfo, panes []tmux.PaneInfo) {
 	syncSession := func(sess *Session) {
 		wName := sess.WindowName()
 		w, found := windowByName[wName]
+		// For remote sessions (Host != ""), also check mirror window name (rm-).
+		if !found && sess.Host != "" {
+			mirrorName := MirrorWindowName(sess.ID)
+			w, found = windowByName[mirrorName]
+		}
 		if !found {
 			sess.Status = StatusOrphan
 			sess.TmuxWindow = ""

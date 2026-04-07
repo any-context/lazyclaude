@@ -14,14 +14,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/any-context/lazyclaude/internal/adapter/tmuxadapter"
-	"github.com/any-context/lazyclaude/internal/core/choice"
 	"github.com/any-context/lazyclaude/internal/core/event"
 	"github.com/any-context/lazyclaude/internal/core/model"
 	"github.com/any-context/lazyclaude/internal/core/tmux"
@@ -98,18 +95,6 @@ func NewDaemonServer(
 	mux.HandleFunc("DELETE /session/{id}", s.withAuth(s.handleSessionDelete))
 	mux.HandleFunc("POST /session/{id}/rename", s.withAuth(s.handleSessionRename))
 	mux.HandleFunc("GET /sessions", s.withAuth(s.handleSessionList))
-
-	// Preview / Scrollback
-	mux.HandleFunc("GET /session/{id}/preview", s.withAuth(s.handlePreview))
-	mux.HandleFunc("GET /session/{id}/scrollback", s.withAuth(s.handleScrollback))
-	mux.HandleFunc("GET /session/{id}/history-size", s.withAuth(s.handleHistorySize))
-
-	// Input
-	mux.HandleFunc("POST /session/{id}/send-keys", s.withAuth(s.handleSendKeys))
-	mux.HandleFunc("POST /session/{id}/send-choice", s.withAuth(s.handleSendChoice))
-
-	// Attach
-	mux.HandleFunc("GET /session/{id}/attach", s.withAuth(s.handleAttach))
 
 	// Worktree
 	mux.HandleFunc("POST /worktree/create", s.withAuth(s.handleWorktreeCreate))
@@ -294,158 +279,6 @@ func (s *DaemonServer) handleSessionList(w http.ResponseWriter, r *http.Request)
 		items[i] = sessionToInfo(sess)
 	}
 	writeJSON(w, http.StatusOK, SessionListResponse{Sessions: items})
-}
-
-// --- Preview / Scrollback handlers ---
-
-func (s *DaemonServer) handlePreview(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	width, _ := strconv.Atoi(r.URL.Query().Get("width"))
-	height, _ := strconv.Atoi(r.URL.Query().Get("height"))
-
-	sess := s.mgr.Store().FindByID(id)
-	if sess == nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-
-	target := resolveTarget(sess)
-	ctx := r.Context()
-
-	if width > 0 && height > 0 {
-		if err := s.tmux.ResizeWindow(ctx, target, width, height); err != nil {
-			s.log.Printf("preview: resize %s: %v", target, err)
-		} else {
-			select {
-			case <-time.After(20 * time.Millisecond):
-			case <-ctx.Done():
-				return
-			}
-		}
-	}
-
-	resp, err := CapturePreviewContent(ctx, s.tmux, target)
-	if err != nil {
-		http.Error(w, "capture failed", http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (s *DaemonServer) handleScrollback(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	width, _ := strconv.Atoi(r.URL.Query().Get("width"))
-	startLine, _ := strconv.Atoi(r.URL.Query().Get("start_line"))
-	endLine, _ := strconv.Atoi(r.URL.Query().Get("end_line"))
-
-	sess := s.mgr.Store().FindByID(id)
-	if sess == nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-
-	target := resolveTarget(sess)
-	_ = width // width is used by caller for truncation, not by capture
-
-	content, err := s.tmux.CapturePaneANSIRange(r.Context(), target, startLine, endLine)
-	if err != nil {
-		http.Error(w, "capture failed", http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, ScrollbackResponse{Content: content})
-}
-
-func (s *DaemonServer) handleHistorySize(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sess := s.mgr.Store().FindByID(id)
-	if sess == nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-
-	target := resolveTarget(sess)
-	out, err := s.tmux.ShowMessage(r.Context(), target, "#{history_size}")
-	if err != nil {
-		http.Error(w, "tmux error", http.StatusInternalServerError)
-		return
-	}
-	lines, _ := strconv.Atoi(strings.TrimSpace(out))
-	writeJSON(w, http.StatusOK, HistorySizeResponse{Lines: lines})
-}
-
-// --- Input handlers ---
-
-func (s *DaemonServer) handleSendKeys(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var req SendKeysRequest
-	if err := readJSON(w, r, &req); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-
-	sess := s.mgr.Store().FindByID(id)
-	if sess == nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-
-	target := "lazyclaude:" + sess.WindowName()
-	var err error
-	if req.Literal {
-		err = s.tmux.SendKeysLiteral(r.Context(), target, req.Keys)
-	} else {
-		err = s.tmux.SendKeys(r.Context(), target, req.Keys)
-	}
-	if err != nil {
-		http.Error(w, "send-keys failed", http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *DaemonServer) handleSendChoice(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var req SendChoiceRequest
-	if err := readJSON(w, r, &req); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-
-	sess := s.mgr.Store().FindByID(id)
-	if sess == nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-
-	window := req.Window
-	if window == "" {
-		window = sess.TmuxWindow
-	}
-	if window == "" {
-		window = sess.WindowName()
-	}
-
-	c := choice.Choice(req.Choice)
-	if err := tmuxadapter.SendToPane(r.Context(), s.tmux, window, c); err != nil {
-		http.Error(w, "send-choice failed", http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// --- Attach handler ---
-
-func (s *DaemonServer) handleAttach(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sess := s.mgr.Store().FindByID(id)
-	if sess == nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-	target := "lazyclaude:" + sess.WindowName()
-	writeJSON(w, http.StatusOK, AttachResponse{TmuxTarget: target})
 }
 
 // --- Worktree handlers ---

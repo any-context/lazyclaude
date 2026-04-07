@@ -194,18 +194,27 @@ func (rp *RemoteProvider) Sessions() ([]SessionInfo, error) {
 // --- SessionMutator ---
 
 func (rp *RemoteProvider) Create(path string) error {
+	_, err := rp.CreateSession(path)
+	return err
+}
+
+// CreateSession creates a session on the remote daemon and returns the
+// response containing the ID and tmux window name. Used by the mirror
+// window creation flow which needs the session ID to construct the
+// mirror window's SSH attach command.
+func (rp *RemoteProvider) CreateSession(path string) (*SessionCreateResponse, error) {
 	client, err := rp.conn.Client()
 	if err != nil {
-		return fmt.Errorf("create: %w", err)
+		return nil, fmt.Errorf("create: %w", err)
 	}
-	_, err = client.CreateSession(context.Background(), SessionCreateRequest{
+	resp, err := client.CreateSession(context.Background(), SessionCreateRequest{
 		Path:        path,
 		SessionType: "plain",
 	})
 	if err != nil {
-		return fmt.Errorf("create session: %w", err)
+		return nil, fmt.Errorf("create session: %w", err)
 	}
-	return nil
+	return resp, nil
 }
 
 func (rp *RemoteProvider) Delete(id string) error {
@@ -232,12 +241,18 @@ func (rp *RemoteProvider) PurgeOrphans() (int, error) {
 	return client.PurgeOrphans(context.Background())
 }
 
-// --- PreviewProvider ---
+// --- SessionActioner ---
 
-// resolveTmuxTarget returns the tmux target string for a session.
-// Used by AttachSession to construct the SSH attach command.
-// Looks up the session's TmuxWindow in the local cache; falls back to
-// constructing from session ID.
+// AttachSession attaches to a remote session via SSH -t tmux attach.
+// Attach always uses SSH because the user's terminal must be connected
+// to the remote tmux process directly.
+func (rp *RemoteProvider) AttachSession(id string) error {
+	target := rp.resolveTmuxTarget(id)
+	return rp.runSSHInteractive(buildTmuxAttachCommand(target))
+}
+
+// resolveTmuxTarget returns the tmux target string for a session on the
+// remote host. Used by AttachSession to construct the SSH attach command.
 func (rp *RemoteProvider) resolveTmuxTarget(id string) string {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
@@ -246,7 +261,6 @@ func (rp *RemoteProvider) resolveTmuxTarget(id string) string {
 			return s.TmuxWindow
 		}
 	}
-	// Fallback: construct window name from ID prefix.
 	name := "lc-" + id
 	if len(id) > 8 {
 		name = "lc-" + id[:8]
@@ -254,80 +268,26 @@ func (rp *RemoteProvider) resolveTmuxTarget(id string) string {
 	return tmuxSessionName + ":" + name
 }
 
-func (rp *RemoteProvider) CapturePreview(id string, width, height int) (*PreviewResponse, error) {
-	client, err := rp.conn.Client()
-	if err != nil {
-		return nil, fmt.Errorf("capture preview: %w", err)
-	}
-	return client.CapturePreview(context.Background(), id, width, height)
+// SendChoice is a no-op for remote sessions. With mirror windows, permission
+// choices are sent via the local tmux provider to the mirror window.
+func (rp *RemoteProvider) SendChoice(_ string, _ int) error {
+	return fmt.Errorf("SendChoice not supported on remote provider (use mirror window)")
 }
 
-func (rp *RemoteProvider) CaptureScrollback(id string, width, startLine, endLine int) (*ScrollbackResponse, error) {
-	client, err := rp.conn.Client()
-	if err != nil {
-		return nil, fmt.Errorf("capture scrollback: %w", err)
-	}
-	return client.CaptureScrollback(context.Background(), id, width, startLine, endLine)
+// CapturePreview is a no-op for remote sessions. With mirror windows, preview
+// capture is handled by the local tmux provider via the mirror window.
+func (rp *RemoteProvider) CapturePreview(_ string, _, _ int) (*PreviewResponse, error) {
+	return nil, fmt.Errorf("CapturePreview not supported on remote provider (use mirror window)")
 }
 
-func (rp *RemoteProvider) HistorySize(id string) (int, error) {
-	client, err := rp.conn.Client()
-	if err != nil {
-		return 0, fmt.Errorf("history size: %w", err)
-	}
-	resp, err := client.HistorySize(context.Background(), id)
-	if err != nil {
-		return 0, err
-	}
-	return resp.Lines, nil
+// CaptureScrollback is a no-op for remote sessions.
+func (rp *RemoteProvider) CaptureScrollback(_ string, _, _, _ int) (*ScrollbackResponse, error) {
+	return nil, fmt.Errorf("CaptureScrollback not supported on remote provider (use mirror window)")
 }
 
-// --- SessionActioner ---
-
-// SendChoice sends a permission choice to the remote session via daemon API.
-func (rp *RemoteProvider) SendChoice(window string, choiceVal int) error {
-	client, err := rp.conn.Client()
-	if err != nil {
-		return fmt.Errorf("send choice: %w", err)
-	}
-	return client.SendChoice(context.Background(), "", window, choiceVal)
-}
-
-// SendKeys sends raw keys to the remote session via daemon API.
-func (rp *RemoteProvider) SendKeys(id, keys string) error {
-	client, err := rp.conn.Client()
-	if err != nil {
-		return fmt.Errorf("send keys: %w", err)
-	}
-	return client.SendKeys(context.Background(), id, keys)
-}
-
-// SendKeysLiteral sends literal text to the remote session via daemon API.
-func (rp *RemoteProvider) SendKeysLiteral(id, text string) error {
-	client, err := rp.conn.Client()
-	if err != nil {
-		return fmt.Errorf("send keys literal: %w", err)
-	}
-	return client.SendKeysLiteral(context.Background(), id, text)
-}
-
-// PasteToPane sends text as a bracketed paste to the remote session via
-// daemon API. Falls back to literal send since PasteToPane is not directly
-// supported over the daemon HTTP API.
-func (rp *RemoteProvider) PasteToPane(id, text string) error {
-	client, err := rp.conn.Client()
-	if err != nil {
-		return fmt.Errorf("paste to pane: %w", err)
-	}
-	return client.SendKeysLiteral(context.Background(), id, text)
-}
-
-// AttachSession attaches to a remote session via SSH -t tmux attach.
-// Attach always uses SSH because the user's terminal must be connected
-// to the remote tmux process directly.
-func (rp *RemoteProvider) AttachSession(id string) error {
-	target := rp.resolveTmuxTarget(id)
-	return rp.runSSHInteractive(buildTmuxAttachCommand(target))
+// HistorySize is a no-op for remote sessions.
+func (rp *RemoteProvider) HistorySize(_ string) (int, error) {
+	return 0, fmt.Errorf("HistorySize not supported on remote provider (use mirror window)")
 }
 
 // LaunchLazygit launches lazygit on the remote host via SSH -t.
@@ -340,7 +300,7 @@ func (rp *RemoteProvider) LaunchLazygit(path string) error {
 // runSSHInteractive runs an interactive SSH command with stdin/stdout/stderr
 // connected to the current terminal.
 func (rp *RemoteProvider) runSSHInteractive(remoteCmd string) error {
-	sshHost, port := splitHostPort(rp.host)
+	sshHost, port := SplitHostPort(rp.host)
 	args := []string{"-t"}
 	if port != "" {
 		args = append(args, "-p", port)

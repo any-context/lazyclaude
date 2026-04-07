@@ -207,7 +207,7 @@ func (t *Tunnel) SSHArgs() []string {
 // other SSH-based operations. The returned slice includes -N, keepalive
 // options, security options, and the resolved host/port.
 func baseSSHArgs(host string) []string {
-	sshHost, port := splitHostPort(host)
+	sshHost, port := SplitHostPort(host)
 	args := []string{
 		"-N",
 		"-a",

@@ -25,22 +25,7 @@ func (m *mockClientAPI) CreateSession(context.Context, SessionCreateRequest) (*S
 func (m *mockClientAPI) DeleteSession(context.Context, string) error                     { return nil }
 func (m *mockClientAPI) RenameSession(context.Context, string, string) error             { return nil }
 func (m *mockClientAPI) Sessions(context.Context) ([]SessionInfo, error)                 { return nil, nil }
-func (m *mockClientAPI) PurgeOrphans(context.Context) (int, error)                       { return 0, nil }
-func (m *mockClientAPI) CapturePreview(context.Context, string, int, int) (*PreviewResponse, error) {
-	return nil, nil
-}
-func (m *mockClientAPI) CaptureScrollback(context.Context, string, int, int, int) (*ScrollbackResponse, error) {
-	return nil, nil
-}
-func (m *mockClientAPI) HistorySize(context.Context, string) (*HistorySizeResponse, error) {
-	return nil, nil
-}
-func (m *mockClientAPI) SendKeys(context.Context, string, string) error        { return nil }
-func (m *mockClientAPI) SendKeysLiteral(context.Context, string, string) error { return nil }
-func (m *mockClientAPI) SendChoice(context.Context, string, string, int) error { return nil }
-func (m *mockClientAPI) AttachSession(context.Context, string) (*AttachResponse, error) {
-	return nil, nil
-}
+func (m *mockClientAPI) PurgeOrphans(context.Context) (int, error) { return 0, nil }
 func (m *mockClientAPI) CreateWorktree(context.Context, WorktreeCreateRequest) (*WorktreeCreateResponse, error) {
 	return nil, nil
 }
