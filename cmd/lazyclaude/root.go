@@ -234,8 +234,16 @@ func newRootCmd() *cobra.Command {
 				return statuses
 			})
 
-			// Wire connect dialog handler.
-			app.SetConnectFn(connectRemoteHost)
+			// Wire connect dialog handler. After a successful connection,
+			// update the adapter's pending host so subsequent operations
+			// (n, w, W, P, N) route to the newly connected host by default.
+			app.SetConnectFn(func(host string) error {
+				if err := connectRemoteHost(host); err != nil {
+					return err
+				}
+				compositeAdapter.SetPendingHost(host)
+				return nil
+			})
 
 			// Plugin manager: wraps `claude plugins` CLI (project scope only)
 			var pluginOpts []plugin.Option

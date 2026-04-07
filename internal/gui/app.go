@@ -46,6 +46,23 @@ type NotificationCacher interface {
 	RefreshPendingFrom([]*model.ToolNotification)
 }
 
+// HostAwareCreator is optionally implemented by SessionProvider to support
+// explicit host routing. When the GUI determines the target host from the
+// cursor position, it uses these methods instead of the host-less defaults
+// (which fall back to pendingHost detected at startup).
+//
+// Note: CreateWorkerSession is not included because it is invoked via the
+// MCP server API (handler_msg.go), not from GUI key handlers.
+// SetPendingHost is also not included — it is a lifecycle concern called
+// directly on the concrete adapter from root.go's connect closure.
+type HostAwareCreator interface {
+	CreateWithHost(path, host string) error
+	CreateWorktreeWithHost(name, prompt, projectRoot, host string) error
+	ResumeWorktreeWithHost(worktreePath, prompt, projectRoot, host string) error
+	ListWorktreesWithHost(projectRoot, host string) ([]WorktreeInfo, error)
+	CreatePMSessionWithHost(projectRoot, host string) error
+}
+
 type SessionProvider interface {
 	Sessions() []SessionItem
 	Projects() []ProjectItem
