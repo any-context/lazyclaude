@@ -344,6 +344,32 @@ func (a *guiCompositeAdapter) createMirrorForExisting(host string, s daemon.Sess
 	debugLog("createMirrorForExisting: mirror %q created for session %q", mirrorName, s.ID)
 }
 
+// ensureMirrorForRemoteSession creates a local mirror window and adds the
+// session to the local store after a remote daemon API call succeeds.
+// This is the shared post-creation step for worktree, PM, and worker sessions
+// on remote hosts.
+func (a *guiCompositeAdapter) ensureMirrorForRemoteSession(host string, resp *daemon.SessionCreateResponse) error {
+	mirrorName := session.MirrorWindowName(resp.ID)
+	if err := a.createMirrorWindow(host, resp.TmuxWindow, mirrorName); err != nil {
+		return fmt.Errorf("create mirror window: %w", err)
+	}
+
+	sess := session.Session{
+		ID:         resp.ID,
+		Name:       resp.Name,
+		Host:       host,
+		Status:     session.StatusRunning,
+		TmuxWindow: mirrorName,
+	}
+	a.localMgr.Store().Add(sess, "")
+	if err := a.localMgr.Store().Save(); err != nil {
+		debugLog("ensureMirrorForRemoteSession: save store failed: %v", err)
+	}
+	debugLog("ensureMirrorForRemoteSession: mirror %q created for remote session %q", mirrorName, resp.ID)
+	a.triggerGUIUpdate()
+	return nil
+}
+
 // failPlaceholder marks a placeholder session as dead and creates a tmux error
 // window so that preview, fullscreen, and visual mode all work normally.
 func (a *guiCompositeAdapter) failPlaceholder(id, msg string) {
@@ -550,7 +576,18 @@ func (a *guiCompositeAdapter) createWorktreeWithHost(name, prompt, projectRoot, 
 	if host != "" {
 		projectRoot = a.resolveRemotePath(projectRoot, host)
 	}
-	return a.cp.CreateWorktree(name, prompt, projectRoot, host)
+	if host == "" {
+		return a.cp.CreateWorktree(name, prompt, projectRoot, host)
+	}
+	rp := a.remoteProvider(host)
+	if rp == nil {
+		return fmt.Errorf("no remote provider for host %q", host)
+	}
+	resp, err := rp.CreateWorktreeResp(name, prompt, projectRoot)
+	if err != nil {
+		return err
+	}
+	return a.ensureMirrorForRemoteSession(host, resp)
 }
 
 func (a *guiCompositeAdapter) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
@@ -565,7 +602,18 @@ func (a *guiCompositeAdapter) resumeWorktreeWithHost(worktreePath, prompt, proje
 	if host != "" {
 		projectRoot = a.resolveRemotePath(projectRoot, host)
 	}
-	return a.cp.ResumeWorktree(worktreePath, prompt, projectRoot, host)
+	if host == "" {
+		return a.cp.ResumeWorktree(worktreePath, prompt, projectRoot, host)
+	}
+	rp := a.remoteProvider(host)
+	if rp == nil {
+		return fmt.Errorf("no remote provider for host %q", host)
+	}
+	resp, err := rp.ResumeWorktreeResp(worktreePath, prompt, projectRoot)
+	if err != nil {
+		return err
+	}
+	return a.ensureMirrorForRemoteSession(host, resp)
 }
 
 func (a *guiCompositeAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeInfo, error) {
@@ -603,7 +651,18 @@ func (a *guiCompositeAdapter) createPMSessionWithHost(projectRoot, host string) 
 	if host != "" {
 		projectRoot = a.resolveRemotePath(projectRoot, host)
 	}
-	return a.cp.CreatePMSession(projectRoot, host)
+	if host == "" {
+		return a.cp.CreatePMSession(projectRoot, host)
+	}
+	rp := a.remoteProvider(host)
+	if rp == nil {
+		return fmt.Errorf("no remote provider for host %q", host)
+	}
+	resp, err := rp.CreatePMSessionResp(projectRoot)
+	if err != nil {
+		return err
+	}
+	return a.ensureMirrorForRemoteSession(host, resp)
 }
 
 func (a *guiCompositeAdapter) CreateWorkerSession(name, prompt, projectRoot string) error {
@@ -618,6 +677,17 @@ func (a *guiCompositeAdapter) createWorkerSessionWithHost(name, prompt, projectR
 	if host != "" {
 		projectRoot = a.resolveRemotePath(projectRoot, host)
 	}
-	return a.cp.CreateWorkerSession(name, prompt, projectRoot, host)
+	if host == "" {
+		return a.cp.CreateWorkerSession(name, prompt, projectRoot, host)
+	}
+	rp := a.remoteProvider(host)
+	if rp == nil {
+		return fmt.Errorf("no remote provider for host %q", host)
+	}
+	resp, err := rp.CreateWorkerSessionResp(name, prompt, projectRoot)
+	if err != nil {
+		return err
+	}
+	return a.ensureMirrorForRemoteSession(host, resp)
 }
 

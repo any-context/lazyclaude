@@ -328,29 +328,56 @@ func buildTmuxAttachCommand(tmuxTarget string) string {
 // --- WorktreeProvider ---
 
 func (rp *RemoteProvider) CreateWorktree(name, prompt, projectRoot string) error {
+	_, err := rp.CreateWorktreeResp(name, prompt, projectRoot)
+	return err
+}
+
+// CreateWorktreeResp creates a worktree on the remote daemon and returns the
+// response containing the session ID and tmux window name.
+func (rp *RemoteProvider) CreateWorktreeResp(name, prompt, projectRoot string) (*SessionCreateResponse, error) {
 	client, err := rp.conn.Client()
 	if err != nil {
-		return fmt.Errorf("create worktree: %w", err)
+		return nil, fmt.Errorf("create worktree: %w", err)
 	}
-	_, err = client.CreateWorktree(context.Background(), WorktreeCreateRequest{
+	resp, err := client.CreateWorktree(context.Background(), WorktreeCreateRequest{
 		Name:        name,
 		Prompt:      prompt,
 		ProjectRoot: projectRoot,
 	})
-	return err
+	if err != nil {
+		return nil, fmt.Errorf("create worktree: %w", err)
+	}
+	return &SessionCreateResponse{
+		ID:         resp.SessionID,
+		Name:       name,
+		TmuxWindow: resp.TmuxWindow,
+	}, nil
 }
 
 func (rp *RemoteProvider) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
+	_, err := rp.ResumeWorktreeResp(worktreePath, prompt, projectRoot)
+	return err
+}
+
+// ResumeWorktreeResp resumes a worktree on the remote daemon and returns the
+// response containing the session ID and tmux window name.
+func (rp *RemoteProvider) ResumeWorktreeResp(worktreePath, prompt, projectRoot string) (*SessionCreateResponse, error) {
 	client, err := rp.conn.Client()
 	if err != nil {
-		return fmt.Errorf("resume worktree: %w", err)
+		return nil, fmt.Errorf("resume worktree: %w", err)
 	}
-	_, err = client.ResumeWorktree(context.Background(), WorktreeResumeRequest{
+	resp, err := client.ResumeWorktree(context.Background(), WorktreeResumeRequest{
 		WorktreePath: worktreePath,
 		Prompt:       prompt,
 		ProjectRoot:  projectRoot,
 	})
-	return err
+	if err != nil {
+		return nil, fmt.Errorf("resume worktree: %w", err)
+	}
+	return &SessionCreateResponse{
+		ID:         resp.SessionID,
+		TmuxWindow: resp.TmuxWindow,
+	}, nil
 }
 
 func (rp *RemoteProvider) ListWorktrees(projectRoot string) ([]WorktreeInfo, error) {
@@ -364,29 +391,41 @@ func (rp *RemoteProvider) ListWorktrees(projectRoot string) ([]WorktreeInfo, err
 // --- RoleSessionProvider ---
 
 func (rp *RemoteProvider) CreatePMSession(projectRoot string) error {
-	client, err := rp.conn.Client()
-	if err != nil {
-		return fmt.Errorf("create PM session: %w", err)
-	}
-	_, err = client.CreateSession(context.Background(), SessionCreateRequest{
-		Path:        projectRoot,
-		SessionType: "pm",
-	})
+	_, err := rp.CreatePMSessionResp(projectRoot)
 	return err
 }
 
-func (rp *RemoteProvider) CreateWorkerSession(name, prompt, projectRoot string) error {
+// CreatePMSessionResp creates a PM session on the remote daemon and returns
+// the response containing the session ID and tmux window name.
+func (rp *RemoteProvider) CreatePMSessionResp(projectRoot string) (*SessionCreateResponse, error) {
 	client, err := rp.conn.Client()
 	if err != nil {
-		return fmt.Errorf("create worker session: %w", err)
+		return nil, fmt.Errorf("create PM session: %w", err)
 	}
-	_, err = client.CreateSession(context.Background(), SessionCreateRequest{
+	return client.CreateSession(context.Background(), SessionCreateRequest{
+		Path:        projectRoot,
+		SessionType: "pm",
+	})
+}
+
+func (rp *RemoteProvider) CreateWorkerSession(name, prompt, projectRoot string) error {
+	_, err := rp.CreateWorkerSessionResp(name, prompt, projectRoot)
+	return err
+}
+
+// CreateWorkerSessionResp creates a worker session on the remote daemon and
+// returns the response containing the session ID and tmux window name.
+func (rp *RemoteProvider) CreateWorkerSessionResp(name, prompt, projectRoot string) (*SessionCreateResponse, error) {
+	client, err := rp.conn.Client()
+	if err != nil {
+		return nil, fmt.Errorf("create worker session: %w", err)
+	}
+	return client.CreateSession(context.Background(), SessionCreateRequest{
 		Path:        projectRoot,
 		SessionType: "worker",
 		Name:        name,
 		Prompt:      prompt,
 	})
-	return err
 }
 
 // --- ConnectionAware ---

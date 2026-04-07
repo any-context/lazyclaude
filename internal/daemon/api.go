@@ -132,9 +132,10 @@ type WorktreeCreateRequest struct {
 
 // WorktreeCreateResponse is returned after a worktree is created.
 type WorktreeCreateResponse struct {
-	SessionID string `json:"session_id"`
-	Path      string `json:"path"`
-	Branch    string `json:"branch"`
+	SessionID  string `json:"session_id"`
+	Path       string `json:"path"`
+	Branch     string `json:"branch"`
+	TmuxWindow string `json:"tmux_window"`
 }
 
 // WorktreeResumeRequest resumes an existing worktree session.
@@ -146,7 +147,8 @@ type WorktreeResumeRequest struct {
 
 // WorktreeResumeResponse is returned after a worktree session is resumed.
 type WorktreeResumeResponse struct {
-	SessionID string `json:"session_id"`
+	SessionID  string `json:"session_id"`
+	TmuxWindow string `json:"tmux_window"`
 }
 
 // WorktreeInfo describes an existing worktree.
