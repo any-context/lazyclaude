@@ -251,6 +251,7 @@ func (a *guiCompositeAdapter) completeRemoteCreate(placeholderID, localPath, hos
 	store.UpdateSession(placeholderID, func(sess *session.Session) {
 		sess.ID = resp.ID
 		sess.Name = resp.Name
+		sess.Path = remotePath
 		sess.Host = host
 		sess.Status = session.StatusRunning
 		sess.TmuxWindow = mirrorName
@@ -348,7 +349,7 @@ func (a *guiCompositeAdapter) createMirrorForExisting(host string, s daemon.Sess
 // session to the local store after a remote daemon API call succeeds.
 // This is the shared post-creation step for worktree, PM, and worker sessions
 // on remote hosts.
-func (a *guiCompositeAdapter) ensureMirrorForRemoteSession(host string, resp *daemon.SessionCreateResponse) error {
+func (a *guiCompositeAdapter) ensureMirrorForRemoteSession(host, path string, resp *daemon.SessionCreateResponse) error {
 	// Skip if already in local store (guards against double-click / retry).
 	if a.localMgr.Store().FindByID(resp.ID) != nil {
 		debugLog("ensureMirrorForRemoteSession: session %q already in store, skipping", resp.ID)
@@ -363,11 +364,12 @@ func (a *guiCompositeAdapter) ensureMirrorForRemoteSession(host string, resp *da
 	sess := session.Session{
 		ID:         resp.ID,
 		Name:       resp.Name,
+		Path:       path,
 		Host:       host,
 		Status:     session.StatusRunning,
 		TmuxWindow: mirrorName,
 	}
-	a.localMgr.Store().Add(sess, "")
+	a.localMgr.Store().Add(sess, path)
 	if err := a.localMgr.Store().Save(); err != nil {
 		debugLog("ensureMirrorForRemoteSession: save store failed: %v", err)
 		if a.onError != nil {
@@ -594,7 +596,7 @@ func (a *guiCompositeAdapter) createWorktreeWithHost(name, prompt, projectRoot, 
 	if err != nil {
 		return err
 	}
-	return a.ensureMirrorForRemoteSession(host, resp)
+	return a.ensureMirrorForRemoteSession(host, projectRoot, resp)
 }
 
 func (a *guiCompositeAdapter) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
@@ -618,7 +620,7 @@ func (a *guiCompositeAdapter) resumeWorktreeWithHost(worktreePath, prompt, proje
 	if err != nil {
 		return err
 	}
-	return a.ensureMirrorForRemoteSession(host, resp)
+	return a.ensureMirrorForRemoteSession(host, projectRoot, resp)
 }
 
 func (a *guiCompositeAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeInfo, error) {
@@ -665,7 +667,7 @@ func (a *guiCompositeAdapter) createPMSessionWithHost(projectRoot, host string) 
 	if err != nil {
 		return err
 	}
-	return a.ensureMirrorForRemoteSession(host, resp)
+	return a.ensureMirrorForRemoteSession(host, projectRoot, resp)
 }
 
 func (a *guiCompositeAdapter) CreateWorkerSession(name, prompt, projectRoot string) error {
@@ -689,6 +691,6 @@ func (a *guiCompositeAdapter) createWorkerSessionWithHost(name, prompt, projectR
 	if err != nil {
 		return err
 	}
-	return a.ensureMirrorForRemoteSession(host, resp)
+	return a.ensureMirrorForRemoteSession(host, projectRoot, resp)
 }
 
