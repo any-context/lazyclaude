@@ -46,6 +46,20 @@ type NotificationCacher interface {
 	RefreshPendingFrom([]*model.ToolNotification)
 }
 
+// HostAwareCreator is optionally implemented by SessionProvider to support
+// explicit host routing. When the GUI determines the target host from the
+// cursor position, it uses these methods instead of the host-less defaults
+// (which fall back to pendingHost detected at startup).
+type HostAwareCreator interface {
+	CreateWithHost(path, host string) error
+	CreateWorktreeWithHost(name, prompt, projectRoot, host string) error
+	ResumeWorktreeWithHost(worktreePath, prompt, projectRoot, host string) error
+	ListWorktreesWithHost(projectRoot, host string) ([]WorktreeInfo, error)
+	CreatePMSessionWithHost(projectRoot, host string) error
+	CreateWorkerSessionWithHost(name, prompt, projectRoot, host string) error
+	SetPendingHost(host string)
+}
+
 type SessionProvider interface {
 	Sessions() []SessionItem
 	Projects() []ProjectItem

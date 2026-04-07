@@ -251,6 +251,28 @@ func (a *App) configDirForSession(s *SessionItem) string {
 	return session.InferProjectRoot(s.Path)
 }
 
+// --- Host routing ---
+
+// currentSessionHost returns the SSH host for the currently selected tree node.
+// Returns "" for local sessions/projects or when no node is selected.
+func (a *App) currentSessionHost() string {
+	node := a.currentNode()
+	if node == nil {
+		return ""
+	}
+	switch node.Kind {
+	case SessionNode:
+		if node.Session != nil {
+			return node.Session.Host
+		}
+	case ProjectNode:
+		if node.Project != nil {
+			return node.Project.Host
+		}
+	}
+	return ""
+}
+
 // --- Session operations ---
 
 func (a *App) CreateSession() { a.createSession(a.currentProjectRoot()) }
@@ -258,13 +280,22 @@ func (a *App) CreateSessionAtCWD() { a.createSession(".") }
 
 // createSession is the shared implementation for CreateSession and CreateSessionAtCWD.
 // localPath is the fallback directory for non-SSH sessions.
+// Routes to the host of the currently selected tree node. Falls back to
+// pendingHost (inside the adapter) when no node is selected.
 // Runs asynchronously to avoid blocking the GUI thread during remote operations.
 func (a *App) createSession(localPath string) {
 	if a.sessions == nil || a.HasActiveDialog() {
 		return
 	}
+	host := a.currentSessionHost()
+	debugLog("createSession: path=%q currentSessionHost=%q", localPath, host)
 	go func() {
-		err := a.sessions.Create(localPath)
+		var err error
+		if hac, ok := a.sessions.(HostAwareCreator); ok {
+			err = hac.CreateWithHost(localPath, host)
+		} else {
+			err = a.sessions.Create(localPath)
+		}
 		a.gui.Update(func(g *gocui.Gui) error {
 			if err != nil {
 				a.showError(g, fmt.Sprintf("Error: %v", err))
@@ -418,8 +449,15 @@ func (a *App) StartPMSession() {
 		return
 	}
 	projectRoot := a.currentProjectRoot()
+	host := a.currentSessionHost()
+	debugLog("StartPMSession: projectRoot=%q host=%q", projectRoot, host)
 	go func() {
-		err := a.sessions.CreatePMSession(projectRoot)
+		var err error
+		if hac, ok := a.sessions.(HostAwareCreator); ok {
+			err = hac.CreatePMSessionWithHost(projectRoot, host)
+		} else {
+			err = a.sessions.CreatePMSession(projectRoot)
+		}
 		a.gui.Update(func(g *gocui.Gui) error {
 			if err != nil {
 				a.showError(g, fmt.Sprintf("PM error: %v", err))
@@ -448,8 +486,16 @@ func (a *App) SelectWorktree() {
 		return
 	}
 	projectRoot := a.currentProjectRoot()
+	host := a.currentSessionHost()
+	debugLog("SelectWorktree: projectRoot=%q host=%q", projectRoot, host)
 	go func() {
-		items, err := a.sessions.ListWorktrees(projectRoot)
+		var items []WorktreeInfo
+		var err error
+		if hac, ok := a.sessions.(HostAwareCreator); ok {
+			items, err = hac.ListWorktreesWithHost(projectRoot, host)
+		} else {
+			items, err = a.sessions.ListWorktrees(projectRoot)
+		}
 		a.gui.Update(func(g *gocui.Gui) error {
 			if err != nil {
 				a.showError(g, fmt.Sprintf("Error: %v", err))

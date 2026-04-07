@@ -257,9 +257,11 @@ type guiCompositeAdapter struct {
 	// cachedPending is refreshed once per layout cycle.
 	cachedPending map[string]bool
 
-	// Lazy remote connection: pendingHost is set once at construction and never
-	// mutated. connectFn is the root.go connectRemoteHost closure.
-	pendingHost      string             // SSH host detected at startup (immutable after construction)
+	// Lazy remote connection: pendingHost is the default SSH host, initially set
+	// at construction from DetectSSHHost() and updated by SetPendingHost after
+	// successful connect-dialog connections. Protected by hostMu for thread safety.
+	hostMu           sync.Mutex
+	pendingHost      string             // Default SSH host (updated after connect dialog)
 	localProjectRoot string             // Local project root at startup (immutable after construction)
 	connectFn        func(string) error // connectRemoteHost from root.go
 	connectMu        sync.Mutex
@@ -283,8 +285,26 @@ type guiCompositeAdapter struct {
 	guiUpdateFn      func()           // triggers gui.Update (wired in root.go)
 }
 
-// Compile-time check.
+// Compile-time checks.
 var _ gui.SessionProvider = (*guiCompositeAdapter)(nil)
+var _ gui.HostAwareCreator = (*guiCompositeAdapter)(nil)
+
+// SetPendingHost updates the default remote host. Called after a successful
+// connection via the connect dialog so that subsequent operations route to
+// the newly connected host.
+func (a *guiCompositeAdapter) SetPendingHost(host string) {
+	a.hostMu.Lock()
+	defer a.hostMu.Unlock()
+	debugLog("SetPendingHost: %q -> %q", a.pendingHost, host)
+	a.pendingHost = host
+}
+
+// readPendingHost returns the current default remote host (thread-safe).
+func (a *guiCompositeAdapter) readPendingHost() string {
+	a.hostMu.Lock()
+	defer a.hostMu.Unlock()
+	return a.pendingHost
+}
 
 // lazyConn ensures a remote host is connected exactly once.
 // If the initial connect fails, subsequent callers see the cached error
@@ -364,8 +384,21 @@ func (a *guiCompositeAdapter) ToggleProjectExpanded(projectID string) {
 }
 
 func (a *guiCompositeAdapter) Create(path string) error {
-	host := a.pendingHost
-	debugLog("Create: path=%q pendingHost=%q", path, host)
+	return a.createWithHost(path, a.readPendingHost())
+}
+
+// CreateWithHost creates a session on the specified host. If host is empty,
+// falls back to pendingHost (same behavior as Create).
+func (a *guiCompositeAdapter) CreateWithHost(path, host string) error {
+	if host == "" {
+		host = a.readPendingHost()
+	}
+	return a.createWithHost(path, host)
+}
+
+// createWithHost is the shared implementation for Create and CreateWithHost.
+func (a *guiCompositeAdapter) createWithHost(path, host string) error {
+	debugLog("createWithHost: path=%q host=%q", path, host)
 	if host == "" {
 		// Local: synchronous (existing behavior).
 		return a.cp.Create(path, "")
@@ -653,7 +686,18 @@ func (a *guiCompositeAdapter) LaunchLazygit(path string) error {
 }
 
 func (a *guiCompositeAdapter) CreateWorktree(name, prompt, projectRoot string) error {
-	host := a.pendingHost
+	return a.createWorktreeWithHost(name, prompt, projectRoot, a.readPendingHost())
+}
+
+func (a *guiCompositeAdapter) CreateWorktreeWithHost(name, prompt, projectRoot, host string) error {
+	if host == "" {
+		host = a.readPendingHost()
+	}
+	return a.createWorktreeWithHost(name, prompt, projectRoot, host)
+}
+
+func (a *guiCompositeAdapter) createWorktreeWithHost(name, prompt, projectRoot, host string) error {
+	debugLog("createWorktreeWithHost: name=%q host=%q", name, host)
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return err
 	}
@@ -664,7 +708,18 @@ func (a *guiCompositeAdapter) CreateWorktree(name, prompt, projectRoot string) e
 }
 
 func (a *guiCompositeAdapter) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
-	host := a.pendingHost
+	return a.resumeWorktreeWithHost(worktreePath, prompt, projectRoot, a.readPendingHost())
+}
+
+func (a *guiCompositeAdapter) ResumeWorktreeWithHost(worktreePath, prompt, projectRoot, host string) error {
+	if host == "" {
+		host = a.readPendingHost()
+	}
+	return a.resumeWorktreeWithHost(worktreePath, prompt, projectRoot, host)
+}
+
+func (a *guiCompositeAdapter) resumeWorktreeWithHost(worktreePath, prompt, projectRoot, host string) error {
+	debugLog("resumeWorktreeWithHost: wtPath=%q host=%q", worktreePath, host)
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return err
 	}
@@ -675,7 +730,18 @@ func (a *guiCompositeAdapter) ResumeWorktree(worktreePath, prompt, projectRoot s
 }
 
 func (a *guiCompositeAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeInfo, error) {
-	host := a.pendingHost
+	return a.listWorktreesWithHost(projectRoot, a.readPendingHost())
+}
+
+func (a *guiCompositeAdapter) ListWorktreesWithHost(projectRoot, host string) ([]gui.WorktreeInfo, error) {
+	if host == "" {
+		host = a.readPendingHost()
+	}
+	return a.listWorktreesWithHost(projectRoot, host)
+}
+
+func (a *guiCompositeAdapter) listWorktreesWithHost(projectRoot, host string) ([]gui.WorktreeInfo, error) {
+	debugLog("listWorktreesWithHost: projectRoot=%q host=%q", projectRoot, host)
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return nil, err
 	}
@@ -694,7 +760,18 @@ func (a *guiCompositeAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeI
 }
 
 func (a *guiCompositeAdapter) CreatePMSession(projectRoot string) error {
-	host := a.pendingHost
+	return a.createPMSessionWithHost(projectRoot, a.readPendingHost())
+}
+
+func (a *guiCompositeAdapter) CreatePMSessionWithHost(projectRoot, host string) error {
+	if host == "" {
+		host = a.readPendingHost()
+	}
+	return a.createPMSessionWithHost(projectRoot, host)
+}
+
+func (a *guiCompositeAdapter) createPMSessionWithHost(projectRoot, host string) error {
+	debugLog("createPMSessionWithHost: projectRoot=%q host=%q", projectRoot, host)
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return err
 	}
@@ -705,7 +782,18 @@ func (a *guiCompositeAdapter) CreatePMSession(projectRoot string) error {
 }
 
 func (a *guiCompositeAdapter) CreateWorkerSession(name, prompt, projectRoot string) error {
-	host := a.pendingHost
+	return a.createWorkerSessionWithHost(name, prompt, projectRoot, a.readPendingHost())
+}
+
+func (a *guiCompositeAdapter) CreateWorkerSessionWithHost(name, prompt, projectRoot, host string) error {
+	if host == "" {
+		host = a.readPendingHost()
+	}
+	return a.createWorkerSessionWithHost(name, prompt, projectRoot, host)
+}
+
+func (a *guiCompositeAdapter) createWorkerSessionWithHost(name, prompt, projectRoot, host string) error {
+	debugLog("createWorkerSessionWithHost: name=%q host=%q", name, host)
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return err
 	}
