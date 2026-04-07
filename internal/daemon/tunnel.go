@@ -71,6 +71,9 @@ func (t *Tunnel) Start(ctx context.Context) error {
 	}
 	args = append(args, sshHost)
 
+	debugLog("Tunnel.Start: host=%q remotePort=%d localPort=%d", t.host, t.remotePort, localPort)
+	debugLog("Tunnel.Start: ssh args=%v", args)
+
 	t.cmd = exec.CommandContext(ctx, "ssh", args...)
 	t.done = make(chan error, 1)
 
@@ -93,7 +96,9 @@ func (t *Tunnel) Start(ctx context.Context) error {
 	t.mu.Unlock()
 
 	// Wait for the tunnel to become connectable (lock-free).
+	debugLog("Tunnel.Start: waitForPort localPort=%d", localPort)
 	if err := waitForPort(ctx, host, localPort, done); err != nil {
+		debugLog("Tunnel.Start: waitForPort failed: %v", err)
 		_ = cmd.Process.Kill()
 		// Mark the tunnel as failed so it can be retried.
 		t.mu.Lock()
@@ -131,6 +136,7 @@ func waitForPort(ctx context.Context, host string, port int, done <-chan error) 
 			conn, err := net.DialTimeout("tcp", addr, tunnelPollInterval)
 			if err == nil {
 				conn.Close()
+				debugLog("waitForPort: connected port=%d", port)
 				return nil
 			}
 		}

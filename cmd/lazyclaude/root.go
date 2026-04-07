@@ -139,10 +139,13 @@ func newRootCmd() *cobra.Command {
 			// connectRemoteHost establishes a full remote connection pipeline:
 			// daemon connection + socket tunnel + provider registration.
 			connectRemoteHost := func(host string) error {
+				debugLog("connectRemoteHost: host=%q", host)
 				remoteConn := daemon.NewRemoteConnection(host, lifecycleMgr, clientFactory)
 				if connErr := remoteConn.Connect(context.Background()); connErr != nil {
+					debugLog("connectRemoteHost: Connect failed: %v", connErr)
 					return fmt.Errorf("lazyclaude is not installed on %s: %w", host, connErr)
 				}
+				debugLog("connectRemoteHost: Connect succeeded")
 
 				remoteProvider := daemon.NewRemoteProvider(host, remoteConn)
 				lc.Register("remote-conn-"+host, func() { remoteConn.Disconnect() })
@@ -150,9 +153,12 @@ func newRootCmd() *cobra.Command {
 				// Socket forwarding for direct tmux pane operations.
 				sockPath := daemon.SocketTunnelLocalPath(host)
 				sockTunnel := daemon.NewSocketTunnel(host, sockPath, "")
+				debugLog("connectRemoteHost: socket tunnel starting sockPath=%q", sockPath)
 				if sockErr := sockTunnel.Start(context.Background()); sockErr != nil {
+					debugLog("connectRemoteHost: socket tunnel failed: %v", sockErr)
 					fmt.Fprintf(os.Stderr, "warning: tmux socket tunnel to %s: %v\n", host, sockErr)
 				} else {
+					debugLog("connectRemoteHost: socket tunnel started")
 					remoteProvider.SetTmuxClient(sockTunnel.TmuxClient())
 					lc.Register("sock-tunnel-"+host, func() { sockTunnel.Stop() })
 					sockChecker.set(host, sockTunnel, remoteProvider)
@@ -173,6 +179,7 @@ func newRootCmd() *cobra.Command {
 				remoteConns[host] = remoteConn
 				remoteConnsMu.Unlock()
 
+				debugLog("connectRemoteHost: SUCCESS host=%q", host)
 				return nil
 			}
 
@@ -180,6 +187,7 @@ func newRootCmd() *cobra.Command {
 			// Connection is deferred until the user performs a remote operation.
 			// Remote CWD is obtained via daemon API after connection is established.
 			pendingSSHHost := gui.DetectSSHHost()
+			debugLog("startup: pendingSSHHost=%q", pendingSSHHost)
 
 			// Snapshot local project root so the adapter can distinguish
 			// local-fallback paths from genuine remote paths.
@@ -188,6 +196,8 @@ func newRootCmd() *cobra.Command {
 				localCWD = "."
 			}
 			localProjectRoot := session.InferProjectRoot(localCWD)
+			debugLog("startup: localProjectRoot=%q", localProjectRoot)
+			debugLog("startup: connectFn set=%v", connectRemoteHost != nil)
 
 			compositeAdapter := &guiCompositeAdapter{
 				cp:               composite,
