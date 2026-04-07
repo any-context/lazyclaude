@@ -201,6 +201,7 @@ func newRootCmd() *cobra.Command {
 			compositeAdapter.localProjectRoot = localProjectRoot
 			compositeAdapter.connectFn = connectRemoteHost
 			compositeAdapter.windowActivityFn = app.WindowActivityMap
+			compositeAdapter.currentHostFn = app.CurrentSessionHost
 			compositeAdapter.onError = app.ScheduleError
 			compositeAdapter.guiUpdateFn = func() {
 				app.Gui().Update(func(_ *gocui.Gui) error { return nil })

@@ -236,7 +236,7 @@ func (s *DaemonServer) handleSessionCreate(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusCreated, SessionCreateResponse{
 		ID:         sess.ID,
 		Name:       sess.Name,
-		TmuxWindow: sess.TmuxWindow,
+		TmuxWindow: sess.WindowName(),
 	})
 }
 
@@ -519,7 +519,7 @@ func sessionToInfo(sess session.Session) SessionInfo {
 		Path:       sess.Path,
 		Host:       sess.Host,
 		Status:     sess.Status.String(),
-		TmuxWindow: sess.TmuxWindow,
+		TmuxWindow: sess.WindowName(),
 		Role:       string(sess.Role),
 	}
 }

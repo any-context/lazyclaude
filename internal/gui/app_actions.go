@@ -255,6 +255,12 @@ func (a *App) configDirForSession(s *SessionItem) string {
 
 // currentSessionHost returns the SSH host for the currently selected tree node.
 // Returns "" for local sessions/projects or when no node is selected.
+// CurrentSessionHost returns the SSH host of the currently selected session
+// or project node. Returns "" for local sessions or when no node is selected.
+func (a *App) CurrentSessionHost() string {
+	return a.currentSessionHost()
+}
+
 func (a *App) currentSessionHost() string {
 	node := a.currentNode()
 	if node == nil {
