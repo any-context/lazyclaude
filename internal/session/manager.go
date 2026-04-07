@@ -435,7 +435,9 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	target := tmuxSessionName + ":" + windowName
 	m.log.Info("delete", "name", sess.Name, "id", id[:8], "target", target, "status", sess.Status)
 	if sess.Status != StatusOrphan {
-		_ = m.tmux.KillWindow(ctx, target)
+		if err := m.tmux.KillWindow(ctx, target); err != nil {
+			m.log.Warn("delete.kill_window", "target", target, "err", err)
+		}
 	}
 
 	m.store.Remove(id)

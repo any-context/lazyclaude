@@ -257,6 +257,8 @@ func (a *App) configDirForSession(s *SessionItem) string {
 // Returns "" for local sessions/projects or when no node is selected.
 // CurrentSessionHost returns the SSH host of the currently selected session
 // or project node. Returns "" for local sessions or when no node is selected.
+// Must be called from the gocui main goroutine (e.g. inside keybinding handlers
+// or Update callbacks) because it reads GUI state (cursor, tree nodes).
 func (a *App) CurrentSessionHost() string {
 	return a.currentSessionHost()
 }

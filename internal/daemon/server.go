@@ -505,13 +505,6 @@ func (s *DaemonServer) handleShutdown(w http.ResponseWriter, _ *http.Request) {
 
 // --- Helpers ---
 
-func resolveTarget(sess *session.Session) string {
-	if sess.TmuxWindow != "" {
-		return sess.TmuxWindow
-	}
-	return "lazyclaude:" + sess.WindowName()
-}
-
 func sessionToInfo(sess session.Session) SessionInfo {
 	return SessionInfo{
 		ID:         sess.ID,

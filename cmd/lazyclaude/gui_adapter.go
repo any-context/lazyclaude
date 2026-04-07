@@ -81,6 +81,11 @@ func (a *guiCompositeAdapter) readPendingHost() string {
 // resolveHost returns the SSH host for the current operation.
 // Prefers the currently selected session's host (from currentHostFn),
 // falling back to the default pendingHost (set by connect dialog or DetectSSHHost).
+//
+// This method must only be called from the gocui main goroutine (keybinding
+// handlers, Update callbacks) because currentHostFn reads GUI state.
+// Background goroutines (e.g. completeRemoteCreate) receive the resolved host
+// as a parameter — they must never call resolveHost directly.
 func (a *guiCompositeAdapter) resolveHost() string {
 	if a.currentHostFn != nil {
 		if h := a.currentHostFn(); h != "" {
