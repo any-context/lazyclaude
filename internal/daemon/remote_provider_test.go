@@ -611,46 +611,6 @@ func TestRemoteProvider_SendKeys(t *testing.T) {
 	}
 }
 
-func TestRemoteProvider_SendKeys_Fallback(t *testing.T) {
-	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"POST /session/s1/send-keys": func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		},
-	})
-	defer srv.Close()
-
-	mock := tmux.NewMockClient()
-	mock.ErrSendKeys = fmt.Errorf("socket not connected")
-	rp.SetTmuxClient(mock)
-
-	rp.mu.Lock()
-	rp.sessions = []SessionInfo{{ID: "s1", TmuxWindow: "lazyclaude:lc-s1"}}
-	rp.mu.Unlock()
-
-	if err := rp.SendKeys("s1", "Enter"); err != nil {
-		t.Fatalf("expected fallback, got error: %v", err)
-	}
-}
-
-func TestRemoteProvider_SendKeys_TmuxSuccess(t *testing.T) {
-	conn := &mockConnManager{state: Connected}
-	rp := NewRemoteProvider("host", conn)
-
-	mock := tmux.NewMockClient()
-	rp.SetTmuxClient(mock)
-
-	rp.mu.Lock()
-	rp.sessions = []SessionInfo{{ID: "s1", TmuxWindow: "lazyclaude:lc-s1"}}
-	rp.mu.Unlock()
-
-	if err := rp.SendKeys("s1", "Enter"); err != nil {
-		t.Fatalf("tmux send-keys failed: %v", err)
-	}
-	if keys := mock.SentKeys["lazyclaude:lc-s1"]; len(keys) != 1 || keys[0] != "Enter" {
-		t.Errorf("unexpected sent keys: %v", keys)
-	}
-}
-
 func TestRemoteProvider_SendKeysLiteral(t *testing.T) {
 	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
 		"POST /session/s1/send-keys": func(w http.ResponseWriter, r *http.Request) {
@@ -671,26 +631,7 @@ func TestRemoteProvider_SendKeysLiteral(t *testing.T) {
 	}
 }
 
-func TestRemoteProvider_SendKeysLiteral_TmuxSuccess(t *testing.T) {
-	conn := &mockConnManager{state: Connected}
-	rp := NewRemoteProvider("host", conn)
-
-	mock := tmux.NewMockClient()
-	rp.SetTmuxClient(mock)
-
-	rp.mu.Lock()
-	rp.sessions = []SessionInfo{{ID: "s1", TmuxWindow: "lazyclaude:lc-s1"}}
-	rp.mu.Unlock()
-
-	if err := rp.SendKeysLiteral("s1", "hello"); err != nil {
-		t.Fatalf("tmux literal send failed: %v", err)
-	}
-	if keys := mock.SentKeys["lazyclaude:lc-s1"]; len(keys) != 1 || keys[0] != "hello" {
-		t.Errorf("unexpected sent keys: %v", keys)
-	}
-}
-
-func TestRemoteProvider_SendKeysLiteral_Fallback(t *testing.T) {
+func TestRemoteProvider_PasteToPane(t *testing.T) {
 	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
 		"POST /session/s1/send-keys": func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -698,56 +639,8 @@ func TestRemoteProvider_SendKeysLiteral_Fallback(t *testing.T) {
 	})
 	defer srv.Close()
 
-	mock := tmux.NewMockClient()
-	mock.ErrSendKeys = fmt.Errorf("socket not connected")
-	rp.SetTmuxClient(mock)
-
-	rp.mu.Lock()
-	rp.sessions = []SessionInfo{{ID: "s1", TmuxWindow: "lazyclaude:lc-s1"}}
-	rp.mu.Unlock()
-
-	if err := rp.SendKeysLiteral("s1", "hello"); err != nil {
-		t.Fatalf("expected fallback, got error: %v", err)
-	}
-}
-
-func TestRemoteProvider_PasteToPane_TmuxSuccess(t *testing.T) {
-	conn := &mockConnManager{state: Connected}
-	rp := NewRemoteProvider("host", conn)
-
-	mock := tmux.NewMockClient()
-	rp.SetTmuxClient(mock)
-
-	rp.mu.Lock()
-	rp.sessions = []SessionInfo{{ID: "s1", TmuxWindow: "lazyclaude:lc-s1"}}
-	rp.mu.Unlock()
-
 	if err := rp.PasteToPane("s1", "pasted"); err != nil {
-		t.Fatalf("paste failed: %v", err)
-	}
-	if keys := mock.SentKeys["lazyclaude:lc-s1"]; len(keys) != 1 || keys[0] != "pasted" {
-		t.Errorf("unexpected sent keys: %v", keys)
-	}
-}
-
-func TestRemoteProvider_PasteToPane_Fallback(t *testing.T) {
-	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"POST /session/s1/send-keys": func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		},
-	})
-	defer srv.Close()
-
-	mock := tmux.NewMockClient()
-	mock.ErrSendKeys = fmt.Errorf("socket not connected")
-	rp.SetTmuxClient(mock)
-
-	rp.mu.Lock()
-	rp.sessions = []SessionInfo{{ID: "s1", TmuxWindow: "lazyclaude:lc-s1"}}
-	rp.mu.Unlock()
-
-	if err := rp.PasteToPane("s1", "pasted"); err != nil {
-		t.Fatalf("expected fallback, got error: %v", err)
+		t.Fatalf("daemon API failed: %v", err)
 	}
 }
 
