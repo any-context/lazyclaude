@@ -141,19 +141,13 @@ func (a *App) setupGlobalKeybindings() error {
 		}
 
 		projectRoot := a.currentProjectRoot()
-		host := a.currentSessionHost()
 		a.closeWorktreeDialog(g)
 
 		go func() {
 			if a.sessions == nil {
 				return
 			}
-			var err error
-			if hac, ok := a.sessions.(HostAwareCreator); ok {
-				err = hac.CreateWorktreeWithHost(branchName, userPrompt, projectRoot, host)
-			} else {
-				err = a.sessions.CreateWorktree(branchName, userPrompt, projectRoot)
-			}
+			err := a.sessions.CreateWorktree(branchName, userPrompt, projectRoot)
 			if err != nil {
 				a.gui.Update(func(g *gocui.Gui) error {
 					a.showError(g, fmt.Sprintf("Error: %v", err))
@@ -285,19 +279,13 @@ func (a *App) setupGlobalKeybindings() error {
 		userPrompt := v.TextArea.GetContent()
 		wtPath := a.dialog.SelectedPath
 		projectRoot := a.currentProjectRoot()
-		host := a.currentSessionHost()
 		a.closeWorktreeResumePrompt(g)
 
 		go func() {
 			if a.sessions == nil {
 				return
 			}
-			var err error
-			if hac, ok := a.sessions.(HostAwareCreator); ok {
-				err = hac.ResumeWorktreeWithHost(wtPath, userPrompt, projectRoot, host)
-			} else {
-				err = a.sessions.ResumeWorktree(wtPath, userPrompt, projectRoot)
-			}
+			err := a.sessions.ResumeWorktree(wtPath, userPrompt, projectRoot)
 			if err != nil {
 				a.gui.Update(func(g *gocui.Gui) error {
 					a.showError(g, fmt.Sprintf("Error: %v", err))

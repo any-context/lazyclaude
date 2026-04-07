@@ -102,12 +102,9 @@ type HistorySizeResponse struct {
 // --- Input ---
 
 // SendKeysRequest sends raw keys to a session's tmux pane.
-// When Literal is true, keys are sent via send-keys -l (not interpreted as key names).
-// When Literal is false, keys are sent via send-keys (interpreted as key names like "Enter").
 type SendKeysRequest struct {
-	ID      string `json:"id"`
-	Keys    string `json:"keys"`
-	Literal bool   `json:"literal,omitempty"`
+	ID   string `json:"id"`
+	Keys string `json:"keys"`
 }
 
 // SendChoiceRequest sends a permission choice (accept/allow/reject/cancel).

@@ -131,8 +131,17 @@ func newRootCmd() *cobra.Command {
 			var remoteConnsMu sync.Mutex
 			remoteConns := make(map[string]*daemon.RemoteConnection)
 
+			// Declare compositeAdapter early so connectRemoteHost can reference it.
+			compositeAdapter := &guiCompositeAdapter{
+				cp:         composite,
+				localMgr:   mgr,
+				tmuxClient: tmuxClient,
+				paths:      paths,
+			}
+
 			// connectRemoteHost establishes a remote connection pipeline:
-			// daemon connection + provider registration.
+			// daemon connection + provider registration + mirror windows for
+			// existing sessions + SSE subscription.
 			connectRemoteHost := func(host string) error {
 				debugLog("connectRemoteHost: host=%q", host)
 				remoteConn := daemon.NewRemoteConnection(host, lifecycleMgr, clientFactory)
@@ -143,13 +152,29 @@ func newRootCmd() *cobra.Command {
 				debugLog("connectRemoteHost: Connect succeeded")
 
 				remoteProvider := daemon.NewRemoteProvider(host, remoteConn)
-				lc.Register("remote-conn-"+host, func() { remoteConn.Disconnect() })
+				lc.Register("remote-conn-"+host, func() {
+					remoteProvider.StopSSE()
+					remoteConn.Disconnect()
+				})
 
 				composite.AddRemote(host, remoteProvider)
 
 				remoteConnsMu.Lock()
 				remoteConns[host] = remoteConn
 				remoteConnsMu.Unlock()
+
+				// Create mirror windows for existing remote sessions so they
+				// appear in the sidebar immediately with working preview.
+				if sessions, err := remoteProvider.Sessions(); err == nil {
+					for _, s := range sessions {
+						compositeAdapter.createMirrorForExisting(host, s)
+					}
+				}
+
+				// Start SSE for activity state + tool notifications.
+				if err := remoteProvider.StartSSE(); err != nil {
+					debugLog("connectRemoteHost: StartSSE failed (non-fatal): %v", err)
+				}
 
 				debugLog("connectRemoteHost: SUCCESS host=%q", host)
 				return nil
@@ -171,15 +196,10 @@ func newRootCmd() *cobra.Command {
 			debugLog("startup: localProjectRoot=%q", localProjectRoot)
 			debugLog("startup: connectFn set=%v", connectRemoteHost != nil)
 
-			compositeAdapter := &guiCompositeAdapter{
-				cp:               composite,
-				localMgr:         mgr,
-				tmuxClient:       tmuxClient,
-				paths:            paths,
-				pendingHost:      pendingSSHHost,
-				localProjectRoot: localProjectRoot,
-				connectFn:        connectRemoteHost,
-			}
+			// Wire remaining fields now that dependencies are available.
+			compositeAdapter.pendingHost = pendingSSHHost
+			compositeAdapter.localProjectRoot = localProjectRoot
+			compositeAdapter.connectFn = connectRemoteHost
 			compositeAdapter.windowActivityFn = app.WindowActivityMap
 			compositeAdapter.onError = app.ScheduleError
 			compositeAdapter.guiUpdateFn = func() {
@@ -238,9 +258,9 @@ func newRootCmd() *cobra.Command {
 			// Wire the notify broker (nil-safe: falls back to file polling only).
 			app.SetNotifyBroker(notifyBroker)
 
-			// Key forwarding: local tmux with remote daemon API fallback.
-			localForwarder := gui.NewTmuxInputForwarder(tmuxClient)
-			app.SetInputForwarder(newCompositeInputForwarder(localForwarder, composite))
+			// Key forwarding: all sessions (including remote mirror windows) are
+			// local tmux windows, so the local forwarder handles everything.
+			app.SetInputForwarder(gui.NewTmuxInputForwarder(tmuxClient))
 
 			// Control mode for event-driven refresh.
 			// The connection dies when all tmux windows are deleted.

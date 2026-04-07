@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -54,9 +54,8 @@ type guiCompositeAdapter struct {
 	guiUpdateFn func() // triggers gui.Update (wired in root.go)
 }
 
-// Compile-time checks.
+// Compile-time check.
 var _ gui.SessionProvider = (*guiCompositeAdapter)(nil)
-var _ gui.HostAwareCreator = (*guiCompositeAdapter)(nil)
 
 // SetPendingHost updates the default remote host. Called after a successful
 // connection via the connect dialog so that subsequent operations route to
@@ -131,22 +130,10 @@ func (a *guiCompositeAdapter) RefreshPendingFrom(notifications []*model.ToolNoti
 }
 
 func (a *guiCompositeAdapter) Sessions() []gui.SessionItem {
-	sessions, err := a.cp.Sessions()
-	if err != nil {
-		msg := fmt.Sprintf("Session list error: %v", err)
-		if a.onError != nil && msg != a.lastErrorMsg {
-			a.lastErrorMsg = msg
-			a.onError(msg)
-		}
-		return nil
-	}
-	a.lastErrorMsg = "" // clear on success so next error is reported
-	items := make([]gui.SessionItem, len(sessions))
+	// All sessions (local + remote mirror windows) are in the local store.
+	sessions := a.localMgr.Sessions()
 	activity := a.getWindowActivity()
-	for i, s := range sessions {
-		items[i] = daemonInfoToGUIItem(s, a.cachedPending, activity)
-	}
-	return items
+	return buildSessionItems(sessions, a.cachedPending, activity)
 }
 
 func (a *guiCompositeAdapter) getWindowActivity() map[string]gui.WindowActivityEntry {
@@ -159,47 +146,7 @@ func (a *guiCompositeAdapter) getWindowActivity() map[string]gui.WindowActivityE
 func (a *guiCompositeAdapter) Projects() []gui.ProjectItem {
 	projects := a.localMgr.Projects()
 	activity := a.getWindowActivity()
-	items := buildProjectItems(projects, a.cachedPending, activity)
-
-	// Merge remote sessions as separate projects.
-	remoteSessions, err := a.cp.Sessions()
-	if err != nil {
-		return items
-	}
-	// Group remote sessions by host+path into projects.
-	type remoteProject struct {
-		host     string
-		path     string
-		sessions []gui.SessionItem
-	}
-	rpMap := make(map[string]*remoteProject)
-	for _, s := range remoteSessions {
-		if s.Host == "" {
-			continue // local session, already in projects
-		}
-		key := s.Host + ":" + s.Path
-		rp, ok := rpMap[key]
-		if !ok {
-			rp = &remoteProject{host: s.Host, path: s.Path}
-			rpMap[key] = rp
-		}
-		rp.sessions = append(rp.sessions, daemonInfoToGUIItem(s, a.cachedPending, activity))
-	}
-	for _, rp := range rpMap {
-		name := rp.path
-		if idx := strings.LastIndex(name, "/"); idx >= 0 && idx < len(name)-1 {
-			name = name[idx+1:]
-		}
-		items = append(items, gui.ProjectItem{
-			ID:       "remote-" + rp.host + "-" + rp.path,
-			Name:     name,
-			Path:     rp.path,
-			Host:     rp.host,
-			Expanded: true,
-			Sessions: rp.sessions,
-		})
-	}
-	return items
+	return buildProjectItems(projects, a.cachedPending, activity)
 }
 
 func (a *guiCompositeAdapter) ToggleProjectExpanded(projectID string) {
@@ -210,16 +157,7 @@ func (a *guiCompositeAdapter) Create(path string) error {
 	return a.createWithHost(path, a.readPendingHost())
 }
 
-// CreateWithHost creates a session on the specified host. If host is empty,
-// falls back to pendingHost (same behavior as Create).
-func (a *guiCompositeAdapter) CreateWithHost(path, host string) error {
-	if host == "" {
-		host = a.readPendingHost()
-	}
-	return a.createWithHost(path, host)
-}
-
-// createWithHost is the shared implementation for Create and CreateWithHost.
+// createWithHost is the shared implementation for Create.
 func (a *guiCompositeAdapter) createWithHost(path, host string) error {
 	debugLog("createWithHost: path=%q host=%q", path, host)
 	if host == "" {
@@ -250,9 +188,9 @@ func (a *guiCompositeAdapter) createWithHost(path, host string) error {
 }
 
 // completeRemoteCreate runs in a background goroutine to finish the
-// optimistic session creation. On failure it marks the placeholder as
-// dead and stores the error message. On success it maps the placeholder
-// to the real remote session for preview routing.
+// optimistic session creation. It creates the session on the remote daemon,
+// then creates a local mirror window (ssh -t host tmux attach) so that
+// the TUI can capture-pane and send-keys through the local tmux.
 func (a *guiCompositeAdapter) completeRemoteCreate(placeholderID, localPath, host string) {
 	debugLog("completeRemoteCreate: placeholderID=%q localPath=%q host=%q", placeholderID, localPath, host)
 	if err := a.ensureRemoteConnected(host); err != nil {
@@ -265,19 +203,124 @@ func (a *guiCompositeAdapter) completeRemoteCreate(placeholderID, localPath, hos
 	remotePath := a.resolveRemotePath(localPath, host)
 	debugLog("completeRemoteCreate: resolveRemotePath input=%q output=%q", localPath, remotePath)
 
-	if err := a.cp.Create(remotePath, host); err != nil {
-		debugLog("completeRemoteCreate: cp.Create failed: %v", err)
+	// Create session on remote daemon and get session ID.
+	rp := a.remoteProvider(host)
+	if rp == nil {
+		a.failPlaceholder(placeholderID, fmt.Sprintf("no remote provider for host %q", host))
+		return
+	}
+	resp, err := rp.CreateSession(remotePath)
+	if err != nil {
+		debugLog("completeRemoteCreate: CreateSession failed: %v", err)
 		a.failPlaceholder(placeholderID, fmt.Sprintf("Session creation failed: %v", err))
 		return
 	}
-	debugLog("completeRemoteCreate: cp.Create succeeded")
+	debugLog("completeRemoteCreate: CreateSession succeeded id=%q window=%q", resp.ID, resp.TmuxWindow)
 
-	// Remove the placeholder -- the real remote session will be shown
-	// via CompositeProvider.Sessions() from the daemon.
-	debugLog("completeRemoteCreate: removing placeholder %s, remote session visible via daemon", placeholderID[:8])
-	a.localMgr.Store().Remove(placeholderID)
-	_ = a.localMgr.Store().Save()
+	// Create local mirror window.
+	mirrorName := session.MirrorWindowName(resp.ID)
+	if err := a.createMirrorWindow(host, resp.TmuxWindow, mirrorName); err != nil {
+		debugLog("completeRemoteCreate: createMirrorWindow failed: %v", err)
+		a.failPlaceholder(placeholderID, fmt.Sprintf("Mirror window failed: %v", err))
+		return
+	}
+
+	// Update the placeholder in the local store with real session info.
+	store := a.localMgr.Store()
+	store.UpdateSession(placeholderID, func(sess *session.Session) {
+		sess.ID = resp.ID
+		sess.Name = resp.Name
+		sess.Host = host
+		sess.Status = session.StatusRunning
+		sess.TmuxWindow = mirrorName
+	})
+	if err := store.Save(); err != nil {
+		debugLog("completeRemoteCreate: save store failed: %v", err)
+	}
+	debugLog("completeRemoteCreate: mirror window %q created for remote session %q", mirrorName, resp.ID)
 	a.triggerGUIUpdate()
+}
+
+// remoteProvider returns the concrete RemoteProvider for the given host.
+func (a *guiCompositeAdapter) remoteProvider(host string) *daemon.RemoteProvider {
+	sp := a.cp.RemoteProvider(host)
+	if sp == nil {
+		return nil
+	}
+	rp, ok := sp.(*daemon.RemoteProvider)
+	if !ok {
+		return nil
+	}
+	return rp
+}
+
+// createMirrorWindow creates a local tmux window that SSH-attaches to a
+// remote lazyclaude tmux session. The remote command is base64-encoded
+// to prevent shell injection from user-controlled host strings.
+func (a *guiCompositeAdapter) createMirrorWindow(host, remoteWindow, localWindowName string) error {
+	// Build the remote tmux attach command. Quote the target to prevent
+	// shell injection from untrusted TmuxWindow values (fetched from daemon API).
+	remoteTarget := "lazyclaude:" + remoteWindow
+	remoteCmd := fmt.Sprintf(
+		"tmux -L lazyclaude set-option -t lazyclaude window-size largest 2>/dev/null; "+
+			"tmux -L lazyclaude attach-session -t %s",
+		daemon.PosixQuote(remoteTarget),
+	)
+
+	// Base64-encode the remote command to prevent shell injection.
+	encoded := base64.StdEncoding.EncodeToString([]byte(remoteCmd))
+
+	sshHost, port := daemon.SplitHostPort(host)
+	sshArgs := "ssh -t"
+	if port != "" {
+		sshArgs += " -p " + port
+	}
+	sshArgs += " " + sshHost
+	command := fmt.Sprintf("exec %s eval \"$(echo %s | base64 -d)\"", sshArgs, encoded)
+
+	abs, err := filepath.Abs(".")
+	if err != nil {
+		abs = "."
+	}
+
+	ctx := context.Background()
+	return a.tmuxClient.NewWindow(ctx, tmux.NewWindowOpts{
+		Session:  "lazyclaude",
+		Name:     localWindowName,
+		Command:  command,
+		StartDir: abs,
+	})
+}
+
+// createMirrorForExisting creates a mirror window and local store entry for
+// an existing remote session discovered during host connection (c key).
+// Skips sessions that already have a mirror window in the local store.
+func (a *guiCompositeAdapter) createMirrorForExisting(host string, s daemon.SessionInfo) {
+	// Skip if already in local store (e.g. reconnection).
+	if a.localMgr.Store().FindByID(s.ID) != nil {
+		debugLog("createMirrorForExisting: session %q already in store, skipping", s.ID)
+		return
+	}
+
+	mirrorName := session.MirrorWindowName(s.ID)
+	if err := a.createMirrorWindow(host, s.TmuxWindow, mirrorName); err != nil {
+		debugLog("createMirrorForExisting: failed for %q: %v", s.ID, err)
+		return
+	}
+
+	sess := session.Session{
+		ID:         s.ID,
+		Name:       s.Name,
+		Path:       s.Path,
+		Host:       host,
+		Status:     session.StatusRunning,
+		TmuxWindow: mirrorName,
+	}
+	a.localMgr.Store().Add(sess, s.Path)
+	if err := a.localMgr.Store().Save(); err != nil {
+		debugLog("createMirrorForExisting: save store failed: %v", err)
+	}
+	debugLog("createMirrorForExisting: mirror %q created for session %q", mirrorName, s.ID)
 }
 
 // failPlaceholder marks a placeholder session as dead and creates a tmux error
@@ -384,10 +427,45 @@ func (a *guiCompositeAdapter) queryRemoteCWD(host string) string {
 }
 
 func (a *guiCompositeAdapter) Delete(id string) error {
+	sess := a.localMgr.Store().FindByID(id)
+	if sess == nil {
+		return fmt.Errorf("session not found: %s", id)
+	}
+	if sess.Host != "" {
+		// Remote session: delete on daemon first, then kill local mirror.
+		if rp := a.remoteProvider(sess.Host); rp != nil {
+			if err := rp.Delete(id); err != nil {
+				debugLog("Delete: daemon API failed (continuing): %v", err)
+			}
+		}
+		// Kill local mirror window.
+		mirrorName := session.MirrorWindowName(id)
+		_ = a.tmuxClient.KillWindow(context.Background(), "lazyclaude:"+mirrorName)
+		a.localMgr.Store().Remove(id)
+		return a.localMgr.Store().Save()
+	}
 	return a.cp.Delete(id)
 }
 
 func (a *guiCompositeAdapter) Rename(id, newName string) error {
+	sess := a.localMgr.Store().FindByID(id)
+	if sess == nil {
+		return fmt.Errorf("session not found: %s", id)
+	}
+	if sess.Host != "" {
+		// Remote session: rename on daemon + update local store.
+		rp := a.remoteProvider(sess.Host)
+		if rp == nil {
+			return fmt.Errorf("no remote provider for host %q", sess.Host)
+		}
+		if err := rp.Rename(id, newName); err != nil {
+			return fmt.Errorf("remote rename: %w", err)
+		}
+		a.localMgr.Store().UpdateSession(id, func(s *session.Session) {
+			s.Name = newName
+		})
+		return a.localMgr.Store().Save()
+	}
 	return a.cp.Rename(id, newName)
 }
 
@@ -443,13 +521,6 @@ func (a *guiCompositeAdapter) CreateWorktree(name, prompt, projectRoot string) e
 	return a.createWorktreeWithHost(name, prompt, projectRoot, a.readPendingHost())
 }
 
-func (a *guiCompositeAdapter) CreateWorktreeWithHost(name, prompt, projectRoot, host string) error {
-	if host == "" {
-		host = a.readPendingHost()
-	}
-	return a.createWorktreeWithHost(name, prompt, projectRoot, host)
-}
-
 func (a *guiCompositeAdapter) createWorktreeWithHost(name, prompt, projectRoot, host string) error {
 	debugLog("createWorktreeWithHost: name=%q host=%q", name, host)
 	if err := a.ensureRemoteConnected(host); err != nil {
@@ -465,13 +536,6 @@ func (a *guiCompositeAdapter) ResumeWorktree(worktreePath, prompt, projectRoot s
 	return a.resumeWorktreeWithHost(worktreePath, prompt, projectRoot, a.readPendingHost())
 }
 
-func (a *guiCompositeAdapter) ResumeWorktreeWithHost(worktreePath, prompt, projectRoot, host string) error {
-	if host == "" {
-		host = a.readPendingHost()
-	}
-	return a.resumeWorktreeWithHost(worktreePath, prompt, projectRoot, host)
-}
-
 func (a *guiCompositeAdapter) resumeWorktreeWithHost(worktreePath, prompt, projectRoot, host string) error {
 	debugLog("resumeWorktreeWithHost: wtPath=%q host=%q", worktreePath, host)
 	if err := a.ensureRemoteConnected(host); err != nil {
@@ -485,13 +549,6 @@ func (a *guiCompositeAdapter) resumeWorktreeWithHost(worktreePath, prompt, proje
 
 func (a *guiCompositeAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeInfo, error) {
 	return a.listWorktreesWithHost(projectRoot, a.readPendingHost())
-}
-
-func (a *guiCompositeAdapter) ListWorktreesWithHost(projectRoot, host string) ([]gui.WorktreeInfo, error) {
-	if host == "" {
-		host = a.readPendingHost()
-	}
-	return a.listWorktreesWithHost(projectRoot, host)
 }
 
 func (a *guiCompositeAdapter) listWorktreesWithHost(projectRoot, host string) ([]gui.WorktreeInfo, error) {
@@ -517,13 +574,6 @@ func (a *guiCompositeAdapter) CreatePMSession(projectRoot string) error {
 	return a.createPMSessionWithHost(projectRoot, a.readPendingHost())
 }
 
-func (a *guiCompositeAdapter) CreatePMSessionWithHost(projectRoot, host string) error {
-	if host == "" {
-		host = a.readPendingHost()
-	}
-	return a.createPMSessionWithHost(projectRoot, host)
-}
-
 func (a *guiCompositeAdapter) createPMSessionWithHost(projectRoot, host string) error {
 	debugLog("createPMSessionWithHost: projectRoot=%q host=%q", projectRoot, host)
 	if err := a.ensureRemoteConnected(host); err != nil {
@@ -539,13 +589,6 @@ func (a *guiCompositeAdapter) CreateWorkerSession(name, prompt, projectRoot stri
 	return a.createWorkerSessionWithHost(name, prompt, projectRoot, a.readPendingHost())
 }
 
-func (a *guiCompositeAdapter) CreateWorkerSessionWithHost(name, prompt, projectRoot, host string) error {
-	if host == "" {
-		host = a.readPendingHost()
-	}
-	return a.createWorkerSessionWithHost(name, prompt, projectRoot, host)
-}
-
 func (a *guiCompositeAdapter) createWorkerSessionWithHost(name, prompt, projectRoot, host string) error {
 	debugLog("createWorkerSessionWithHost: name=%q host=%q", name, host)
 	if err := a.ensureRemoteConnected(host); err != nil {
@@ -557,32 +600,3 @@ func (a *guiCompositeAdapter) createWorkerSessionWithHost(name, prompt, projectR
 	return a.cp.CreateWorkerSession(name, prompt, projectRoot, host)
 }
 
-// daemonInfoToGUIItem converts daemon.SessionInfo to gui.SessionItem.
-func daemonInfoToGUIItem(s daemon.SessionInfo, pending map[string]bool, windowActivity map[string]gui.WindowActivityEntry) gui.SessionItem {
-	activity := model.ActivityUnknown
-	toolName := ""
-
-	if s.Status == "running" {
-		if wa, ok := windowActivity[s.TmuxWindow]; ok {
-			activity = wa.State
-			toolName = wa.ToolName
-		}
-	}
-
-	if s.Status == "running" && pending[s.TmuxWindow] {
-		activity = model.ActivityNeedsInput
-	}
-
-	return gui.SessionItem{
-		ID:         s.ID,
-		Name:       s.Name,
-		Path:       s.Path,
-		Host:       s.Host,
-		Status:     s.Status,
-		Flags:      s.Flags,
-		TmuxWindow: s.TmuxWindow,
-		Activity:   activity,
-		ToolName:   toolName,
-		Role:       s.Role,
-	}
-}

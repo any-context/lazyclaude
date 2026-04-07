@@ -210,74 +210,6 @@ func TestRemoteProvider_PurgeOrphans(t *testing.T) {
 	}
 }
 
-func TestRemoteProvider_CapturePreview(t *testing.T) {
-	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"GET /session/s1/preview": func(w http.ResponseWriter, _ *http.Request) {
-			testWriteJSON(w, PreviewResponse{Content: "preview-content", CursorX: 10})
-		},
-	})
-	defer srv.Close()
-
-	resp, err := rp.CapturePreview("s1", 80, 24)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Content != "preview-content" {
-		t.Errorf("got content=%q", resp.Content)
-	}
-}
-
-func TestRemoteProvider_HistorySize(t *testing.T) {
-	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"GET /session/s1/history-size": func(w http.ResponseWriter, _ *http.Request) {
-			testWriteJSON(w, HistorySizeResponse{Lines: 1000})
-		},
-	})
-	defer srv.Close()
-
-	lines, err := rp.HistorySize("s1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if lines != 1000 {
-		t.Errorf("got %d, want 1000", lines)
-	}
-}
-
-func TestRemoteProvider_SendChoice(t *testing.T) {
-	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"POST /session/choice": func(w http.ResponseWriter, r *http.Request) {
-			var req SendChoiceRequest
-			json.NewDecoder(r.Body).Decode(&req)
-			if req.Window != "@1" {
-				t.Errorf("got window=%q, want @1", req.Window)
-			}
-			w.WriteHeader(http.StatusOK)
-		},
-	})
-	defer srv.Close()
-
-	if err := rp.SendChoice("@1", 1); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestRemoteProvider_CaptureScrollback(t *testing.T) {
-	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"GET /session/s1/scrollback": func(w http.ResponseWriter, _ *http.Request) {
-			testWriteJSON(w, ScrollbackResponse{Content: "scroll", CursorX: 0, CursorY: 10})
-		},
-	})
-	defer srv.Close()
-
-	resp, err := rp.CaptureScrollback("s1", 80, 0, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Content != "scroll" {
-		t.Errorf("got content=%q", resp.Content)
-	}
-}
 
 func TestRemoteProvider_ResumeWorktree(t *testing.T) {
 	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
@@ -593,54 +525,6 @@ func TestParseSSEStream_ContextCancellation(t *testing.T) {
 	// May deliver 0 or 1 depending on timing; just ensure it terminates.
 	if count > 1 {
 		t.Errorf("got %d events after cancel, want <= 1", count)
-	}
-}
-
-// --- Daemon API tests ---
-
-func TestRemoteProvider_SendKeys(t *testing.T) {
-	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"POST /session/s1/send-keys": func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		},
-	})
-	defer srv.Close()
-
-	if err := rp.SendKeys("s1", "Enter"); err != nil {
-		t.Fatalf("daemon API failed: %v", err)
-	}
-}
-
-func TestRemoteProvider_SendKeysLiteral(t *testing.T) {
-	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"POST /session/s1/send-keys": func(w http.ResponseWriter, r *http.Request) {
-			var req SendKeysRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				t.Errorf("decode: %v", err)
-			}
-			if !req.Literal {
-				t.Error("expected Literal=true")
-			}
-			w.WriteHeader(http.StatusOK)
-		},
-	})
-	defer srv.Close()
-
-	if err := rp.SendKeysLiteral("s1", "hello"); err != nil {
-		t.Fatalf("daemon API failed: %v", err)
-	}
-}
-
-func TestRemoteProvider_PasteToPane(t *testing.T) {
-	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"POST /session/s1/send-keys": func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		},
-	})
-	defer srv.Close()
-
-	if err := rp.PasteToPane("s1", "pasted"); err != nil {
-		t.Fatalf("daemon API failed: %v", err)
 	}
 }
 

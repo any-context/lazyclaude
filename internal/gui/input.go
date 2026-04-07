@@ -42,14 +42,6 @@ func (f *TmuxInputForwarder) ForwardPaste(target string, text string) error {
 	return f.client.PasteToPane(context.Background(), target, text)
 }
 
-// SessionContextSetter is optionally implemented by InputForwarder to support
-// switching between local and remote key forwarding. When the fullscreen target
-// changes, SetSessionContext is called with the session ID and host so the
-// forwarder can route keys to the correct backend.
-type SessionContextSetter interface {
-	SetSessionContext(sessionID, host string)
-}
-
 // MockInputForwarder records forwarded keys for testing.
 type MockInputForwarder struct {
 	mu       sync.Mutex

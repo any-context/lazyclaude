@@ -287,15 +287,9 @@ func (a *App) createSession(localPath string) {
 	if a.sessions == nil || a.HasActiveDialog() {
 		return
 	}
-	host := a.currentSessionHost()
-	debugLog("createSession: path=%q currentSessionHost=%q", localPath, host)
+	debugLog("createSession: path=%q", localPath)
 	go func() {
-		var err error
-		if hac, ok := a.sessions.(HostAwareCreator); ok {
-			err = hac.CreateWithHost(localPath, host)
-		} else {
-			err = a.sessions.Create(localPath)
-		}
+		err := a.sessions.Create(localPath)
 		a.gui.Update(func(g *gocui.Gui) error {
 			if err != nil {
 				a.showError(g, fmt.Sprintf("Error: %v", err))
@@ -449,15 +443,9 @@ func (a *App) StartPMSession() {
 		return
 	}
 	projectRoot := a.currentProjectRoot()
-	host := a.currentSessionHost()
-	debugLog("StartPMSession: projectRoot=%q host=%q", projectRoot, host)
+	debugLog("StartPMSession: projectRoot=%q", projectRoot)
 	go func() {
-		var err error
-		if hac, ok := a.sessions.(HostAwareCreator); ok {
-			err = hac.CreatePMSessionWithHost(projectRoot, host)
-		} else {
-			err = a.sessions.CreatePMSession(projectRoot)
-		}
+		err := a.sessions.CreatePMSession(projectRoot)
 		a.gui.Update(func(g *gocui.Gui) error {
 			if err != nil {
 				a.showError(g, fmt.Sprintf("PM error: %v", err))
@@ -486,16 +474,9 @@ func (a *App) SelectWorktree() {
 		return
 	}
 	projectRoot := a.currentProjectRoot()
-	host := a.currentSessionHost()
-	debugLog("SelectWorktree: projectRoot=%q host=%q", projectRoot, host)
+	debugLog("SelectWorktree: projectRoot=%q", projectRoot)
 	go func() {
-		var items []WorktreeInfo
-		var err error
-		if hac, ok := a.sessions.(HostAwareCreator); ok {
-			items, err = hac.ListWorktreesWithHost(projectRoot, host)
-		} else {
-			items, err = a.sessions.ListWorktrees(projectRoot)
-		}
+		items, err := a.sessions.ListWorktrees(projectRoot)
 		a.gui.Update(func(g *gocui.Gui) error {
 			if err != nil {
 				a.showError(g, fmt.Sprintf("Error: %v", err))
