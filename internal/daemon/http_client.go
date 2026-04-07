@@ -90,9 +90,9 @@ func (c *HTTPClient) CapturePreview(ctx context.Context, id string, width, heigh
 
 func (c *HTTPClient) CaptureScrollback(ctx context.Context, id string, width, startLine, endLine int) (*ScrollbackResponse, error) {
 	q := url.Values{
-		"width": {fmt.Sprint(width)},
-		"start": {fmt.Sprint(startLine)},
-		"end":   {fmt.Sprint(endLine)},
+		"width":      {fmt.Sprint(width)},
+		"start_line": {fmt.Sprint(startLine)},
+		"end_line":   {fmt.Sprint(endLine)},
 	}
 	p := sessionPath(id, "/scrollback") + "?" + q.Encode()
 	var resp ScrollbackResponse
@@ -233,7 +233,7 @@ func (c *HTTPClient) PendingNotifications(ctx context.Context) ([]*ToolNotificat
 // The returned channel emits events until the context is canceled or
 // the connection drops. The caller must drain the channel.
 func (c *HTTPClient) SubscribeNotifications(ctx context.Context) (<-chan NotificationEvent, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/notifications/stream", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/notifications", nil)
 	if err != nil {
 		return nil, fmt.Errorf("create SSE request: %w", err)
 	}

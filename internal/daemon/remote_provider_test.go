@@ -476,7 +476,7 @@ func TestRemoteProvider_StartSSE(t *testing.T) {
 	// Create an SSE server that sends one event then closes.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/notifications/stream":
+		case "/notifications":
 			w.Header().Set("Content-Type", "text/event-stream")
 			flusher, ok := w.(http.Flusher)
 			if !ok {

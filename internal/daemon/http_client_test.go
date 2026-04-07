@@ -217,8 +217,11 @@ func TestHTTPClient_SendChoice_WithoutSessionID(t *testing.T) {
 func TestHTTPClient_CaptureScrollback(t *testing.T) {
 	srv := newClientTestServer(t, map[string]http.HandlerFunc{
 		"GET /session/s1/scrollback": func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Query().Get("start") != "10" {
-				t.Errorf("unexpected start: %s", r.URL.Query().Get("start"))
+			if r.URL.Query().Get("start_line") != "10" {
+				t.Errorf("unexpected start_line: %s", r.URL.Query().Get("start_line"))
+			}
+			if r.URL.Query().Get("end_line") != "20" {
+				t.Errorf("unexpected end_line: %s", r.URL.Query().Get("end_line"))
 			}
 			testWriteJSON(w, ScrollbackResponse{Content: "scrollback", CursorX: 0, CursorY: 5})
 		},
@@ -434,7 +437,7 @@ func TestHTTPClient_ErrorResponse(t *testing.T) {
 
 func TestHTTPClient_SubscribeNotifications(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/notifications/stream" {
+		if r.URL.Path != "/notifications" {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
