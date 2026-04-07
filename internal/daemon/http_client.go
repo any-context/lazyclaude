@@ -36,7 +36,7 @@ func NewHTTPClient(baseURL, token string) *HTTPClient {
 
 // sessionPath returns an escaped path for a session endpoint.
 func sessionPath(id, suffix string) string {
-	return "/sessions/" + url.PathEscape(id) + suffix
+	return "/session/" + url.PathEscape(id) + suffix
 }
 
 // --- Session CRUD ---
@@ -114,7 +114,7 @@ func (c *HTTPClient) HistorySize(ctx context.Context, id string) (*HistorySizeRe
 
 func (c *HTTPClient) SendKeys(ctx context.Context, id, keys string) error {
 	req := SendKeysRequest{ID: id, Keys: keys}
-	return c.postJSON(ctx, sessionPath(id, "/keys"), req, nil)
+	return c.postJSON(ctx, sessionPath(id, "/send-keys"), req, nil)
 }
 
 func (c *HTTPClient) SendChoice(ctx context.Context, id, window string, choice int) error {
@@ -122,9 +122,9 @@ func (c *HTTPClient) SendChoice(ctx context.Context, id, window string, choice i
 	// SendChoice posts to a dedicated endpoint. The request body carries
 	// window and choice; the session ID in the path may be empty when
 	// the caller routes by window name instead of session ID.
-	path := "/sessions/choice"
+	path := "/session/choice"
 	if id != "" {
-		path = sessionPath(id, "/choice")
+		path = sessionPath(id, "/send-choice")
 	}
 	return c.postJSON(ctx, path, req, nil)
 }
@@ -143,7 +143,7 @@ func (c *HTTPClient) AttachSession(ctx context.Context, id string) (*AttachRespo
 
 func (c *HTTPClient) CreateWorktree(ctx context.Context, req WorktreeCreateRequest) (*WorktreeCreateResponse, error) {
 	var resp WorktreeCreateResponse
-	if err := c.postJSON(ctx, "/worktrees", req, &resp); err != nil {
+	if err := c.postJSON(ctx, "/worktree/create", req, &resp); err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 	return &resp, nil
@@ -151,7 +151,7 @@ func (c *HTTPClient) CreateWorktree(ctx context.Context, req WorktreeCreateReque
 
 func (c *HTTPClient) ResumeWorktree(ctx context.Context, req WorktreeResumeRequest) (*WorktreeResumeResponse, error) {
 	var resp WorktreeResumeResponse
-	if err := c.postJSON(ctx, "/worktrees/resume", req, &resp); err != nil {
+	if err := c.postJSON(ctx, "/worktree/resume", req, &resp); err != nil {
 		return nil, fmt.Errorf("resume worktree: %w", err)
 	}
 	return &resp, nil

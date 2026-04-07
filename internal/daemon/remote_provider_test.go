@@ -169,7 +169,7 @@ func TestRemoteProvider_Create(t *testing.T) {
 
 func TestRemoteProvider_Delete(t *testing.T) {
 	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"DELETE /sessions/s1": func(w http.ResponseWriter, _ *http.Request) {
+		"DELETE /session/s1": func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		},
 	})
@@ -182,7 +182,7 @@ func TestRemoteProvider_Delete(t *testing.T) {
 
 func TestRemoteProvider_Rename(t *testing.T) {
 	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"POST /sessions/s1/rename": func(w http.ResponseWriter, _ *http.Request) {
+		"POST /session/s1/rename": func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		},
 	})
@@ -212,7 +212,7 @@ func TestRemoteProvider_PurgeOrphans(t *testing.T) {
 
 func TestRemoteProvider_CapturePreview(t *testing.T) {
 	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"GET /sessions/s1/preview": func(w http.ResponseWriter, _ *http.Request) {
+		"GET /session/s1/preview": func(w http.ResponseWriter, _ *http.Request) {
 			testWriteJSON(w, PreviewResponse{Content: "preview-content", CursorX: 10})
 		},
 	})
@@ -229,7 +229,7 @@ func TestRemoteProvider_CapturePreview(t *testing.T) {
 
 func TestRemoteProvider_HistorySize(t *testing.T) {
 	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"GET /sessions/s1/history-size": func(w http.ResponseWriter, _ *http.Request) {
+		"GET /session/s1/history-size": func(w http.ResponseWriter, _ *http.Request) {
 			testWriteJSON(w, HistorySizeResponse{Lines: 1000})
 		},
 	})
@@ -246,7 +246,7 @@ func TestRemoteProvider_HistorySize(t *testing.T) {
 
 func TestRemoteProvider_SendChoice(t *testing.T) {
 	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"POST /sessions/choice": func(w http.ResponseWriter, r *http.Request) {
+		"POST /session/choice": func(w http.ResponseWriter, r *http.Request) {
 			var req SendChoiceRequest
 			json.NewDecoder(r.Body).Decode(&req)
 			if req.Window != "@1" {
@@ -264,7 +264,7 @@ func TestRemoteProvider_SendChoice(t *testing.T) {
 
 func TestRemoteProvider_CaptureScrollback(t *testing.T) {
 	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"GET /sessions/s1/scrollback": func(w http.ResponseWriter, _ *http.Request) {
+		"GET /session/s1/scrollback": func(w http.ResponseWriter, _ *http.Request) {
 			testWriteJSON(w, ScrollbackResponse{Content: "scroll", CursorX: 0, CursorY: 10})
 		},
 	})
@@ -281,7 +281,7 @@ func TestRemoteProvider_CaptureScrollback(t *testing.T) {
 
 func TestRemoteProvider_ResumeWorktree(t *testing.T) {
 	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"POST /worktrees/resume": func(w http.ResponseWriter, _ *http.Request) {
+		"POST /worktree/resume": func(w http.ResponseWriter, _ *http.Request) {
 			testWriteJSON(w, WorktreeResumeResponse{SessionID: "wt-resume"})
 		},
 	})
@@ -295,7 +295,7 @@ func TestRemoteProvider_ResumeWorktree(t *testing.T) {
 func TestRemoteProvider_CreateWorktree(t *testing.T) {
 	var gotReq WorktreeCreateRequest
 	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
-		"POST /worktrees": func(w http.ResponseWriter, r *http.Request) {
+		"POST /worktree/create": func(w http.ResponseWriter, r *http.Request) {
 			json.NewDecoder(r.Body).Decode(&gotReq)
 			testWriteJSON(w, WorktreeCreateResponse{SessionID: "wt1"})
 		},
