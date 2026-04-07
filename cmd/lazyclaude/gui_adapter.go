@@ -33,6 +33,10 @@ type guiCompositeAdapter struct {
 	// cachedPending is refreshed once per layout cycle.
 	cachedPending map[string]bool
 
+	// currentHostFn returns the SSH host of the currently selected session.
+	// Wired from app.currentSessionHost() in root.go.
+	currentHostFn func() string
+
 	// Lazy remote connection: pendingHost is the default SSH host, initially set
 	// at construction from DetectSSHHost() and updated by SetPendingHost after
 	// successful connect-dialog connections. Protected by hostMu for thread safety.
@@ -72,6 +76,23 @@ func (a *guiCompositeAdapter) readPendingHost() string {
 	a.hostMu.RLock()
 	defer a.hostMu.RUnlock()
 	return a.pendingHost
+}
+
+// resolveHost returns the SSH host for the current operation.
+// Prefers the currently selected session's host (from currentHostFn),
+// falling back to the default pendingHost (set by connect dialog or DetectSSHHost).
+//
+// This method must only be called from the gocui main goroutine (keybinding
+// handlers, Update callbacks) because currentHostFn reads GUI state.
+// Background goroutines (e.g. completeRemoteCreate) receive the resolved host
+// as a parameter — they must never call resolveHost directly.
+func (a *guiCompositeAdapter) resolveHost() string {
+	if a.currentHostFn != nil {
+		if h := a.currentHostFn(); h != "" {
+			return h
+		}
+	}
+	return a.readPendingHost()
 }
 
 // lazyConn ensures a remote host is connected exactly once.
@@ -154,7 +175,7 @@ func (a *guiCompositeAdapter) ToggleProjectExpanded(projectID string) {
 }
 
 func (a *guiCompositeAdapter) Create(path string) error {
-	return a.createWithHost(path, a.readPendingHost())
+	return a.createWithHost(path, a.resolveHost())
 }
 
 // createWithHost is the shared implementation for Create.
@@ -518,7 +539,7 @@ func (a *guiCompositeAdapter) LaunchLazygit(path string) error {
 }
 
 func (a *guiCompositeAdapter) CreateWorktree(name, prompt, projectRoot string) error {
-	return a.createWorktreeWithHost(name, prompt, projectRoot, a.readPendingHost())
+	return a.createWorktreeWithHost(name, prompt, projectRoot, a.resolveHost())
 }
 
 func (a *guiCompositeAdapter) createWorktreeWithHost(name, prompt, projectRoot, host string) error {
@@ -533,7 +554,7 @@ func (a *guiCompositeAdapter) createWorktreeWithHost(name, prompt, projectRoot, 
 }
 
 func (a *guiCompositeAdapter) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
-	return a.resumeWorktreeWithHost(worktreePath, prompt, projectRoot, a.readPendingHost())
+	return a.resumeWorktreeWithHost(worktreePath, prompt, projectRoot, a.resolveHost())
 }
 
 func (a *guiCompositeAdapter) resumeWorktreeWithHost(worktreePath, prompt, projectRoot, host string) error {
@@ -548,7 +569,7 @@ func (a *guiCompositeAdapter) resumeWorktreeWithHost(worktreePath, prompt, proje
 }
 
 func (a *guiCompositeAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeInfo, error) {
-	return a.listWorktreesWithHost(projectRoot, a.readPendingHost())
+	return a.listWorktreesWithHost(projectRoot, a.resolveHost())
 }
 
 func (a *guiCompositeAdapter) listWorktreesWithHost(projectRoot, host string) ([]gui.WorktreeInfo, error) {
@@ -571,7 +592,7 @@ func (a *guiCompositeAdapter) listWorktreesWithHost(projectRoot, host string) ([
 }
 
 func (a *guiCompositeAdapter) CreatePMSession(projectRoot string) error {
-	return a.createPMSessionWithHost(projectRoot, a.readPendingHost())
+	return a.createPMSessionWithHost(projectRoot, a.resolveHost())
 }
 
 func (a *guiCompositeAdapter) createPMSessionWithHost(projectRoot, host string) error {
@@ -586,7 +607,7 @@ func (a *guiCompositeAdapter) createPMSessionWithHost(projectRoot, host string) 
 }
 
 func (a *guiCompositeAdapter) CreateWorkerSession(name, prompt, projectRoot string) error {
-	return a.createWorkerSessionWithHost(name, prompt, projectRoot, a.readPendingHost())
+	return a.createWorkerSessionWithHost(name, prompt, projectRoot, a.resolveHost())
 }
 
 func (a *guiCompositeAdapter) createWorkerSessionWithHost(name, prompt, projectRoot, host string) error {

@@ -425,10 +425,19 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	// Orphan sessions are skipped: the window may still be alive if HasSession
 	// failed transiently (e.g. tmux server temporarily unreachable). Killing an
 	// orphan's window would destroy a perfectly healthy Claude Code session.
-	target := tmuxSessionName + ":" + sess.WindowName()
+	//
+	// Remote sessions use mirror windows (rm- prefix) instead of local windows
+	// (lc- prefix). Use the correct window name based on session type.
+	windowName := sess.WindowName()
+	if sess.Host != "" {
+		windowName = MirrorWindowName(sess.ID)
+	}
+	target := tmuxSessionName + ":" + windowName
 	m.log.Info("delete", "name", sess.Name, "id", id[:8], "target", target, "status", sess.Status)
 	if sess.Status != StatusOrphan {
-		_ = m.tmux.KillWindow(ctx, target)
+		if err := m.tmux.KillWindow(ctx, target); err != nil {
+			m.log.Warn("delete.kill_window", "target", target, "err", err)
+		}
 	}
 
 	m.store.Remove(id)
