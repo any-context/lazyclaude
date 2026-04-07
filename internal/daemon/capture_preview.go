@@ -8,7 +8,7 @@ import (
 	"github.com/any-context/lazyclaude/internal/core/tmux"
 )
 
-// CapturePaneContent captures the content and cursor position from a tmux
+// CapturePreviewContent captures the content and cursor position from a tmux
 // pane. This is the shared implementation used by both the daemon server
 // (handlePreview) and the local provider (CapturePreview).
 //
@@ -18,7 +18,7 @@ import (
 //
 // Resize must be performed by the caller before calling this function,
 // because resize deduplication logic differs between callers.
-func CapturePaneContent(ctx context.Context, tc tmux.Client, target string) (*PreviewResponse, error) {
+func CapturePreviewContent(ctx context.Context, tc tmux.Client, target string) (*PreviewResponse, error) {
 	content, err := tc.CapturePaneANSI(ctx, target)
 	if err != nil {
 		return nil, err

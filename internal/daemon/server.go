@@ -324,7 +324,7 @@ func (s *DaemonServer) handlePreview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp, err := CapturePaneContent(ctx, s.tmux, target)
+	resp, err := CapturePreviewContent(ctx, s.tmux, target)
 	if err != nil {
 		http.Error(w, "capture failed", http.StatusInternalServerError)
 		return

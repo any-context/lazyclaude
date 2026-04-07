@@ -118,7 +118,7 @@ func newRootCmd() *cobra.Command {
 			}
 
 			// Always use CompositeProvider so manual 'c' connect can add remotes.
-			localProvider := &localDaemonProvider{mgr: mgr, tmux: tmuxClient, paths: paths}
+			localProvider := &localDaemonProvider{mgr: mgr, tmux: tmuxClient}
 			composite := daemon.NewCompositeProvider(localProvider, nil)
 
 			ssh := &daemon.ExecSSHExecutor{}

@@ -12,7 +12,6 @@ import (
 
 	"github.com/any-context/lazyclaude/internal/adapter/tmuxadapter"
 	"github.com/any-context/lazyclaude/internal/core/choice"
-	"github.com/any-context/lazyclaude/internal/core/config"
 	"github.com/any-context/lazyclaude/internal/core/tmux"
 	"github.com/any-context/lazyclaude/internal/daemon"
 	"github.com/any-context/lazyclaude/internal/session"
@@ -22,9 +21,8 @@ import (
 // localDaemonProvider wraps session.Manager to implement daemon.SessionProvider.
 // Used as the local backend for CompositeProvider.
 type localDaemonProvider struct {
-	mgr   *session.Manager
-	tmux  tmux.Client
-	paths config.Paths
+	mgr  *session.Manager
+	tmux tmux.Client
 
 	lastResizeID string
 	lastResizeW  int
@@ -94,9 +92,12 @@ func (p *localDaemonProvider) CapturePreview(id string, width, height int) (*dae
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	resp, err := daemon.CapturePaneContent(ctx, p.tmux, target)
-	if err != nil || width <= 0 {
-		return resp, err
+	resp, err := daemon.CapturePreviewContent(ctx, p.tmux, target)
+	if err != nil {
+		return nil, err
+	}
+	if width <= 0 {
+		return resp, nil
 	}
 
 	lines := strings.Split(resp.Content, "\n")
