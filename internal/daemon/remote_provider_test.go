@@ -300,6 +300,110 @@ func TestRemoteProvider_CreateWorkerSession(t *testing.T) {
 	}
 }
 
+func TestRemoteProvider_PostCreateHook_CalledOnCreateWorktree(t *testing.T) {
+	var hookCalled bool
+	var gotHost, gotPath string
+	var gotResp *SessionCreateResponse
+
+	srv := newClientTestServer(t, map[string]http.HandlerFunc{
+		"POST /worktree/create": func(w http.ResponseWriter, _ *http.Request) {
+			testWriteJSON(w, WorktreeCreateResponse{SessionID: "wt1", TmuxWindow: "lc-wt1"})
+		},
+	})
+	defer srv.Close()
+
+	client := NewHTTPClient(srv.URL, "test-token")
+	conn := &mockConnManager{state: Connected, client: client}
+	rp := NewRemoteProvider("remote-host", conn, WithPostCreate(func(host, path string, resp *SessionCreateResponse) error {
+		hookCalled = true
+		gotHost = host
+		gotPath = path
+		gotResp = resp
+		return nil
+	}))
+
+	if err := rp.CreateWorktree("feat", "do stuff", "/project"); err != nil {
+		t.Fatal(err)
+	}
+	if !hookCalled {
+		t.Fatal("PostCreateHook was not called")
+	}
+	if gotHost != "remote-host" {
+		t.Errorf("hook host=%q, want remote-host", gotHost)
+	}
+	if gotPath != "/project" {
+		t.Errorf("hook path=%q, want /project", gotPath)
+	}
+	if gotResp == nil || gotResp.ID != "wt1" {
+		t.Errorf("hook resp=%v, want ID=wt1", gotResp)
+	}
+}
+
+func TestRemoteProvider_PostCreateHook_CalledOnCreatePMSession(t *testing.T) {
+	var hookCalled bool
+	srv := newClientTestServer(t, map[string]http.HandlerFunc{
+		"POST /session/create": func(w http.ResponseWriter, _ *http.Request) {
+			testWriteJSON(w, SessionCreateResponse{ID: "pm1", TmuxWindow: "lc-pm1"})
+		},
+	})
+	defer srv.Close()
+
+	client := NewHTTPClient(srv.URL, "test-token")
+	conn := &mockConnManager{state: Connected, client: client}
+	rp := NewRemoteProvider("host", conn, WithPostCreate(func(_, _ string, _ *SessionCreateResponse) error {
+		hookCalled = true
+		return nil
+	}))
+
+	if err := rp.CreatePMSession("/project"); err != nil {
+		t.Fatal(err)
+	}
+	if !hookCalled {
+		t.Fatal("PostCreateHook was not called for CreatePMSession")
+	}
+}
+
+func TestRemoteProvider_PostCreateHook_ErrorPropagated(t *testing.T) {
+	srv := newClientTestServer(t, map[string]http.HandlerFunc{
+		"POST /session/create": func(w http.ResponseWriter, _ *http.Request) {
+			testWriteJSON(w, SessionCreateResponse{ID: "w1"})
+		},
+	})
+	defer srv.Close()
+
+	client := NewHTTPClient(srv.URL, "test-token")
+	conn := &mockConnManager{state: Connected, client: client}
+	rp := NewRemoteProvider("host", conn, WithPostCreate(func(_, _ string, _ *SessionCreateResponse) error {
+		return fmt.Errorf("mirror setup failed")
+	}))
+
+	err := rp.CreateWorkerSession("w1", "task", "/project")
+	if err == nil {
+		t.Fatal("expected error from PostCreateHook")
+	}
+	if !strings.Contains(err.Error(), "mirror setup failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRemoteProvider_NoHook_NoError(t *testing.T) {
+	srv := newClientTestServer(t, map[string]http.HandlerFunc{
+		"POST /worktree/resume": func(w http.ResponseWriter, _ *http.Request) {
+			testWriteJSON(w, WorktreeResumeResponse{SessionID: "wt-resume"})
+		},
+	})
+	defer srv.Close()
+
+	client := NewHTTPClient(srv.URL, "test-token")
+	conn := &mockConnManager{state: Connected, client: client}
+	// No WithPostCreate — hook is nil.
+	rp := NewRemoteProvider("host", conn)
+
+	if err := rp.ResumeWorktree("/tmp/wt", "continue", "/project"); err != nil {
+		t.Fatalf("unexpected error without hook: %v", err)
+	}
+}
+
 func TestRemoteProvider_ConnectionError(t *testing.T) {
 	conn := &mockConnManager{
 		state: Disconnected,

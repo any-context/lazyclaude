@@ -54,6 +54,12 @@ type guiCompositeAdapter struct {
 	onError      func(msg string)
 	lastErrorMsg string
 
+	// cachedHost stores the most recently resolved SSH host from currentHostFn.
+	// Updated on every layout cycle (main goroutine) via Sessions().
+	// Read by resolveHost() from any goroutine.
+	hostCacheMu sync.RWMutex
+	cachedHost  string
+
 	// guiUpdateFn triggers a GUI refresh from background goroutines.
 	guiUpdateFn func() // triggers gui.Update (wired in root.go)
 }
@@ -79,18 +85,17 @@ func (a *guiCompositeAdapter) readPendingHost() string {
 }
 
 // resolveHost returns the SSH host for the current operation.
-// Prefers the currently selected session's host (from currentHostFn),
+// Prefers the cached host (updated by Sessions() on each layout cycle),
 // falling back to the default pendingHost (set by connect dialog or DetectSSHHost).
 //
-// This method must only be called from the gocui main goroutine (keybinding
-// handlers, Update callbacks) because currentHostFn reads GUI state.
-// Background goroutines (e.g. completeRemoteCreate) receive the resolved host
-// as a parameter — they must never call resolveHost directly.
+// Thread-safe: reads cachedHost under RLock instead of calling currentHostFn
+// directly, so it can be called from any goroutine.
 func (a *guiCompositeAdapter) resolveHost() string {
-	if a.currentHostFn != nil {
-		if h := a.currentHostFn(); h != "" {
-			return h
-		}
+	a.hostCacheMu.RLock()
+	h := a.cachedHost
+	a.hostCacheMu.RUnlock()
+	if h != "" {
+		return h
 	}
 	return a.readPendingHost()
 }
@@ -151,6 +156,14 @@ func (a *guiCompositeAdapter) RefreshPendingFrom(notifications []*model.ToolNoti
 }
 
 func (a *guiCompositeAdapter) Sessions() []gui.SessionItem {
+	// Update cached host on every layout cycle (main goroutine).
+	if a.currentHostFn != nil {
+		h := a.currentHostFn()
+		a.hostCacheMu.Lock()
+		a.cachedHost = h
+		a.hostCacheMu.Unlock()
+	}
+
 	// All sessions (local + remote mirror windows) are in the local store.
 	sessions := a.localMgr.Sessions()
 	activity := a.getWindowActivity()
@@ -565,59 +578,29 @@ func (a *guiCompositeAdapter) LaunchLazygit(path string) error {
 }
 
 func (a *guiCompositeAdapter) CreateWorktree(name, prompt, projectRoot string) error {
-	return a.createWorktreeWithHost(name, prompt, projectRoot, a.resolveHost())
-}
-
-func (a *guiCompositeAdapter) createWorktreeWithHost(name, prompt, projectRoot, host string) error {
-	debugLog("createWorktreeWithHost: name=%q host=%q", name, host)
-	if host == "" {
-		return a.cp.CreateWorktree(name, prompt, projectRoot, host)
-	}
+	host := a.resolveHost()
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return err
 	}
-	projectRoot = a.resolveRemotePath(projectRoot, host)
-	rp := a.remoteProvider(host)
-	if rp == nil {
-		return fmt.Errorf("no remote provider for host %q", host)
+	if host != "" {
+		projectRoot = a.resolveRemotePath(projectRoot, host)
 	}
-	resp, err := rp.CreateWorktreeResp(name, prompt, projectRoot)
-	if err != nil {
-		return err
-	}
-	return a.ensureMirrorForRemoteSession(host, projectRoot, resp)
+	return a.cp.CreateWorktree(name, prompt, projectRoot, host)
 }
 
 func (a *guiCompositeAdapter) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
-	return a.resumeWorktreeWithHost(worktreePath, prompt, projectRoot, a.resolveHost())
-}
-
-func (a *guiCompositeAdapter) resumeWorktreeWithHost(worktreePath, prompt, projectRoot, host string) error {
-	debugLog("resumeWorktreeWithHost: wtPath=%q host=%q", worktreePath, host)
-	if host == "" {
-		return a.cp.ResumeWorktree(worktreePath, prompt, projectRoot, host)
-	}
+	host := a.resolveHost()
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return err
 	}
-	projectRoot = a.resolveRemotePath(projectRoot, host)
-	rp := a.remoteProvider(host)
-	if rp == nil {
-		return fmt.Errorf("no remote provider for host %q", host)
+	if host != "" {
+		projectRoot = a.resolveRemotePath(projectRoot, host)
 	}
-	resp, err := rp.ResumeWorktreeResp(worktreePath, prompt, projectRoot)
-	if err != nil {
-		return err
-	}
-	return a.ensureMirrorForRemoteSession(host, projectRoot, resp)
+	return a.cp.ResumeWorktree(worktreePath, prompt, projectRoot, host)
 }
 
 func (a *guiCompositeAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeInfo, error) {
-	return a.listWorktreesWithHost(projectRoot, a.resolveHost())
-}
-
-func (a *guiCompositeAdapter) listWorktreesWithHost(projectRoot, host string) ([]gui.WorktreeInfo, error) {
-	debugLog("listWorktreesWithHost: projectRoot=%q host=%q", projectRoot, host)
+	host := a.resolveHost()
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return nil, err
 	}
@@ -636,50 +619,24 @@ func (a *guiCompositeAdapter) listWorktreesWithHost(projectRoot, host string) ([
 }
 
 func (a *guiCompositeAdapter) CreatePMSession(projectRoot string) error {
-	return a.createPMSessionWithHost(projectRoot, a.resolveHost())
-}
-
-func (a *guiCompositeAdapter) createPMSessionWithHost(projectRoot, host string) error {
-	debugLog("createPMSessionWithHost: projectRoot=%q host=%q", projectRoot, host)
-	if host == "" {
-		return a.cp.CreatePMSession(projectRoot, host)
-	}
+	host := a.resolveHost()
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return err
 	}
-	projectRoot = a.resolveRemotePath(projectRoot, host)
-	rp := a.remoteProvider(host)
-	if rp == nil {
-		return fmt.Errorf("no remote provider for host %q", host)
+	if host != "" {
+		projectRoot = a.resolveRemotePath(projectRoot, host)
 	}
-	resp, err := rp.CreatePMSessionResp(projectRoot)
-	if err != nil {
-		return err
-	}
-	return a.ensureMirrorForRemoteSession(host, projectRoot, resp)
+	return a.cp.CreatePMSession(projectRoot, host)
 }
 
 func (a *guiCompositeAdapter) CreateWorkerSession(name, prompt, projectRoot string) error {
-	return a.createWorkerSessionWithHost(name, prompt, projectRoot, a.resolveHost())
-}
-
-func (a *guiCompositeAdapter) createWorkerSessionWithHost(name, prompt, projectRoot, host string) error {
-	debugLog("createWorkerSessionWithHost: name=%q host=%q", name, host)
-	if host == "" {
-		return a.cp.CreateWorkerSession(name, prompt, projectRoot, host)
-	}
+	host := a.resolveHost()
 	if err := a.ensureRemoteConnected(host); err != nil {
 		return err
 	}
-	projectRoot = a.resolveRemotePath(projectRoot, host)
-	rp := a.remoteProvider(host)
-	if rp == nil {
-		return fmt.Errorf("no remote provider for host %q", host)
+	if host != "" {
+		projectRoot = a.resolveRemotePath(projectRoot, host)
 	}
-	resp, err := rp.CreateWorkerSessionResp(name, prompt, projectRoot)
-	if err != nil {
-		return err
-	}
-	return a.ensureMirrorForRemoteSession(host, projectRoot, resp)
+	return a.cp.CreateWorkerSession(name, prompt, projectRoot, host)
 }
 

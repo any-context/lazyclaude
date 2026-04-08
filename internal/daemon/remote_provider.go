@@ -14,6 +14,18 @@ import (
 // Compile-time check: RemoteProvider implements SessionProvider.
 var _ SessionProvider = (*RemoteProvider)(nil)
 
+// PostCreateHook is called after a remote session is created via daemon API.
+// The hook creates a mirror tmux window and adds the session to the local store.
+type PostCreateHook func(host, path string, resp *SessionCreateResponse) error
+
+// RemoteProviderOption configures a RemoteProvider.
+type RemoteProviderOption func(*RemoteProvider)
+
+// WithPostCreate sets the hook called after session creation on the remote daemon.
+func WithPostCreate(hook PostCreateHook) RemoteProviderOption {
+	return func(rp *RemoteProvider) { rp.postCreate = hook }
+}
+
 // RemoteProvider adapts a daemon ClientAPI to the SessionProvider interface.
 // It maintains a local cache of sessions and buffers tool notifications
 // received via SSE.
@@ -22,8 +34,9 @@ var _ SessionProvider = (*RemoteProvider)(nil)
 // through the daemon API. Socket tunnel forwarding was removed because
 // remote sshd environments often block Unix domain socket forwarding.
 type RemoteProvider struct {
-	host string
-	conn ConnectionManager
+	host       string
+	conn       ConnectionManager
+	postCreate PostCreateHook
 
 	mu            sync.Mutex
 	sessions      []SessionInfo
@@ -36,11 +49,15 @@ type RemoteProvider struct {
 // NewRemoteProvider creates a RemoteProvider for the given host.
 // The ConnectionManager must already be connected or will be connected
 // separately; this constructor does not initiate the connection.
-func NewRemoteProvider(host string, conn ConnectionManager) *RemoteProvider {
-	return &RemoteProvider{
+func NewRemoteProvider(host string, conn ConnectionManager, opts ...RemoteProviderOption) *RemoteProvider {
+	rp := &RemoteProvider{
 		host: host,
 		conn: conn,
 	}
+	for _, o := range opts {
+		o(rp)
+	}
+	return rp
 }
 
 // Conn returns the underlying ConnectionManager for direct API access.
@@ -328,13 +345,19 @@ func buildTmuxAttachCommand(tmuxTarget string) string {
 // --- WorktreeProvider ---
 
 func (rp *RemoteProvider) CreateWorktree(name, prompt, projectRoot string) error {
-	_, err := rp.CreateWorktreeResp(name, prompt, projectRoot)
-	return err
+	resp, err := rp.createWorktreeResp(name, prompt, projectRoot)
+	if err != nil {
+		return err
+	}
+	if rp.postCreate != nil {
+		return rp.postCreate(rp.host, projectRoot, resp)
+	}
+	return nil
 }
 
-// CreateWorktreeResp creates a worktree on the remote daemon and returns the
+// createWorktreeResp creates a worktree on the remote daemon and returns the
 // response containing the session ID and tmux window name.
-func (rp *RemoteProvider) CreateWorktreeResp(name, prompt, projectRoot string) (*SessionCreateResponse, error) {
+func (rp *RemoteProvider) createWorktreeResp(name, prompt, projectRoot string) (*SessionCreateResponse, error) {
 	client, err := rp.conn.Client()
 	if err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
@@ -355,13 +378,19 @@ func (rp *RemoteProvider) CreateWorktreeResp(name, prompt, projectRoot string) (
 }
 
 func (rp *RemoteProvider) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
-	_, err := rp.ResumeWorktreeResp(worktreePath, prompt, projectRoot)
-	return err
+	resp, err := rp.resumeWorktreeResp(worktreePath, prompt, projectRoot)
+	if err != nil {
+		return err
+	}
+	if rp.postCreate != nil {
+		return rp.postCreate(rp.host, projectRoot, resp)
+	}
+	return nil
 }
 
-// ResumeWorktreeResp resumes a worktree on the remote daemon and returns the
+// resumeWorktreeResp resumes a worktree on the remote daemon and returns the
 // response containing the session ID and tmux window name.
-func (rp *RemoteProvider) ResumeWorktreeResp(worktreePath, prompt, projectRoot string) (*SessionCreateResponse, error) {
+func (rp *RemoteProvider) resumeWorktreeResp(worktreePath, prompt, projectRoot string) (*SessionCreateResponse, error) {
 	client, err := rp.conn.Client()
 	if err != nil {
 		return nil, fmt.Errorf("resume worktree: %w", err)
@@ -392,13 +421,19 @@ func (rp *RemoteProvider) ListWorktrees(projectRoot string) ([]WorktreeInfo, err
 // --- RoleSessionProvider ---
 
 func (rp *RemoteProvider) CreatePMSession(projectRoot string) error {
-	_, err := rp.CreatePMSessionResp(projectRoot)
-	return err
+	resp, err := rp.createPMSessionResp(projectRoot)
+	if err != nil {
+		return err
+	}
+	if rp.postCreate != nil {
+		return rp.postCreate(rp.host, projectRoot, resp)
+	}
+	return nil
 }
 
-// CreatePMSessionResp creates a PM session on the remote daemon and returns
+// createPMSessionResp creates a PM session on the remote daemon and returns
 // the response containing the session ID and tmux window name.
-func (rp *RemoteProvider) CreatePMSessionResp(projectRoot string) (*SessionCreateResponse, error) {
+func (rp *RemoteProvider) createPMSessionResp(projectRoot string) (*SessionCreateResponse, error) {
 	client, err := rp.conn.Client()
 	if err != nil {
 		return nil, fmt.Errorf("create PM session: %w", err)
@@ -410,13 +445,19 @@ func (rp *RemoteProvider) CreatePMSessionResp(projectRoot string) (*SessionCreat
 }
 
 func (rp *RemoteProvider) CreateWorkerSession(name, prompt, projectRoot string) error {
-	_, err := rp.CreateWorkerSessionResp(name, prompt, projectRoot)
-	return err
+	resp, err := rp.createWorkerSessionResp(name, prompt, projectRoot)
+	if err != nil {
+		return err
+	}
+	if rp.postCreate != nil {
+		return rp.postCreate(rp.host, projectRoot, resp)
+	}
+	return nil
 }
 
-// CreateWorkerSessionResp creates a worker session on the remote daemon and
+// createWorkerSessionResp creates a worker session on the remote daemon and
 // returns the response containing the session ID and tmux window name.
-func (rp *RemoteProvider) CreateWorkerSessionResp(name, prompt, projectRoot string) (*SessionCreateResponse, error) {
+func (rp *RemoteProvider) createWorkerSessionResp(name, prompt, projectRoot string) (*SessionCreateResponse, error) {
 	client, err := rp.conn.Client()
 	if err != nil {
 		return nil, fmt.Errorf("create worker session: %w", err)

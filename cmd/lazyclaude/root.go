@@ -151,7 +151,10 @@ func newRootCmd() *cobra.Command {
 				}
 				debugLog("connectRemoteHost: Connect succeeded")
 
-				remoteProvider := daemon.NewRemoteProvider(host, remoteConn)
+				hook := func(host, path string, resp *daemon.SessionCreateResponse) error {
+					return compositeAdapter.ensureMirrorForRemoteSession(host, path, resp)
+				}
+				remoteProvider := daemon.NewRemoteProvider(host, remoteConn, daemon.WithPostCreate(hook))
 				lc.Register("remote-conn-"+host, func() {
 					remoteProvider.StopSSE()
 					remoteConn.Disconnect()
