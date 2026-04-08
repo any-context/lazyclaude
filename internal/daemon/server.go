@@ -237,6 +237,7 @@ func (s *DaemonServer) handleSessionCreate(w http.ResponseWriter, r *http.Reques
 		ID:         sess.ID,
 		Name:       sess.Name,
 		TmuxWindow: sess.WindowName(),
+		Role:       string(sess.Role),
 	})
 }
 
@@ -303,6 +304,7 @@ func (s *DaemonServer) handleWorktreeCreate(w http.ResponseWriter, r *http.Reque
 		Path:       wtPath,
 		Branch:     req.Name,
 		TmuxWindow: sess.WindowName(),
+		Role:       string(sess.Role),
 	})
 }
 
@@ -324,6 +326,7 @@ func (s *DaemonServer) handleWorktreeResume(w http.ResponseWriter, r *http.Reque
 		SessionID:  sess.ID,
 		Name:       sess.Name,
 		TmuxWindow: sess.WindowName(),
+		Role:       string(sess.Role),
 	})
 }
 

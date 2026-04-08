@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"github.com/any-context/lazyclaude/internal/core/model"
@@ -337,12 +338,23 @@ func (rp *RemoteProvider) runSSHInteractive(remoteCmd string) error {
 }
 
 // buildTmuxAttachCommand returns the shell command to attach to a tmux
-// target on the remote lazyclaude server.
+// target on the remote lazyclaude server. It creates a grouped session
+// (new-session -t) so that each client has independent window selection,
+// preventing multiple mirrors from overriding each other's active window.
+// The grouped session uses destroy-unattached so it is cleaned up when
+// the SSH connection drops.
 func buildTmuxAttachCommand(tmuxTarget string) string {
+	// Extract the window name from "session:window" format.
+	window := tmuxTarget
+	if _, after, ok := strings.Cut(tmuxTarget, ":"); ok {
+		window = after
+	}
 	return fmt.Sprintf(
 		"tmux -L lazyclaude set-option -t lazyclaude window-size largest 2>/dev/null; "+
-			"tmux -L lazyclaude attach-session -t %s",
-		PosixQuote(tmuxTarget),
+			"tmux -L lazyclaude new-session -t lazyclaude -s attach-$$ "+
+			"\\; set-option destroy-unattached on "+
+			"\\; select-window -t %s",
+		PosixQuote(window),
 	)
 }
 
@@ -378,6 +390,7 @@ func (rp *RemoteProvider) createWorktreeResp(name, prompt, projectRoot string) (
 		ID:         resp.SessionID,
 		Name:       name,
 		TmuxWindow: resp.TmuxWindow,
+		Role:       resp.Role,
 	}, nil
 }
 
@@ -411,6 +424,7 @@ func (rp *RemoteProvider) resumeWorktreeResp(worktreePath, prompt, projectRoot s
 		ID:         resp.SessionID,
 		Name:       resp.Name,
 		TmuxWindow: resp.TmuxWindow,
+		Role:       resp.Role,
 	}, nil
 }
 
