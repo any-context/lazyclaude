@@ -252,16 +252,20 @@ func (a *guiCompositeAdapter) completeRemoteCreate(placeholderID, localPath, hos
 	}
 	debugLog("completeRemoteCreate: CreateSession succeeded id=%q window=%q", resp.ID, resp.TmuxWindow)
 
-	// Remove the placeholder and add the real session with correct path.
-	// This ensures the session is grouped under the correct project
-	// (UpdateSession doesn't move between project groups).
-	store := a.localMgr.Store()
-	store.Remove(placeholderID)
+	// Create the mirror first, then remove the placeholder. If mirror
+	// creation fails, the placeholder is still in the store so
+	// failPlaceholder can mark it as dead and show the error to the user.
 	if err := a.ensureMirrorForRemoteSession(host, remotePath, resp); err != nil {
 		debugLog("completeRemoteCreate: ensureMirrorForRemoteSession failed: %v", err)
 		a.failPlaceholder(placeholderID, fmt.Sprintf("Mirror setup failed: %v", err))
 		return
 	}
+
+	// Remove the placeholder now that the real session is in the store.
+	// This ensures the session is grouped under the correct project
+	// (UpdateSession doesn't move between project groups).
+	store := a.localMgr.Store()
+	store.Remove(placeholderID)
 	debugLog("completeRemoteCreate: session %q created with path=%q", resp.ID, remotePath)
 	a.triggerGUIUpdate()
 }

@@ -95,7 +95,7 @@ func (c *HTTPClient) ResumeWorktree(ctx context.Context, req WorktreeResumeReque
 }
 
 func (c *HTTPClient) ListWorktrees(ctx context.Context, projectRoot string) ([]WorktreeInfo, error) {
-	q := url.Values{"root": {projectRoot}}
+	q := url.Values{"project_root": {projectRoot}}
 	p := "/worktrees?" + q.Encode()
 	var resp WorktreeListResponse
 	if err := c.getJSON(ctx, p, &resp); err != nil {

@@ -219,8 +219,8 @@ func TestHTTPClient_CreateWorktree(t *testing.T) {
 func TestHTTPClient_ListWorktrees(t *testing.T) {
 	srv := newClientTestServer(t, map[string]http.HandlerFunc{
 		"GET /worktrees": func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Query().Get("root") != "/project" {
-				t.Errorf("unexpected root: %s", r.URL.Query().Get("root"))
+			if r.URL.Query().Get("project_root") != "/project" {
+				t.Errorf("unexpected project_root: %s", r.URL.Query().Get("project_root"))
 			}
 			testWriteJSON(w, WorktreeListResponse{
 				Worktrees: []WorktreeInfo{{Name: "wt1", Path: "/tmp/wt1", Branch: "main"}},

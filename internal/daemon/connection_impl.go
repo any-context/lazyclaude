@@ -334,10 +334,12 @@ func (rc *RemoteConnection) reconnect(ctx context.Context) {
 		delay := rc.backoff.Next()
 		rc.mu.Unlock()
 
+		t := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			t.Stop()
 			return
-		case <-time.After(delay):
+		case <-t.C:
 		}
 
 		rc.connMu.Lock()
