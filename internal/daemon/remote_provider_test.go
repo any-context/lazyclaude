@@ -330,7 +330,7 @@ func TestRemoteProvider_PostCreateHook_CalledOnCreateWorktree(t *testing.T) {
 
 	srv := newClientTestServer(t, map[string]http.HandlerFunc{
 		"POST /worktree/create": func(w http.ResponseWriter, _ *http.Request) {
-			testWriteJSON(w, WorktreeCreateResponse{SessionID: "wt1", TmuxWindow: "lc-wt1"})
+			testWriteJSON(w, WorktreeCreateResponse{SessionID: "wt1", TmuxWindow: "lc-wt1", Role: "worker"})
 		},
 	})
 	defer srv.Close()
@@ -360,21 +360,26 @@ func TestRemoteProvider_PostCreateHook_CalledOnCreateWorktree(t *testing.T) {
 	if gotResp == nil || gotResp.ID != "wt1" {
 		t.Errorf("hook resp=%v, want ID=wt1", gotResp)
 	}
+	if gotResp != nil && gotResp.Role != "worker" {
+		t.Errorf("hook resp.Role=%q, want worker", gotResp.Role)
+	}
 }
 
 func TestRemoteProvider_PostCreateHook_CalledOnCreatePMSession(t *testing.T) {
 	var hookCalled bool
+	var gotResp *SessionCreateResponse
 	srv := newClientTestServer(t, map[string]http.HandlerFunc{
 		"POST /session/create": func(w http.ResponseWriter, _ *http.Request) {
-			testWriteJSON(w, SessionCreateResponse{ID: "pm1", TmuxWindow: "lc-pm1"})
+			testWriteJSON(w, SessionCreateResponse{ID: "pm1", TmuxWindow: "lc-pm1", Role: "pm"})
 		},
 	})
 	defer srv.Close()
 
 	client := NewHTTPClient(srv.URL, "test-token")
 	conn := &mockConnManager{state: Connected, client: client}
-	rp := NewRemoteProvider("host", conn, WithPostCreate(func(_, _ string, _ *SessionCreateResponse) error {
+	rp := NewRemoteProvider("host", conn, WithPostCreate(func(_, _ string, resp *SessionCreateResponse) error {
 		hookCalled = true
+		gotResp = resp
 		return nil
 	}))
 
@@ -384,14 +389,18 @@ func TestRemoteProvider_PostCreateHook_CalledOnCreatePMSession(t *testing.T) {
 	if !hookCalled {
 		t.Fatal("PostCreateHook was not called for CreatePMSession")
 	}
+	if gotResp != nil && gotResp.Role != "pm" {
+		t.Errorf("hook resp.Role=%q, want pm", gotResp.Role)
+	}
 }
 
 func TestRemoteProvider_PostCreateHook_CalledOnResumeWorktree(t *testing.T) {
 	var hookCalled bool
 	var gotHost, gotPath string
+	var gotResp *SessionCreateResponse
 	srv := newClientTestServer(t, map[string]http.HandlerFunc{
 		"POST /worktree/resume": func(w http.ResponseWriter, _ *http.Request) {
-			testWriteJSON(w, WorktreeResumeResponse{SessionID: "wt-resume", Name: "feat", TmuxWindow: "lc-resume"})
+			testWriteJSON(w, WorktreeResumeResponse{SessionID: "wt-resume", Name: "feat", TmuxWindow: "lc-resume", Role: "worker"})
 		},
 	})
 	defer srv.Close()
@@ -402,6 +411,7 @@ func TestRemoteProvider_PostCreateHook_CalledOnResumeWorktree(t *testing.T) {
 		hookCalled = true
 		gotHost = host
 		gotPath = path
+		gotResp = resp
 		return nil
 	}))
 
@@ -416,6 +426,9 @@ func TestRemoteProvider_PostCreateHook_CalledOnResumeWorktree(t *testing.T) {
 	}
 	if gotPath != "/project" {
 		t.Errorf("hook path=%q, want /project", gotPath)
+	}
+	if gotResp != nil && gotResp.Role != "worker" {
+		t.Errorf("hook resp.Role=%q, want worker", gotResp.Role)
 	}
 }
 
@@ -689,19 +702,34 @@ func TestParseSSEStream_ContextCancellation(t *testing.T) {
 }
 
 func TestBuildTmuxAttachCommand(t *testing.T) {
-	cmd := buildTmuxAttachCommand("lazyclaude:lc-abcd1234")
-	if !strings.Contains(cmd, "new-session -t lazyclaude") {
-		t.Errorf("missing grouped new-session in: %s", cmd)
-	}
-	if !strings.Contains(cmd, "select-window") {
-		t.Errorf("missing select-window in: %s", cmd)
-	}
-	if !strings.Contains(cmd, "lc-abcd1234") {
-		t.Errorf("missing window target in: %s", cmd)
-	}
-	if !strings.Contains(cmd, "destroy-unattached") {
-		t.Errorf("missing destroy-unattached in: %s", cmd)
-	}
+	t.Run("session:window format", func(t *testing.T) {
+		cmd := buildTmuxAttachCommand("lazyclaude:lc-abcd1234")
+		if !strings.Contains(cmd, "new-session -t lazyclaude") {
+			t.Errorf("missing grouped new-session in: %s", cmd)
+		}
+		if !strings.Contains(cmd, "select-window") {
+			t.Errorf("missing select-window in: %s", cmd)
+		}
+		if !strings.Contains(cmd, "lc-abcd1234") {
+			t.Errorf("missing window target in: %s", cmd)
+		}
+		if !strings.Contains(cmd, "destroy-unattached") {
+			t.Errorf("missing destroy-unattached in: %s", cmd)
+		}
+	})
+
+	t.Run("bare window name without colon", func(t *testing.T) {
+		cmd := buildTmuxAttachCommand("lc-bare")
+		if !strings.Contains(cmd, "new-session -t lazyclaude") {
+			t.Errorf("missing grouped new-session in: %s", cmd)
+		}
+		if !strings.Contains(cmd, "select-window") {
+			t.Errorf("missing select-window in: %s", cmd)
+		}
+		if !strings.Contains(cmd, "'lc-bare'") {
+			t.Errorf("missing bare window target in: %s", cmd)
+		}
+	})
 }
 
 // --- Helpers ---
