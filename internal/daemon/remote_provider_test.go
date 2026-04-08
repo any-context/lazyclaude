@@ -690,11 +690,17 @@ func TestParseSSEStream_ContextCancellation(t *testing.T) {
 
 func TestBuildTmuxAttachCommand(t *testing.T) {
 	cmd := buildTmuxAttachCommand("lazyclaude:lc-abcd1234")
-	if !strings.Contains(cmd, "attach-session") {
-		t.Errorf("missing attach-session in: %s", cmd)
+	if !strings.Contains(cmd, "new-session -t lazyclaude") {
+		t.Errorf("missing grouped new-session in: %s", cmd)
 	}
-	if !strings.Contains(cmd, "lazyclaude:lc-abcd1234") {
-		t.Errorf("missing target in: %s", cmd)
+	if !strings.Contains(cmd, "select-window") {
+		t.Errorf("missing select-window in: %s", cmd)
+	}
+	if !strings.Contains(cmd, "lc-abcd1234") {
+		t.Errorf("missing window target in: %s", cmd)
+	}
+	if !strings.Contains(cmd, "destroy-unattached") {
+		t.Errorf("missing destroy-unattached in: %s", cmd)
 	}
 }
 

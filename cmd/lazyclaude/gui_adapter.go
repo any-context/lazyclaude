@@ -282,16 +282,20 @@ func (a *guiCompositeAdapter) remoteProvider(host string) *daemon.RemoteProvider
 }
 
 // createMirrorWindow creates a local tmux window that SSH-attaches to a
-// remote lazyclaude tmux session. The remote command is base64-encoded
-// to prevent shell injection from user-controlled host strings.
+// remote lazyclaude tmux session. Uses a grouped session (new-session -t)
+// so that each mirror has independent window selection. The remote command
+// is base64-encoded to prevent shell injection from user-controlled host strings.
 func (a *guiCompositeAdapter) createMirrorWindow(host, remoteWindow, localWindowName string) error {
-	// Build the remote tmux attach command. Quote the target to prevent
-	// shell injection from untrusted TmuxWindow values (fetched from daemon API).
-	remoteTarget := "lazyclaude:" + remoteWindow
+	// Build the remote tmux grouped-session command. Each mirror gets its own
+	// grouped session (named after localWindowName) with destroy-unattached so
+	// the session is cleaned up when the SSH connection drops.
 	remoteCmd := fmt.Sprintf(
 		"tmux -L lazyclaude set-option -t lazyclaude window-size largest 2>/dev/null; "+
-			"tmux -L lazyclaude attach-session -t %s",
-		daemon.PosixQuote(remoteTarget),
+			"tmux -L lazyclaude new-session -t lazyclaude -s %s "+
+			"\\; set-option destroy-unattached on "+
+			"\\; select-window -t %s",
+		daemon.PosixQuote(localWindowName),
+		daemon.PosixQuote(remoteWindow),
 	)
 
 	// Base64-encode the remote command to prevent shell injection.
@@ -342,6 +346,7 @@ func (a *guiCompositeAdapter) createMirrorForExisting(host string, s daemon.Sess
 		Host:       host,
 		Status:     session.StatusRunning,
 		TmuxWindow: mirrorName,
+		Role:       session.Role(s.Role),
 	}
 	a.localMgr.Store().Add(sess, s.Path)
 	if err := a.localMgr.Store().Save(); err != nil {
@@ -373,6 +378,7 @@ func (a *guiCompositeAdapter) ensureMirrorForRemoteSession(host, path string, re
 		Host:       host,
 		Status:     session.StatusRunning,
 		TmuxWindow: mirrorName,
+		Role:       session.Role(resp.Role),
 	}
 	a.localMgr.Store().Add(sess, path)
 	if err := a.localMgr.Store().Save(); err != nil {

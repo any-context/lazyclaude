@@ -29,6 +29,7 @@ type SessionCreateResponse struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	TmuxWindow string `json:"tmux_window"`
+	Role       string `json:"role,omitempty"`
 }
 
 // SessionDeleteRequest deletes a session by ID.
@@ -136,6 +137,7 @@ type WorktreeCreateResponse struct {
 	Path       string `json:"path"`
 	Branch     string `json:"branch"`
 	TmuxWindow string `json:"tmux_window"`
+	Role       string `json:"role,omitempty"`
 }
 
 // WorktreeResumeRequest resumes an existing worktree session.
@@ -150,6 +152,7 @@ type WorktreeResumeResponse struct {
 	SessionID  string `json:"session_id"`
 	Name       string `json:"name"`
 	TmuxWindow string `json:"tmux_window"`
+	Role       string `json:"role,omitempty"`
 }
 
 // WorktreeInfo describes an existing worktree.
