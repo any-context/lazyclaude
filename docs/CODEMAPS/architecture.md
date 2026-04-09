@@ -1,8 +1,8 @@
-<!-- Generated: 2026-04-01 | Files scanned: 154 src + test | Lines: ~14,602 src | Token estimate: ~950 -->
+<!-- Last Updated: 2026-04-08 | daemon-arch branch: mirror windows, PostCreateHook, Role propagation, lazy remote connection -->
 
 # Architecture
 
-**Last Updated:** 2026-04-01
+**Last Updated:** 2026-04-08 (daemon-arch)
 
 ## System Overview
 
@@ -81,8 +81,18 @@ cmd/lazyclaude (CLI entry, Cobra)
 - `lazyclaude setup` -- install hooks + keybindings (--settings flag injection)
 - `lazyclaude server` -- start MCP daemon (manual)
 
-## Recent Enhancements (Apr 2026)
+## Recent Enhancements
 
+**daemon-arch branch (Apr 2026):**
+- **Mirror Windows** -- SSH-attached tmux windows for transparent remote session interaction
+- **Grouped Tmux Sessions** -- Each mirror gets own grouped session (new-session -t lazyclaude -s {name})
+- **PostCreateHook Pattern** -- Side-effect hook called after remote session creation
+- **Session Role Propagation** -- PM/Worker roles displayed with [PM]/[W] prefixes in sidebar
+- **Lazy Remote Connection** -- First remote operation triggers connection (sync.Once per host)
+- **Optimistic UI** -- Create shows placeholder immediately, finishes in background
+- **Path Resolution** -- resolveRemotePath() bridges local and remote CWDs via daemon API
+
+**stg branch (earlier Apr 2026):**
 - **Rich Sidebar Status** -- 5-stage ActivityState with icons + tool name display
 - **Scrollback Browser** -- vim-like navigation (j/k, g/G, v for select, y to copy) in fullscreen
 - **Search Filtering** -- fzf-style "/" key for session/plugin/MCP filtering with visual indicator

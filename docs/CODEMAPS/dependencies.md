@@ -1,8 +1,8 @@
-<!-- Generated: 2026-04-01 | Go 1.25 | Token estimate: ~500 -->
+<!-- Last Updated: 2026-04-08 | daemon-arch: added daemon HTTP client, remote connection, mirror window setup -->
 
 # Dependencies
 
-**Last Updated:** 2026-04-01
+**Last Updated:** 2026-04-08 (daemon-arch)
 
 ## Go Module Dependencies
 
@@ -28,11 +28,15 @@
 
 | Tool | Minimum Version | Usage |
 |------|-----------------|-------|
-| `tmux` | 3.4 | Session management, display-popup, control mode |
+| `tmux` | 3.4 | Session management, display-popup, control mode, grouped sessions for mirrors |
 | `claude` | Latest | Claude Code CLI (plugins, MCP, sessions) |
 | `git` | 2.25+ | Worktree operations, project root detection |
-| `ssh` | OpenSSH | Remote session support (reverse tunnel setup) |
+| `ssh` | OpenSSH | Remote session support, mirror window creation (base64-encoded commands) |
 | `bash` | 4.0+ | Script execution for remote sessions |
+
+**daemon-arch additions:**
+- `tmux new-session -t lazyclaude -s {name}` for grouped mirror sessions
+- `base64` for encoding/decoding remote tmux commands (SSH injection prevention)
 
 ## File-based Integration Points
 
@@ -41,10 +45,12 @@
 | `~/.claude/settings.json` | Hook installation target (--settings flag) | Claude Code |
 | `~/.claude.json` | MCP server definitions (read-only) | Claude Code |
 | `~/.claude/ide/<port>.lock` | IDE discovery lock file | Claude Code |
-| `~/.local/share/lazyclaude/state.json` | Session persistence | lazyclaude |
+| `~/.local/share/lazyclaude/state.json` | Session persistence (includes Host, Role fields for remote sessions) | lazyclaude |
 | `~/.local/share/lazyclaude/port.file` | Server port + token | lazyclaude |
 | `/tmp/lazyclaude-q-*.json` | Notification queue (SSH fallback) | lazyclaude |
 | `/tmp/lazyclaude/server.log` | Server log (prefix: lazyclaude-srv:) | lazyclaude |
+| `/tmp/lazyclaude-{user}/` | Remote daemon socket and config (SSH tunnel) | lazyclaude |
+| `~/.local/share/lazyclaude/daemon/{host}.json` | Remote daemon auth tokens (one per connected host) | lazyclaude |
 
 ## Environment Variables
 
@@ -57,11 +63,15 @@ LAZYCLAUDE_HOST_TMUX      -- remote host tmux socket (SSH remote sessions)
 
 LAZYCLAUDE_HOOK_PORT      -- Injected at hook time (server port discovery)
 LAZYCLAUDE_HOOK_TOKEN     -- Injected at hook time (server auth token)
+
+LAZYCLAUDE_REMOTE_HOST    -- Set during remote session to identify host
 ```
 
-Variables injected via `--settings` flag during setup:
+Variables injected via `--settings` flag during setup (local TUI only):
 - `LAZYCLAUDE_HOOK_PORT` -- used by PreToolUse hook for /notify POST
 - `LAZYCLAUDE_HOOK_TOKEN` -- used by PreToolUse hook for server auth
+
+**daemon-arch:** Remote daemons discover their own port/token via lock file scanning (findAliveLockJS)
 
 ## Claude Code Hook Integration
 

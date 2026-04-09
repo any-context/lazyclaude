@@ -1,5 +1,7 @@
 # Plan: リモート機能の統一修正
 
+**Status:** IMPLEMENTED (daemon-arch branch)
+
 ## コンセプト
 
 **ローカルの実装がそのままリモートで動作する。通信の部分はしょうがないので、リモート用を作る。**
@@ -26,14 +28,22 @@
 
 ## 詳細設計
 
-### 1. mirror window の命名
+### 1. mirror window の命名と grouped tmux session
 
 mirror window のプレフィックスは `rm-` を使用（`lc-` ではない）。
 理由: GC の SyncWithTmux は `lc-` プレフィックスで window name と session ID をマッチングする。`lc-` を使うと GC がローカルセッションと混同して状態を破壊する。
 
+**Implemented:** Grouped tmux sessions (tmux new-session -t lazyclaude -s {localWindowName})
+- Each mirror gets its own grouped session (named after localWindowName)
+- destroy-unattached=on so the session cleans up when SSH drops
+- Independent window selection per mirror
+
 ```
 ローカルセッション: lc-abcd1234  (lc- + session ID[:8])
 リモート mirror:    rm-abcd1234  (rm- + remote session ID[:8])
+
+Grouped session per mirror:
+  tmux new-session -t lazyclaude -s {localWindowName} \; set-option destroy-unattached on \; select-window -t {remoteWindow}
 ```
 
 SyncWithTmux の window name マッチング: `rm-` プレフィックスは既存の `lc-` マッチングロジックの対象外。GC は mirror window を無視する。mirror window のライフサイクルは guiCompositeAdapter が管理する。
@@ -42,20 +52,34 @@ session.WindowName() に影響しない。WindowName() は Session.ID から `lc
 
 ### 2. mirror window の SSH コマンド（Shell injection 対策）
 
-host はユーザー入力。直接 `fmt.Sprintf` で展開しない。
-既存の `runSSHInteractive` (remote_provider.go) の base64 エンコードパターンを使用:
+**Implemented in gui_adapter.go:createMirrorWindow**
+
+host はユーザー入力。直接 `fmt.Sprintf` で展開しない。base64 エンコードパターンで安全に処理:
 
 ```go
-remoteCmd := fmt.Sprintf("tmux -L lazyclaude attach-session -t lazyclaude:lc-%s", remoteID[:8])
+remoteCmd := fmt.Sprintf(
+    "tmux -L lazyclaude set-option -t lazyclaude window-size largest 2>/dev/null; "+
+    "tmux -L lazyclaude new-session -t lazyclaude -s %s "+
+    "\\; set-option destroy-unattached on "+
+    "\\; select-window -t %s",
+    daemon.PosixQuote(localWindowName),
+    daemon.PosixQuote(remoteWindow),
+)
 encoded := base64.StdEncoding.EncodeToString([]byte(remoteCmd))
-sshHost, port := splitHostPort(host)
-args := []string{"-t"}
+sshHost, port := daemon.SplitHostPort(host)
+sshArgs := "ssh -t"
 if port != "" {
-    args = append(args, "-p", port)
+    sshArgs += " -p " + port
 }
-args = append(args, sshHost, fmt.Sprintf("eval \"$(echo %s | base64 -d)\"", encoded))
-// tmux new-window に渡す command は exec ssh <args...>
+sshArgs += " " + sshHost
+command := fmt.Sprintf("exec %s eval \"$(echo %s | base64 -d)\"", sshArgs, encoded)
 ```
+
+Key details:
+- `PosixQuote()` for safe shell quoting of strings passed to tmux
+- Base64 encoding prevents injection via host or window name
+- `new-session -t lazyclaude -s {localWindowName}` creates grouped session
+- `destroy-unattached on` cleans up when SSH drops
 
 ### 3. ローカル Store エントリ
 
@@ -79,20 +103,36 @@ pane が alive → Running、dead → Dead。
 
 ### 4. セッション作成フロー
 
+**Implemented in gui_adapter.go**
+
 ```
 n 押下 (リモートプロジェクト上)
   → guiCompositeAdapter.Create(path)
-  → host を判定 (pendingHost or currentHostFn)
-  → ensureRemoteConnected(host) で daemon 接続
-  → daemon API POST /session/create → リモートセッション作成 (lc-xxxx)
-  → レスポンスから session ID, window name 取得
-  → ローカル tmux -L lazyclaude に mirror window 作成 (rm-xxxx)
-     command: exec ssh -t host eval "$(echo BASE64 | base64 -d)"
-  → ローカル Store に session 追加 (Host=host, TmuxWindow=rm-xxxx)
+  → resolveHost() で host を判定 (cachedHost or pendingHost)
+  → createWithHost(path, host) 呼び出し
+  → 現在のパスを placeholder セッションで表示（optimistic UI）
+  → completeRemoteCreate() が bg goroutine で実行:
+     a. ensureRemoteConnected(host) で daemon 接続（lazyConn で once-only）
+     b. resolveRemotePath(localPath, host) で remote CWD を取得
+     c. rp.CreateSession(remotePath) → daemon API POST /session/create (remote tmux)
+     d. ensureMirrorForRemoteSession() で mirror window 作成:
+        - createMirrorWindow(host, remoteWindow, localWindowName)
+        - grouped tmux session + base64-encoded SSH attach command
+     e. PostCreateHook が呼ばれて local store に session 追加
+     f. placeholder を削除して本物の session に置き換え
   → サイドバーに表示、preview が動く
 ```
 
+Key behavioral details:
+- **Optimistic creation**: UI shows placeholder immediately, real session added in background
+- **LazyConn pattern**: ensureRemoteConnected uses sync.Once per host for exactly one connection
+- **Path resolution**: resolveRemotePath() calls daemon API GET /cwd to get remote CWD
+- **PostCreateHook pattern**: RemoteProvider calls hook after remote session creation to set up mirror
+- **Placeholder cleanup**: if any step fails, failPlaceholder() marks it dead; user sees error in status
+
 ### 5. セッション削除フロー（双方向）
+
+**Implemented in gui_adapter.go:Delete and local_provider.go:Delete**
 
 ```
 d 押下
@@ -107,6 +147,11 @@ d 押下
 
 順序: daemon API 先 → ローカル後。daemon API が失敗してもローカルは削除（リモートは GC が掃除）。
 
+**Implementation details:**
+- `guiCompositeAdapter.Delete()` routes to local or remote via `session.Host`
+- Remote: calls `rp.DeleteSession()` then `a.localMgr.Delete()` to remove mirror
+- Local: calls `a.localMgr.Delete()` which handles tmux window cleanup
+
 ### 6. リネームフロー（双方向）
 
 ```
@@ -120,16 +165,24 @@ R 押下
 
 ### 7. `c` キー接続時の既存セッション mirror 化
 
+**Implemented in root.go:connectRemoteHost**
+
 ```
 c → AERO 接続
   → connectRemoteHost(host) → daemon 起動、tunnel 確立
   → daemon API GET /sessions → 既存リモートセッション一覧
   → 各セッションに対して:
-    1. ローカル tmux に mirror window 作成 (rm-xxxx)
-    2. ローカル Store に session 追加 (Host=host)
+    1. ensureMirrorForRemoteSession() で mirror window 作成
+    2. ローカル Store に session 追加 (Host=host, TmuxWindow=rm-xxxx)
   → SSE 開始 (activity/通知)
   → サイドバーにリモートセッション全て表示
 ```
+
+**Session and Role propagation:**
+- API response `SessionCreateResponse` includes `Role` field ("pm", "worker", or empty)
+- Session persisted to local store with `session.Role` field
+- PM/Worker sessions displayed with `[PM]` or `[W]` prefix in sidebar
+- Role information preserved across daemon restarts (stored in state.json)
 
 ### 8. SSH 切断時のハンドリング
 
@@ -275,6 +328,18 @@ currentSessionHost() は app.go に残す（gui_adapter が参照する関数と
 
 1つの Worker。変更が密結合。
 
+## 実装済みの変更
+
+| Component | Change | File |
+|-----------|--------|------|
+| GUI Adapter | New composite adapter with lazy remote connection, optimistic UI | cmd/lazyclaude/gui_adapter.go |
+| Mirror Windows | Grouped tmux sessions with base64-encoded SSH commands | gui_adapter.go:createMirrorWindow |
+| Session Store | `Host` and `Role` fields propagated from daemon response | internal/session/store.go |
+| Remote Provider | PostCreateHook pattern for mirror creation | internal/daemon/remote_provider.go |
+| API Response | SessionCreateResponse includes Role field | internal/daemon/api.go |
+| Local Provider | Routes through composite adapter for dual local/remote | cmd/lazyclaude/local_provider.go |
+| Root.go | connectRemoteHost with existing session mirror discovery | cmd/lazyclaude/root.go |
+
 ## 検証
 
 1. `go build ./...` パス
@@ -291,6 +356,20 @@ currentSessionHost() は app.go に残す（gui_adapter が参照する関数と
    - 1/2/3 → キー送信
    - Activity 状態がサイドバーに反映
    - ツール通知ポップアップが表示
+   - PM/Worker セッションが正しいロール表示で表示
 6. SSH 切断テスト:
    - SSH 接続を切断 → mirror window が dead → サイドバーに反映
    - `c` で再接続 → RespawnPane で復活
+
+## リモートリセットチェックリスト
+
+リモートセッションをリセットする際は以下全て確認（see .claude/memory/feedback_remote_reset.md）:
+
+1. リモート daemon プロセス停止
+2. リモート tmux サーバー停止
+3. リモート state.json 削除
+4. リモート daemon.json 削除
+5. リモート tmux ソケット削除
+6. リモート一時ファイル削除
+7. ローカルの rm- mirror windows 削除
+8. ローカル state.json からリモートセッション削除

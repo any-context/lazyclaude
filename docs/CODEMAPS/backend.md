@@ -1,8 +1,8 @@
-<!-- Generated: 2026-04-01 | Files scanned: 154 src | Token estimate: ~850 -->
+<!-- Last Updated: 2026-04-08 | daemon-arch branch with mirror windows + PostCreateHook + Role propagation -->
 
 # Backend
 
-**Last Updated:** 2026-04-01
+**Last Updated:** 2026-04-08 (daemon-arch)
 
 ## CLI Commands (Cobra)
 
@@ -10,6 +10,7 @@
 lazyclaude           -- Interactive TUI (default), flags: --debug, --log-file
 lazyclaude server    -- MCP daemon, flags: --port, --token
 lazyclaude setup     -- Install hooks + keybindings (--settings flag)
+lazyclaude daemon    -- SSH daemon management (internal, used for remote hosts)
 lazyclaude diff      -- Diff viewer popup (internal use)
 lazyclaude tool      -- Tool confirmation popup (internal use)
 ```
@@ -54,11 +55,33 @@ server/ensure.go       (169 lines) -- health checks + startup
 server/jsonrpc.go      -- JSON-RPC protocol utilities
 ```
 
+## Daemon Architecture (internal/daemon/)
+
+**Remote session management via HTTP API with mirror window strategy**
+
+```
+composite_provider.go  -- Unified local+remote provider routing via CompositeProvider
+remote_provider.go     -- HTTP client for remote daemon API
+  PostCreateHook      -- Called after remote session creation for mirror setup
+  ConnectionManager   -- SSH tunnel + daemon connection lifecycle
+server.go            -- Remote daemon HTTP server (runs on remote host)
+api.go               -- SessionCreateResponse (includes Role field), SessionCreateRequest
+client.go            -- HTTP session client (local TUI <-> remote daemon)
+http_client.go       -- Low-level HTTP utilities
+```
+
+**Key patterns:**
+- Functional option: `WithPostCreate(hook PostCreateHook)` for side-effects
+- Remote daemon API includes: POST /session/create, DELETE /session/{id}, POST /session/{id}/rename, GET /sessions, GET /cwd
+- Response includes: ID, Name, Path, TmuxWindow, Role ("pm", "worker", or empty)
+
 ## Session Management (internal/session/)
 
 ```
 manager.go     (667+ lines) -- CRUD, tmux sync, project grouping, role management
 store.go       (518 lines) -- JSON persistence (~/.local/share/lazyclaude/state.json)
+  Fields       -- ID, Name, Path, Host (remote hostname), TmuxWindow (local mirror), Role
+  SyncWithTmux -- Detects rm- and lc- windows, ignores external tmux changes
 service.go     -- SessionService interface
 project.go     -- project grouping by git root
 role.go        -- PM/Worker role management + session creation
@@ -128,3 +151,32 @@ Events published by server:
 - `ActivityNotification` (ActivityState + tool name + window ID)
 - `ToolNotification` (permission prompts)
 - Generic `Event` for pubsub
+
+## GUI Composite Adapter (cmd/lazyclaude/)
+
+**Bridge between GUI and dual local/remote session management**
+
+```
+gui_adapter.go         -- guiCompositeAdapter implements gui.SessionProvider
+  CompositeProvider    -- Routes to LocalProvider or RemoteProvider by host
+  resolveHost()        -- Resolves current operation host (cached or pending)
+  ensureRemoteConnected() -- Lazy remote connection (sync.Once per host)
+  createWithHost()     -- Optimistic local session creation
+  completeRemoteCreate() -- Background session creation + mirror window setup
+  createMirrorWindow() -- Creates grouped tmux session with SSH attach command
+  remoteProvider()     -- Type assertion escape hatch for Delete/Rename
+
+local_provider.go      -- LocalDaemonProvider implements daemon.SessionProvider
+  Routes to session.Manager for local-only operations
+
+Lazy connection pattern:
+  lazyConn struct with sync.Once ensures exactly one connectFn call per host
+  Subsequent callers see cached result without retrying
+```
+
+**Key behavioral patterns:**
+- **Optimistic UI**: Create shows placeholder immediately, finishes in background
+- **Lazy remote connection**: First remote operation triggers connection (not on connect dialog alone)
+- **Path resolution**: resolveRemotePath() calls daemon GET /cwd after connection established
+- **PostCreateHook**: RemoteProvider calls hook after API response to set up mirror
+- **Grouped sessions**: Mirror windows use `new-session -t lazyclaude -s {localWindowName}` for independent selection
