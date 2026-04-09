@@ -127,10 +127,10 @@ func NewDaemonServer(
 	// broker for SSE delivery to the remote TUI.
 	// Hooks use "X-Claude-Code-Ide-Authorization" header (not X-Daemon-Authorization),
 	// so they use withHookAuth instead of withAuth.
-	mux.HandleFunc("POST /notify", s.withHookAuth(s.handleHookNotify))
-	mux.HandleFunc("POST /stop", s.withHookAuth(s.handleHookStop))
-	mux.HandleFunc("POST /session-start", s.withHookAuth(s.handleHookSessionStart))
-	mux.HandleFunc("POST /prompt-submit", s.withHookAuth(s.handleHookPromptSubmit))
+	mux.HandleFunc("POST /notify", s.withAuth(s.handleHookNotify))
+	mux.HandleFunc("POST /stop", s.withAuth(s.handleHookStop))
+	mux.HandleFunc("POST /session-start", s.withAuth(s.handleHookSessionStart))
+	mux.HandleFunc("POST /prompt-submit", s.withAuth(s.handleHookPromptSubmit))
 
 	s.httpSrv = &http.Server{Handler: mux}
 	return s
@@ -202,25 +202,17 @@ func (s *DaemonServer) Port() int {
 
 // --- Auth middleware ---
 
+// withAuth authenticates requests using any of the supported auth headers:
+// X-Daemon-Authorization (daemon API clients), X-Claude-Code-Ide-Authorization
+// (hooks via lock file), or X-Auth-Token (CLI tools like lazyclaude sessions).
 func (s *DaemonServer) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := r.Header.Get(AuthHeader)
-		if subtle.ConstantTimeCompare([]byte(token), []byte(s.config.Token)) != 1 {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next(w, r)
-	}
-}
-
-// withHookAuth authenticates hook requests from Claude Code.
-// Hooks use "X-Claude-Code-Ide-Authorization" (set by lock file discovery),
-// not the daemon's "X-Daemon-Authorization" header.
-func (s *DaemonServer) withHookAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		token := r.Header.Get("X-Claude-Code-Ide-Authorization")
 		if token == "" {
-			token = r.Header.Get(AuthHeader)
+			token = r.Header.Get("X-Claude-Code-Ide-Authorization")
+		}
+		if token == "" {
+			token = r.Header.Get("X-Auth-Token")
 		}
 		if subtle.ConstantTimeCompare([]byte(token), []byte(s.config.Token)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
