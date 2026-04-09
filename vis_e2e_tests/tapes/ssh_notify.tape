@@ -28,12 +28,18 @@ Enter
 Wait+Screen /Claude Code/
 Sleep 3s
 
-# Ask Claude to create a file (triggers Write tool -> permission popup)
+# Ask Claude to create a file (triggers Write tool -> permission)
 Escape
 Wait+Screen /❯/
 Type "create a file called /tmp/test-notify.txt with the text hello" Enter
+Sleep 5s
 
-# Wait for the permission popup overlay (C-y to approve)
+# Exit fullscreen BEFORE the permission popup arrives
+# The popup notification shows up as gocui overlay in session list view
+Ctrl+\
+Sleep 2s
+
+# Wait for popup notification with C-y (approve) button
 Wait+Screen /C-y/
 Sleep 3s
 
