@@ -602,11 +602,23 @@ func (a *guiCompositeAdapter) HistorySize(id string) (int, error) {
 }
 
 func (a *guiCompositeAdapter) PendingNotifications() []*model.ToolNotification {
-	notifications, err := notify.ReadAll(a.paths.RuntimeDir)
-	if err != nil || len(notifications) == 0 {
+	// Local notifications from file system (written by hooks when broker
+	// is not active). When the in-process broker is wired, the server
+	// publishes to the broker instead of writing files, so ReadAll
+	// returns empty — no duplicates.
+	var result []*model.ToolNotification
+	if local, err := notify.ReadAll(a.paths.RuntimeDir); err == nil {
+		result = append(result, local...)
+	}
+
+	// Remote notifications buffered by SSE in each RemoteProvider.
+	// Window names are remapped from lc-xxxx to rm-xxxx by CompositeProvider.
+	result = append(result, a.cp.PendingNotifications()...)
+
+	if len(result) == 0 {
 		return nil
 	}
-	return notifications
+	return result
 }
 
 func (a *guiCompositeAdapter) SendChoice(window string, c gui.Choice) error {
@@ -618,7 +630,14 @@ func (a *guiCompositeAdapter) AttachSession(id string) error {
 }
 
 func (a *guiCompositeAdapter) LaunchLazygit(path string) error {
-	return a.cp.LaunchLazygit(path, "")
+	host := a.resolveHost()
+	if err := a.ensureRemoteConnected(host); err != nil {
+		return err
+	}
+	if host != "" {
+		path = a.resolveRemotePath(path, host)
+	}
+	return a.cp.LaunchLazygit(path, host)
 }
 
 func (a *guiCompositeAdapter) CreateWorktree(name, prompt, projectRoot string) error {

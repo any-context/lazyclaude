@@ -2,7 +2,10 @@ package daemon
 
 import (
 	"fmt"
+	"strings"
 	"sync"
+
+	"github.com/any-context/lazyclaude/internal/core/model"
 )
 
 // --- Small interfaces composing SessionProvider ---
@@ -341,4 +344,45 @@ func (c *CompositeProvider) providerForSession(sessionID string) SessionProvider
 		}
 	}
 	return nil
+}
+
+// notificationDrainer is implemented by providers that buffer tool
+// notifications for later retrieval (e.g. RemoteProvider via SSE).
+type notificationDrainer interface {
+	PendingNotifications() []*model.ToolNotification
+}
+
+// PendingNotifications collects buffered tool notifications from all
+// connected remote providers. Window names are remapped from the remote
+// "lc-" prefix to the local mirror "rm-" prefix so that the GUI can
+// match notifications to mirror windows.
+func (c *CompositeProvider) PendingNotifications() []*model.ToolNotification {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []*model.ToolNotification
+	for _, sp := range c.remotes {
+		if sp.ConnectionState() != Connected {
+			continue
+		}
+		nd, ok := sp.(notificationDrainer)
+		if !ok {
+			continue
+		}
+		for _, n := range nd.PendingNotifications() {
+			mapped := *n
+			mapped.Window = remapRemoteWindow(n.Window)
+			result = append(result, &mapped)
+		}
+	}
+	return result
+}
+
+// remapRemoteWindow converts a remote tmux window name ("lc-xxxx") to
+// the corresponding local mirror window name ("rm-xxxx").
+func remapRemoteWindow(window string) string {
+	if strings.HasPrefix(window, "lc-") {
+		return "rm-" + window[3:]
+	}
+	return window
 }

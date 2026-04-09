@@ -325,9 +325,13 @@ func (a *App) Run() error {
 					// never blocks on remote API calls.
 					a.refreshSessionsAsync()
 
-					// When broker is wired (in-process server), notifications
-					// arrive via brokerCh — skip file polling to avoid duplicates.
-					if a.sessions != nil && !a.notify.HasBroker() {
+					// Poll PendingNotifications for remote SSE-buffered
+					// notifications (which never go through the broker) and,
+					// when no broker is wired, also for local file-based
+					// notifications. When the broker IS active, local
+					// notifications arrive via brokerCh and ReadAll returns
+					// empty, so no duplicates occur.
+					if a.sessions != nil {
 						pending := a.sessions.PendingNotifications()
 						// Cache the pending set for badge rendering in layout.
 						// Must happen before showToolPopup because ReadAll
