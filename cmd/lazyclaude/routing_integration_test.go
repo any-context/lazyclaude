@@ -41,6 +41,12 @@ import (
 // rename, which bypass the CompositeProvider and go through this type
 // directly.
 type fakeRemoteSessionAPI struct {
+	// nameStore drives session name generation so the fake matches
+	// production's behaviour (Manager.Create calls Store.GenerateName).
+	// The store is private to the fake and never persisted — it exists
+	// only so we can call GenerateName without hard-coding names.
+	nameStore *session.Store
+
 	// createCalls records the remote path passed to CreateSession so that
 	// n/N tests can assert what was sent to the remote daemon after
 	// resolveRemotePath translation.
@@ -57,7 +63,7 @@ func (f *fakeRemoteSessionAPI) CreateSession(path string) (*daemon.SessionCreate
 	id := uuid.New().String()
 	return &daemon.SessionCreateResponse{
 		ID:         id,
-		Name:       "remote-" + id[:4],
+		Name:       f.nameStore.GenerateName(path),
 		Path:       path,
 		TmuxWindow: "lc-" + id[:8],
 	}, nil
@@ -373,7 +379,9 @@ func newIntegrationStack(t *testing.T, cursor cursorState, pendingHost string) *
 	hostMgr := NewRemoteHostManager(func(_ string) error { return nil })
 	hostMgr.MarkConnected(integrationRemoteHost)
 
-	fakeRemote := &fakeRemoteSessionAPI{}
+	fakeRemote := &fakeRemoteSessionAPI{
+		nameStore: session.NewStore(""),
+	}
 	// Post-create hook mirrors production: every remote CreateWorktree /
 	// CreatePMSession / CreateWorkerSession must funnel through
 	// MirrorManager.CreateMirror so that the resulting mirror session
@@ -477,6 +485,55 @@ func projectHostOf(p session.Project) string {
 	return ""
 }
 
+// assertSingleNonPMSession verifies that the store contains exactly one
+// session with the expected Path/Host/Role, and that this session lives
+// inside a project keyed by (expectProjectPath, expectHost). Use this
+// helper for n, N, w, worker cases (anything that is NOT a PM session).
+//
+// The linkage check (session ID matches project.Sessions[0].ID) guards
+// against regressions where the session lands in the store but ends up
+// attached to the wrong project tuple — a failure mode that a looser
+// "non-nil project" assertion would miss.
+func assertSingleNonPMSession(t *testing.T, mgr *session.Manager,
+	expectProjectPath, expectSessionPath, expectHost string, expectRole session.Role,
+) {
+	t.Helper()
+	sessions := mgr.Sessions()
+	require.Len(t, sessions, 1, "expected exactly one session in the store")
+	sess := sessions[0]
+	assert.Equal(t, expectSessionPath, sess.Path, "session.Path")
+	assert.Equal(t, expectHost, sess.Host, "session.Host")
+	assert.Equal(t, expectRole, sess.Role, "session.Role")
+
+	proj := findProjectByPathHost(mgr, expectProjectPath, expectHost)
+	require.NotNil(t, proj, "project (%q, %q) must exist", expectProjectPath, expectHost)
+	require.Len(t, proj.Sessions, 1, "project must contain exactly one session")
+	assert.Equal(t, sess.ID, proj.Sessions[0].ID, "session must be linked to project.Sessions")
+	assert.Nil(t, proj.PM, "non-PM routing must not populate project.PM")
+}
+
+// assertSinglePMSession verifies that the store contains exactly one
+// session with Role=RolePM at the expected project, and that the PM is
+// attached as project.PM (not project.Sessions). Use this helper for P
+// cases.
+func assertSinglePMSession(t *testing.T, mgr *session.Manager,
+	expectProjectPath, expectSessionPath, expectHost string,
+) {
+	t.Helper()
+	sessions := mgr.Sessions()
+	require.Len(t, sessions, 1, "expected exactly one session in the store")
+	sess := sessions[0]
+	assert.Equal(t, expectSessionPath, sess.Path, "PM session.Path")
+	assert.Equal(t, expectHost, sess.Host, "PM session.Host")
+	assert.Equal(t, session.RolePM, sess.Role, "PM session.Role")
+
+	proj := findProjectByPathHost(mgr, expectProjectPath, expectHost)
+	require.NotNil(t, proj, "project (%q, %q) must exist", expectProjectPath, expectHost)
+	require.NotNil(t, proj.PM, "P routing must populate project.PM")
+	assert.Equal(t, sess.ID, proj.PM.ID, "PM session must be linked to project.PM")
+	assert.Empty(t, proj.Sessions, "P routing must not populate project.Sessions")
+}
+
 // --- n (CreateSession) ×4 ----------------------------------------------------
 
 // 1. n, cursor on local node, pendingHost=AERO → stays local (plan table row 1)
@@ -486,14 +543,7 @@ func TestIntegration_n_LocalCursor_StaysLocal(t *testing.T) {
 	require.NoError(t, s.adapter.Create(s.localProj))
 
 	assert.Empty(t, s.fakeRemote.createCalls, "local cursor must not invoke remote API")
-
-	sessions := s.mgr.Sessions()
-	require.Len(t, sessions, 1)
-	assert.Empty(t, sessions[0].Host, "session must be local")
-	assert.Equal(t, s.localProj, sessions[0].Path)
-
-	proj := findProjectByPathHost(s.mgr, s.localProj, "")
-	require.NotNil(t, proj, "local project must exist")
+	assertSingleNonPMSession(t, s.mgr, s.localProj, s.localProj, "", session.RoleNone)
 }
 
 // 2. n, cursor on remote node (/remote/proj), pendingHost=AERO → routes to AERO
@@ -506,11 +556,9 @@ func TestIntegration_n_RemoteCursor_RoutesToRemote(t *testing.T) {
 
 	assert.Equal(t, []string{remoteProj}, s.fakeRemote.createCalls,
 		"remote CreateSession must receive the cursor-provided remote path verbatim")
-
-	proj := findProjectByPathHost(s.mgr, remoteProj, integrationRemoteHost)
-	require.NotNil(t, proj, "remote project must exist")
-	require.Len(t, proj.Sessions, 1)
-	assert.Equal(t, integrationRemoteHost, proj.Sessions[0].Host)
+	// For n (plain create) the mirror session's Path matches the remote
+	// project root and its Role is RoleNone.
+	assertSingleNonPMSession(t, s.mgr, remoteProj, remoteProj, integrationRemoteHost, session.RoleNone)
 }
 
 // 3. n, no cursor, pendingHost=AERO → path "." resolved via remoteCWD
@@ -525,10 +573,7 @@ func TestIntegration_n_NoCursor_FallsBackToPending(t *testing.T) {
 
 	assert.Equal(t, []string{s.fakeRP.remoteCWD}, s.fakeRemote.createCalls,
 		"remote CreateSession must receive the remote CWD returned by QueryCWD")
-
-	proj := findProjectByPathHost(s.mgr, s.fakeRP.remoteCWD, integrationRemoteHost)
-	require.NotNil(t, proj, "remote project at remote CWD must exist")
-	require.Len(t, proj.Sessions, 1)
+	assertSingleNonPMSession(t, s.mgr, s.fakeRP.remoteCWD, s.fakeRP.remoteCWD, integrationRemoteHost, session.RoleNone)
 }
 
 // 4. n, no cursor, pendingHost="" → stays local at the cwd project path
@@ -538,10 +583,7 @@ func TestIntegration_n_NoCursor_NoPending_StaysLocal(t *testing.T) {
 	require.NoError(t, s.adapter.Create(s.localProj))
 
 	assert.Empty(t, s.fakeRemote.createCalls)
-
-	proj := findProjectByPathHost(s.mgr, s.localProj, "")
-	require.NotNil(t, proj)
-	require.Len(t, proj.Sessions, 1)
+	assertSingleNonPMSession(t, s.mgr, s.localProj, s.localProj, "", session.RoleNone)
 }
 
 // --- N (CreateAtPaneCWD) ×4 --------------------------------------------------
@@ -555,10 +597,7 @@ func TestIntegration_N_LocalCursor_RoutesToPending(t *testing.T) {
 
 	assert.Equal(t, []string{s.fakeRP.remoteCWD}, s.fakeRemote.createCalls,
 		"N must bypass resolveHost() and route to pendingHost even with a local cursor")
-
-	proj := findProjectByPathHost(s.mgr, s.fakeRP.remoteCWD, integrationRemoteHost)
-	require.NotNil(t, proj)
-	require.Len(t, proj.Sessions, 1)
+	assertSingleNonPMSession(t, s.mgr, s.fakeRP.remoteCWD, s.fakeRP.remoteCWD, integrationRemoteHost, session.RoleNone)
 }
 
 // 6. N, cursor on remote node, pendingHost=AERO → pendingHost + remoteCWD
@@ -569,9 +608,7 @@ func TestIntegration_N_RemoteCursor_RoutesToPending(t *testing.T) {
 	waitUntilStoreSettled(t, s.mgr, 1)
 
 	assert.Equal(t, []string{s.fakeRP.remoteCWD}, s.fakeRemote.createCalls)
-
-	proj := findProjectByPathHost(s.mgr, s.fakeRP.remoteCWD, integrationRemoteHost)
-	require.NotNil(t, proj)
+	assertSingleNonPMSession(t, s.mgr, s.fakeRP.remoteCWD, s.fakeRP.remoteCWD, integrationRemoteHost, session.RoleNone)
 }
 
 // 7. N, no cursor, pendingHost=AERO → pendingHost + remoteCWD
@@ -582,8 +619,7 @@ func TestIntegration_N_NoCursor_RoutesToPending(t *testing.T) {
 	waitUntilStoreSettled(t, s.mgr, 1)
 
 	assert.Equal(t, []string{s.fakeRP.remoteCWD}, s.fakeRemote.createCalls)
-	proj := findProjectByPathHost(s.mgr, s.fakeRP.remoteCWD, integrationRemoteHost)
-	require.NotNil(t, proj)
+	assertSingleNonPMSession(t, s.mgr, s.fakeRP.remoteCWD, s.fakeRP.remoteCWD, integrationRemoteHost, session.RoleNone)
 }
 
 // 8. N, no cursor, pendingHost="" → stays local at the pane cwd
@@ -593,12 +629,9 @@ func TestIntegration_N_NoCursor_NoPending_StaysLocal(t *testing.T) {
 	require.NoError(t, s.adapter.CreateAtPaneCWD())
 
 	assert.Empty(t, s.fakeRemote.createCalls)
-
 	// localDaemonProvider.Create translates "." to filepath.Abs(".") =
-	// localProj, so the resulting project is at localProj.
-	proj := findProjectByPathHost(s.mgr, s.localProj, "")
-	require.NotNil(t, proj)
-	require.Len(t, proj.Sessions, 1)
+	// localProj, so the resulting session's Path is localProj.
+	assertSingleNonPMSession(t, s.mgr, s.localProj, s.localProj, "", session.RoleNone)
 }
 
 // --- w (CreateWorktree) ×4 ---------------------------------------------------
@@ -615,11 +648,7 @@ func TestIntegration_w_LocalCursor_StaysLocal(t *testing.T) {
 	require.NoError(t, err, "git worktree add must have created the directory")
 	assert.True(t, info.IsDir())
 
-	proj := findProjectByPathHost(s.mgr, s.localProj, "")
-	require.NotNil(t, proj)
-	require.Len(t, proj.Sessions, 1)
-	assert.Equal(t, wtPath, proj.Sessions[0].Path)
-	assert.Equal(t, session.RoleWorker, proj.Sessions[0].Role)
+	assertSingleNonPMSession(t, s.mgr, s.localProj, wtPath, "", session.RoleWorker)
 }
 
 // 10. w, cursor on remote node → fake CreateWorktree with the remote project path
@@ -632,11 +661,12 @@ func TestIntegration_w_RemoteCursor_RoutesToRemote(t *testing.T) {
 	require.Len(t, s.fakeRP.worktreeCalls, 1)
 	assert.Equal(t, remoteProj, s.fakeRP.worktreeCalls[0].Target.ProjectRoot)
 	assert.Equal(t, "feat-r", s.fakeRP.worktreeCalls[0].Name)
-
-	proj := findProjectByPathHost(s.mgr, remoteProj, integrationRemoteHost)
-	require.NotNil(t, proj)
-	require.Len(t, proj.Sessions, 1)
-	assert.Equal(t, integrationRemoteHost, proj.Sessions[0].Host)
+	// fakeSessionProvider.CreateWorktree builds a synthetic
+	// SessionCreateResponse whose Path is projectRoot/.lazyclaude/worktrees/<name>
+	// and Role="worker"; the PostCreateHook then routes it through
+	// MirrorManager.CreateMirror into the local store.
+	wtPath := filepath.Join(remoteProj, session.WorktreePathSegment, "feat-r")
+	assertSingleNonPMSession(t, s.mgr, remoteProj, wtPath, integrationRemoteHost, session.RoleWorker)
 }
 
 // 11. w, no cursor, pendingHost=AERO → resolveRemotePath("." → remoteCWD), fake receives remoteCWD
@@ -648,9 +678,8 @@ func TestIntegration_w_NoCursor_FallsBackToPending(t *testing.T) {
 	require.Len(t, s.fakeRP.worktreeCalls, 1)
 	assert.Equal(t, s.fakeRP.remoteCWD, s.fakeRP.worktreeCalls[0].Target.ProjectRoot,
 		"remote worktree projectRoot must be the resolved remote CWD")
-	proj := findProjectByPathHost(s.mgr, s.fakeRP.remoteCWD, integrationRemoteHost)
-	require.NotNil(t, proj)
-	require.Len(t, proj.Sessions, 1)
+	wtPath := filepath.Join(s.fakeRP.remoteCWD, session.WorktreePathSegment, "feat-cwd")
+	assertSingleNonPMSession(t, s.mgr, s.fakeRP.remoteCWD, wtPath, integrationRemoteHost, session.RoleWorker)
 }
 
 // 12. w, no cursor, no pending → local git worktree add at localProj
@@ -663,11 +692,7 @@ func TestIntegration_w_NoCursor_NoPending_StaysLocal(t *testing.T) {
 	wtPath := filepath.Join(s.localProj, session.WorktreePathSegment, "feat-12")
 	_, err := os.Stat(wtPath)
 	require.NoError(t, err)
-
-	proj := findProjectByPathHost(s.mgr, s.localProj, "")
-	require.NotNil(t, proj)
-	require.Len(t, proj.Sessions, 1)
-	assert.Equal(t, wtPath, proj.Sessions[0].Path)
+	assertSingleNonPMSession(t, s.mgr, s.localProj, wtPath, "", session.RoleWorker)
 }
 
 // --- W (ListWorktrees) ×4 ----------------------------------------------------
@@ -726,10 +751,9 @@ func TestIntegration_P_LocalCursor_StaysLocal(t *testing.T) {
 	require.NoError(t, s.adapter.CreatePMSession(s.localProj))
 
 	assert.Empty(t, s.fakeRP.pmCalls)
-	proj := findProjectByPathHost(s.mgr, s.localProj, "")
-	require.NotNil(t, proj)
-	require.NotNil(t, proj.PM, "local PM session must be stored under project.PM")
-	assert.Equal(t, session.RolePM, proj.PM.Role)
+	// session.Manager.CreatePMSession sets sess.Path = projectRoot, so the
+	// session path matches the project path for PM sessions.
+	assertSinglePMSession(t, s.mgr, s.localProj, s.localProj, "")
 }
 
 // 18. P, cursor on remote node → fake.pmCalls[0] == /remote/proj, mirror stored
@@ -740,12 +764,11 @@ func TestIntegration_P_RemoteCursor_RoutesToRemote(t *testing.T) {
 	require.NoError(t, s.adapter.CreatePMSession(remoteProj))
 
 	assert.Equal(t, []string{remoteProj}, s.fakeRP.pmCalls)
-
-	proj := findProjectByPathHost(s.mgr, remoteProj, integrationRemoteHost)
-	require.NotNil(t, proj)
-	require.NotNil(t, proj.PM)
-	assert.Equal(t, integrationRemoteHost, proj.PM.Host)
-	assert.Equal(t, session.RolePM, proj.PM.Role)
+	// fakeSessionProvider.CreatePMSession builds a synthetic response
+	// whose Path is the projectRoot and Role is "pm"; the PostCreateHook
+	// routes it through MirrorManager.CreateMirror into the local store
+	// as project.PM.
+	assertSinglePMSession(t, s.mgr, remoteProj, remoteProj, integrationRemoteHost)
 }
 
 // 19. P, no cursor, pendingHost=AERO → remoteCWD resolution + mirror stored
@@ -755,10 +778,7 @@ func TestIntegration_P_NoCursor_FallsBackToPending(t *testing.T) {
 	require.NoError(t, s.adapter.CreatePMSession("."))
 
 	assert.Equal(t, []string{s.fakeRP.remoteCWD}, s.fakeRP.pmCalls)
-
-	proj := findProjectByPathHost(s.mgr, s.fakeRP.remoteCWD, integrationRemoteHost)
-	require.NotNil(t, proj)
-	require.NotNil(t, proj.PM)
+	assertSinglePMSession(t, s.mgr, s.fakeRP.remoteCWD, s.fakeRP.remoteCWD, integrationRemoteHost)
 }
 
 // 20. P, no cursor, no pending → local PM at localProj
@@ -768,9 +788,7 @@ func TestIntegration_P_NoCursor_NoPending_StaysLocal(t *testing.T) {
 	require.NoError(t, s.adapter.CreatePMSession(s.localProj))
 
 	assert.Empty(t, s.fakeRP.pmCalls)
-	proj := findProjectByPathHost(s.mgr, s.localProj, "")
-	require.NotNil(t, proj)
-	require.NotNil(t, proj.PM)
+	assertSinglePMSession(t, s.mgr, s.localProj, s.localProj, "")
 }
 
 // --- worker (CreateWorkerSession) ×4 -----------------------------------------
@@ -782,13 +800,8 @@ func TestIntegration_worker_LocalCursor_StaysLocal(t *testing.T) {
 	require.NoError(t, s.adapter.CreateWorkerSession("work-21", "task", s.localProj))
 
 	assert.Empty(t, s.fakeRP.workerCalls)
-
-	proj := findProjectByPathHost(s.mgr, s.localProj, "")
-	require.NotNil(t, proj)
-	require.Len(t, proj.Sessions, 1)
-	assert.Equal(t, session.RoleWorker, proj.Sessions[0].Role)
 	wtPath := filepath.Join(s.localProj, session.WorktreePathSegment, "work-21")
-	assert.Equal(t, wtPath, proj.Sessions[0].Path)
+	assertSingleNonPMSession(t, s.mgr, s.localProj, wtPath, "", session.RoleWorker)
 }
 
 // 22. worker, cursor on remote node → fake.workerCalls[0] == /remote/proj
@@ -801,11 +814,8 @@ func TestIntegration_worker_RemoteCursor_RoutesToRemote(t *testing.T) {
 	require.Len(t, s.fakeRP.workerCalls, 1)
 	assert.Equal(t, remoteProj, s.fakeRP.workerCalls[0].Target.ProjectRoot)
 	assert.Equal(t, "work-22", s.fakeRP.workerCalls[0].Name)
-
-	proj := findProjectByPathHost(s.mgr, remoteProj, integrationRemoteHost)
-	require.NotNil(t, proj)
-	require.Len(t, proj.Sessions, 1)
-	assert.Equal(t, session.RoleWorker, proj.Sessions[0].Role)
+	wtPath := filepath.Join(remoteProj, session.WorktreePathSegment, "work-22")
+	assertSingleNonPMSession(t, s.mgr, remoteProj, wtPath, integrationRemoteHost, session.RoleWorker)
 }
 
 // 23. worker, no cursor, pendingHost=AERO → resolveRemotePath translates "." → remoteCWD
@@ -816,10 +826,8 @@ func TestIntegration_worker_NoCursor_FallsBackToPending(t *testing.T) {
 
 	require.Len(t, s.fakeRP.workerCalls, 1)
 	assert.Equal(t, s.fakeRP.remoteCWD, s.fakeRP.workerCalls[0].Target.ProjectRoot)
-
-	proj := findProjectByPathHost(s.mgr, s.fakeRP.remoteCWD, integrationRemoteHost)
-	require.NotNil(t, proj)
-	require.Len(t, proj.Sessions, 1)
+	wtPath := filepath.Join(s.fakeRP.remoteCWD, session.WorktreePathSegment, "work-23")
+	assertSingleNonPMSession(t, s.mgr, s.fakeRP.remoteCWD, wtPath, integrationRemoteHost, session.RoleWorker)
 }
 
 // 24. worker, no cursor, no pending → local worker at localProj
@@ -829,11 +837,8 @@ func TestIntegration_worker_NoCursor_NoPending_StaysLocal(t *testing.T) {
 	require.NoError(t, s.adapter.CreateWorkerSession("work-24", "task", s.localProj))
 
 	assert.Empty(t, s.fakeRP.workerCalls)
-
-	proj := findProjectByPathHost(s.mgr, s.localProj, "")
-	require.NotNil(t, proj)
-	require.Len(t, proj.Sessions, 1)
-	assert.Equal(t, session.RoleWorker, proj.Sessions[0].Role)
+	wtPath := filepath.Join(s.localProj, session.WorktreePathSegment, "work-24")
+	assertSingleNonPMSession(t, s.mgr, s.localProj, wtPath, "", session.RoleWorker)
 }
 
 // --- g (LaunchLazygit) ×2 — remote only --------------------------------------
@@ -863,15 +868,17 @@ func TestIntegration_g_NoCursor_FallsBackToPending(t *testing.T) {
 func TestIntegration_d_LocalSession(t *testing.T) {
 	s := newIntegrationStack(t, cursorState{}, "")
 
-	// Create a local session to delete.
+	// Create a local session to delete, and pre-verify the initial state.
 	require.NoError(t, s.adapter.Create(s.localProj))
-	require.Len(t, s.mgr.Sessions(), 1)
+	assertSingleNonPMSession(t, s.mgr, s.localProj, s.localProj, "", session.RoleNone)
 	sess := s.mgr.Sessions()[0]
 
 	require.NoError(t, s.adapter.Delete(sess.ID))
 
 	assert.Empty(t, s.fakeRemote.deleteCalls, "remote API must not be invoked for local session")
 	assert.Empty(t, s.mgr.Sessions(), "local store must be empty after delete")
+	assert.Nil(t, findProjectByPathHost(s.mgr, s.localProj, ""),
+		"project must be removed once its last session is deleted")
 
 	// tmux mock should have received a KillWindow for the local window.
 	assertKillWindowContains(t, s.tmuxMock, "lc-")
@@ -886,8 +893,8 @@ func TestIntegration_d_RemoteSession(t *testing.T) {
 	const remoteProj = "/remote/proj"
 	require.NoError(t, s.adapter.Create(remoteProj))
 	waitUntilStoreSettled(t, s.mgr, 1)
+	assertSingleNonPMSession(t, s.mgr, remoteProj, remoteProj, integrationRemoteHost, session.RoleNone)
 	sess := s.mgr.Sessions()[0]
-	require.Equal(t, integrationRemoteHost, sess.Host)
 
 	// Reset KillWindow history so we only see the delete-time kill.
 	s.tmuxMock.killedWindows = nil
@@ -897,6 +904,8 @@ func TestIntegration_d_RemoteSession(t *testing.T) {
 	assert.Equal(t, []string{sess.ID}, s.fakeRemote.deleteCalls,
 		"remote API Delete must be called with the session id")
 	assert.Empty(t, s.mgr.Sessions(), "local store must be empty after delete")
+	assert.Nil(t, findProjectByPathHost(s.mgr, remoteProj, integrationRemoteHost),
+		"remote project must be removed once its last session is deleted")
 
 	// Mirror window prefix is rm- per session.MirrorWindowName.
 	assertKillWindowContains(t, s.tmuxMock, "rm-")
@@ -909,7 +918,7 @@ func TestIntegration_R_LocalSession(t *testing.T) {
 	s := newIntegrationStack(t, cursorState{}, "")
 
 	require.NoError(t, s.adapter.Create(s.localProj))
-	require.Len(t, s.mgr.Sessions(), 1)
+	assertSingleNonPMSession(t, s.mgr, s.localProj, s.localProj, "", session.RoleNone)
 	sess := s.mgr.Sessions()[0]
 
 	require.NoError(t, s.adapter.Rename(sess.ID, "renamed-local"))
@@ -918,6 +927,15 @@ func TestIntegration_R_LocalSession(t *testing.T) {
 	updated := s.mgr.Store().FindByID(sess.ID)
 	require.NotNil(t, updated)
 	assert.Equal(t, "renamed-local", updated.Name)
+	// Verify the rename did not relocate the session: Path/Host/Role/
+	// project linkage must remain identical.
+	assert.Equal(t, s.localProj, updated.Path)
+	assert.Empty(t, updated.Host)
+	assert.Equal(t, session.RoleNone, updated.Role)
+	proj := findProjectByPathHost(s.mgr, s.localProj, "")
+	require.NotNil(t, proj)
+	require.Len(t, proj.Sessions, 1)
+	assert.Equal(t, sess.ID, proj.Sessions[0].ID)
 }
 
 // 30. R, remote session → fakeRemote.Rename + store.Name updated
@@ -927,8 +945,8 @@ func TestIntegration_R_RemoteSession(t *testing.T) {
 	const remoteProj = "/remote/proj"
 	require.NoError(t, s.adapter.Create(remoteProj))
 	waitUntilStoreSettled(t, s.mgr, 1)
+	assertSingleNonPMSession(t, s.mgr, remoteProj, remoteProj, integrationRemoteHost, session.RoleNone)
 	sess := s.mgr.Sessions()[0]
-	require.Equal(t, integrationRemoteHost, sess.Host)
 
 	require.NoError(t, s.adapter.Rename(sess.ID, "renamed-remote"))
 
@@ -936,6 +954,14 @@ func TestIntegration_R_RemoteSession(t *testing.T) {
 	updated := s.mgr.Store().FindByID(sess.ID)
 	require.NotNil(t, updated)
 	assert.Equal(t, "renamed-remote", updated.Name)
+	// Verify the rename preserved routing metadata.
+	assert.Equal(t, remoteProj, updated.Path)
+	assert.Equal(t, integrationRemoteHost, updated.Host)
+	assert.Equal(t, session.RoleNone, updated.Role)
+	proj := findProjectByPathHost(s.mgr, remoteProj, integrationRemoteHost)
+	require.NotNil(t, proj)
+	require.Len(t, proj.Sessions, 1)
+	assert.Equal(t, sess.ID, proj.Sessions[0].ID)
 }
 
 // --- tmux assertion helper ---------------------------------------------------
