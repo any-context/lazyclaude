@@ -54,7 +54,8 @@ func newDaemonCmd() *cobra.Command {
 			broker := event.NewBroker[model.Event]()
 			defer broker.Close()
 
-			// MCP server を in-process 起動 (hooks の受信用)
+			// Start MCP server in-process so Claude Code hooks are received
+			// by the existing server code and published to the shared broker.
 			mcpLogger := log.New(os.Stderr, "lazyclaude-mcp: ", log.LstdFlags)
 			mcpCfg := server.Config{
 				Port:       0,
@@ -64,16 +65,18 @@ func newDaemonCmd() *cobra.Command {
 				RuntimeDir: paths.RuntimeDir,
 			}
 			mcpSrv := server.New(mcpCfg, tmuxClient, mcpLogger, server.WithBroker(broker))
+			mcpSrv.SetSessionLister(&sessionListerAdapter{mgr: mgr})
+			mcpSrv.SetSessionCreator(&sessionCreatorAdapter{mgr: mgr})
 			if _, err := mcpSrv.Start(context.Background()); err != nil {
 				return fmt.Errorf("start MCP server: %w", err)
 			}
 			defer func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				mcpSrv.Stop(ctx) //nolint:errcheck
+				if err := mcpSrv.Stop(ctx); err != nil {
+					logger.Printf("warning: MCP server stop: %v", err)
+				}
 			}()
-			mcpSrv.SetSessionLister(&sessionListerAdapter{mgr: mgr})
-			mcpSrv.SetSessionCreator(&sessionCreatorAdapter{mgr: mgr})
 
 			runtimeDir := daemon.DaemonInfoDir()
 
