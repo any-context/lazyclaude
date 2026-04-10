@@ -78,6 +78,11 @@ func newDaemonCmd() *cobra.Command {
 				}
 			}()
 
+			// Start background GC to sync tmux window state and clean dead sessions.
+			gc := session.NewGC(mgr, 2*time.Second)
+			gc.Start()
+			defer gc.Stop()
+
 			runtimeDir := daemon.DaemonInfoDir()
 
 			cfg := daemon.DaemonConfig{
