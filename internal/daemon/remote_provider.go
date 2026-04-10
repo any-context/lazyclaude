@@ -162,7 +162,7 @@ func (rp *RemoteProvider) handleSSEEvent(ev NotificationEvent) {
 	switch ev.Type {
 	case EventActivity:
 		for i := range rp.sessions {
-			if rp.sessions[i].ID == ev.SessionID {
+			if rp.sessions[i].ID == ev.SessionID || strings.HasPrefix(rp.sessions[i].ID, ev.SessionID) {
 				rp.sessions[i].Activity = ev.Activity
 				rp.sessions[i].ToolName = ev.ToolName
 				// Forward to local broker for sidebar display.
