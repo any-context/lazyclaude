@@ -1,18 +1,17 @@
-# コマンドルーティング定義 (現状)
+# コマンドルーティング (現状)
 
 ## n (CreateSession)
 
 ```
 n
-├─ [入力]
-│  ├─ path = currentProjectRoot()
-│  │  ├─ Focus on ProjectNode → project.Path
-│  │  ├─ Focus on SessionNode → 親プロジェクトの Path
-│  │  └─ Focus なし → filepath.Abs(".")
-│  └─ host = resolveHost()
-│     ├─ cachedHost != "" → cachedHost
-│     └─ pendingHost
-└─ [実行] commands.Create({host, path})
+├─ path = currentProjectRoot()
+│  ├─ Focus on ProjectNode → project.Path
+│  ├─ Focus on SessionNode → 親プロジェクトの Path
+│  └─ Focus なし → filepath.Abs(".")
+├─ host = resolveHost()
+│  ├─ cachedHost != "" → cachedHost
+│  └─ pendingHost
+└─ commands.Create({host, path})
    ├─ host == ""
    │  └─ cp.Create(path, "")
    └─ host != ""
@@ -27,10 +26,9 @@ n
 
 ```
 N
-├─ [入力]
-│  ├─ path = "."
-│  └─ host = resolveHost()
-└─ [実行] commands.Create({host, "."})
+├─ path = "."
+├─ host = resolveHost()
+└─ commands.Create({host, "."})
    ├─ host == ""
    │  └─ cp.Create(".", "")
    └─ host != ""
@@ -42,12 +40,11 @@ N
 
 ```
 w → ダイアログ → Enter
-├─ [入力]
-│  ├─ path = currentProjectRoot()
-│  ├─ host = resolveHost()
-│  ├─ name = ダイアログ入力
-│  └─ prompt = ダイアログ入力
-└─ [実行] commands.CreateWorktree({host, path}, name, prompt)
+├─ path = currentProjectRoot()
+├─ host = resolveHost()
+├─ name = ダイアログ入力
+├─ prompt = ダイアログ入力
+└─ commands.CreateWorktree({host, path}, name, prompt)
    ├─ prepareRemote(&target)
    │  ├─ ensureConnected(host)
    │  └─ resolveRemotePath(path, host) → queryRemoteCWD
@@ -58,10 +55,9 @@ w → ダイアログ → Enter
 
 ```
 W
-├─ [入力]
-│  ├─ path = currentProjectRoot()
-│  └─ host = resolveHost()
-└─ [実行] commands.ListWorktrees({host, path})
+├─ path = currentProjectRoot()
+├─ host = resolveHost()
+└─ commands.ListWorktrees({host, path})
    ├─ prepareRemote(&target)
    └─ cp.ListWorktrees(path, host)
 ```
@@ -70,10 +66,9 @@ W
 
 ```
 P
-├─ [入力]
-│  ├─ path = currentProjectRoot()
-│  └─ host = resolveHost()
-└─ [実行] commands.CreatePMSession({host, path})
+├─ path = currentProjectRoot()
+├─ host = resolveHost()
+└─ commands.CreatePMSession({host, path})
    ├─ prepareRemote(&target)
    └─ cp.CreatePMSession(path, host)
 ```
@@ -82,9 +77,8 @@ P
 
 ```
 d
-├─ [入力]
-│  └─ id = currentSession().ID
-└─ [実行] commands.Delete(id)
+├─ id = currentSession().ID
+└─ commands.Delete(id)
    ├─ sess.Host == ""
    │  └─ cp.Delete(id)
    └─ sess.Host != ""
@@ -96,10 +90,9 @@ d
 
 ```
 R → ダイアログ → Enter
-├─ [入力]
-│  ├─ id = currentSession().ID
-│  └─ newName = ダイアログ入力
-└─ [実行] commands.Rename(id, newName)
+├─ id = currentSession().ID
+├─ newName = ダイアログ入力
+└─ commands.Rename(id, newName)
    ├─ sess.Host == ""
    │  └─ cp.Rename(id, newName)
    └─ sess.Host != ""
@@ -111,10 +104,9 @@ R → ダイアログ → Enter
 
 ```
 g
-├─ [入力]
-│  ├─ path = currentProjectRoot()
-│  └─ host = resolveHost()
-└─ [実行] commands.LaunchLazygit({host, path})
+├─ path = currentProjectRoot()
+├─ host = resolveHost()
+└─ commands.LaunchLazygit({host, path})
    ├─ prepareRemote(&target)
    └─ cp.LaunchLazygit(path, host)
 ```
@@ -123,18 +115,15 @@ g
 
 ```
 a
-├─ [入力]
-│  └─ id = currentSession().ID
-└─ [実行] cp.AttachSession(id)
+├─ id = currentSession().ID
+└─ cp.AttachSession(id)
 ```
 
 ## Enter (Fullscreen)
 
 ```
 Enter
-├─ [入力]
-│  └─ id = currentSession().ID
-└─ [実行]
-   ├─ capture-pane(mirror window)
-   └─ send-keys(mirror window)
+├─ id = currentSession().ID
+├─ capture-pane(mirror window)
+└─ send-keys(mirror window)
 ```
