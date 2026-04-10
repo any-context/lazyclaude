@@ -28,7 +28,9 @@ commands.Create({host, path})
 
 completeRemoteCreate
 ├─ ensureConnected(host)
-├─ resolveRemotePath(path, host) → queryRemoteCWD
+├─ resolveRemotePath(path, host)
+│  ├─ path == localProjectRoot or path == "." → queryRemoteCWD
+│  └─ それ以外 (既存リモートプロジェクトのパス) → path そのまま
 ├─ remoteAPI.Create(remotePath)
 └─ mirrorMgr.CreateMirror
 ```
@@ -86,7 +88,9 @@ prompt = ダイアログ入力
 commands.CreateWorktree({host, path}, name, prompt)
 ├─ prepareRemote(&target)
 │  ├─ ensureConnected(host)
-│  └─ resolveRemotePath(path, host) → queryRemoteCWD
+│  └─ resolveRemotePath(path, host)
+│     ├─ path == localProjectRoot or path == "." → queryRemoteCWD
+│     └─ それ以外 → path そのまま
 └─ cp.CreateWorktree(name, prompt, path, host)
 ```
 
@@ -104,7 +108,9 @@ host = resolveHost()
 commands.ListWorktrees({host, path})
 ├─ prepareRemote(&target)
 │  ├─ ensureConnected(host)
-│  └─ resolveRemotePath(path, host) → queryRemoteCWD
+│  └─ resolveRemotePath(path, host)
+│     ├─ path == localProjectRoot or path == "." → queryRemoteCWD
+│     └─ それ以外 → path そのまま
 └─ cp.ListWorktrees(path, host)
 ```
 
@@ -122,7 +128,9 @@ host = resolveHost()
 commands.CreatePMSession({host, path})
 ├─ prepareRemote(&target)
 │  ├─ ensureConnected(host)
-│  └─ resolveRemotePath(path, host) → queryRemoteCWD
+│  └─ resolveRemotePath(path, host)
+│     ├─ path == localProjectRoot or path == "." → queryRemoteCWD
+│     └─ それ以外 → path そのまま
 └─ cp.CreatePMSession(path, host)
 ```
 
@@ -177,7 +185,9 @@ host = resolveHost()
 commands.LaunchLazygit({host, path})
 ├─ prepareRemote(&target)
 │  ├─ ensureConnected(host)
-│  └─ resolveRemotePath(path, host) → queryRemoteCWD
+│  └─ resolveRemotePath(path, host)
+│     ├─ path == localProjectRoot or path == "." → queryRemoteCWD
+│     └─ それ以外 → path そのまま
 └─ cp.LaunchLazygit(path, host)
 ```
 

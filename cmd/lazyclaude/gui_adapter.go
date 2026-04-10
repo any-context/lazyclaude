@@ -131,18 +131,25 @@ func (a *guiCompositeAdapter) Create(path string) error {
 }
 
 // resolveRemotePath maps a local path to the remote daemon's CWD when
-// creating the first session on an SSH host. Once remote sessions exist,
-// currentProjectRoot() returns the correct remote path from the session
-// tree, so the provided path is returned unchanged.
+// creating the first session on an SSH host. Local-origin paths (the
+// local project root from the startup fallback, or ".") are meaningless
+// on the remote machine and must be translated via the daemon GET /cwd
+// API. Any other path is assumed to be an existing remote project path
+// (e.g. from the session tree) and is returned unchanged.
 //
-// The remote CWD is obtained via the daemon GET /cwd API. This requires
-// the remote connection to be established first (call ensureRemoteConnected
-// before this method).
+// Querying the remote CWD requires the remote connection to be established
+// first (call ensureRemoteConnected before this method).
 func (a *guiCompositeAdapter) resolveRemotePath(path, host string) string {
-	debugLog("resolveRemotePath: input=%q host=%q", path, host)
-	// Always query the remote daemon for its CWD when the host is set.
-	// Local paths (from currentProjectRoot fallback) are meaningless on
-	// the remote machine.
+	debugLog("resolveRemotePath: input=%q host=%q localProjectRoot=%q", path, host, a.localProjectRoot)
+	// Treat a path as local-origin only if it is "." or matches a known
+	// local project root. When localProjectRoot is unset (zero value), the
+	// only local marker we can trust is ".", so any other path is passed
+	// through unchanged.
+	isLocalOrigin := path == "." || (a.localProjectRoot != "" && path == a.localProjectRoot)
+	if !isLocalOrigin {
+		debugLog("resolveRemotePath: output=%q (passthrough, already remote)", path)
+		return path
+	}
 	remoteCWD := a.queryRemoteCWD(host)
 	if remoteCWD != "" {
 		debugLog("resolveRemotePath: output=%q (from queryRemoteCWD)", remoteCWD)
