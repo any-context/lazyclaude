@@ -28,6 +28,16 @@ func WithPostCreate(hook PostCreateHook) RemoteProviderOption {
 	return func(rp *RemoteProvider) { rp.postCreate = hook }
 }
 
+// SSEActivityCallback is called when an SSE activity event is received.
+// The window name is the REMOTE window (lc-xxxx); callers must remap to rm-xxxx.
+type SSEActivityCallback func(ev model.Event)
+
+// WithSSEActivity sets the callback for SSE activity events.
+// Used to forward remote activity to the local broker for sidebar display.
+func WithSSEActivity(cb SSEActivityCallback) RemoteProviderOption {
+	return func(rp *RemoteProvider) { rp.onSSEActivity = cb }
+}
+
 // RemoteProvider adapts a daemon ClientAPI to the SessionProvider interface.
 // It maintains a local cache of sessions and buffers tool notifications
 // received via SSE.
@@ -36,9 +46,10 @@ func WithPostCreate(hook PostCreateHook) RemoteProviderOption {
 // through the daemon API. Socket tunnel forwarding was removed because
 // remote sshd environments often block Unix domain socket forwarding.
 type RemoteProvider struct {
-	host       string
-	conn       ConnectionManager
-	postCreate PostCreateHook // immutable after construction
+	host           string
+	conn           ConnectionManager
+	postCreate     PostCreateHook     // immutable after construction
+	onSSEActivity  SSEActivityCallback // immutable after construction
 
 	mu            sync.Mutex
 	sessions      []SessionInfo
@@ -154,6 +165,15 @@ func (rp *RemoteProvider) handleSSEEvent(ev NotificationEvent) {
 			if rp.sessions[i].ID == ev.SessionID {
 				rp.sessions[i].Activity = ev.Activity
 				rp.sessions[i].ToolName = ev.ToolName
+				// Forward to local broker for sidebar display.
+				if rp.onSSEActivity != nil {
+					mirrorWindow := remapRemoteWindow(rp.sessions[i].TmuxWindow)
+					rp.onSSEActivity(model.Event{ActivityNotification: &model.ActivityNotification{
+						Window:   mirrorWindow,
+						State:    ev.Activity,
+						ToolName: ev.ToolName,
+					}})
+				}
 				break
 			}
 		}
