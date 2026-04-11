@@ -39,6 +39,19 @@ Scrollback / history_size の取得を **remote daemon API 経由** に切り替
 
 ## 実装ステップ
 
+### Step 0: APIVersion の bump
+
+ファイル: `internal/daemon/api.go:13`
+
+新 endpoint を追加するため API version を 1 → 2 に bump:
+```go
+const APIVersion = 2
+```
+
+理由 (codex review 指摘): 現状 connection handshake は `health.APIVersion != APIVersion` で拒否する (`internal/daemon/connection_impl.go:198-205`)。bump しないと、古い remote daemon (未 update) に接続した時に新 endpoint が存在せず HTTP 404 で silent fail する。bump することで handshake 段階で「remote binary を upgrade してください」エラーを明示的に返せる。
+
+**影響**: 既存の remote daemon は再 build + re-install が必要になる。本 bug fix を merge した後、remote でも同 commit を install し直す運用を documentation に追記。
+
 ### Step 1: daemon API endpoints の追加
 
 ファイル: `internal/daemon/api.go`
@@ -127,32 +140,54 @@ CaptureScrollback(ctx context.Context, req ScrollbackRequest) (*ScrollbackRespon
 HistorySize(ctx context.Context, id string) (int, error)
 ```
 
+**重要 (codex review 反映)**: `ClientAPI` を拡張すると全 implementer に stub を追加しないとビルドが通らない。実装確認済の影響範囲:
+- `internal/daemon/http_client.go:HTTPClient` (本命 implementation、Step 3)
+- `internal/daemon/connection_impl_test.go:mockClientAPI` (L11-52 の範囲)
+
+#### 2-a: mockClientAPI の stub 追加
+ファイル: `internal/daemon/connection_impl_test.go`
+
+```go
+func (m *mockClientAPI) CaptureScrollback(_ context.Context, _ ScrollbackRequest) (*ScrollbackResponse, error) {
+    return &ScrollbackResponse{}, nil
+}
+
+func (m *mockClientAPI) HistorySize(_ context.Context, _ string) (int, error) {
+    return 0, nil
+}
+```
+
+これ以外の mock/stub があれば同様に追加する。Worker は Step 2 実装前に以下を grep:
+```bash
+grep -rn 'ClientAPI\b' --include='*.go' .
+grep -rn 'implements ClientAPI\|_ ClientAPI =' --include='*.go' .
+```
+
 ### Step 3: HTTPClient 実装
 
 ファイル: `internal/daemon/http_client.go`
 
-`ClientAPI` 実装側に 2 メソッド追加:
+**重要 (codex review 反映)**: 既存 HTTPClient の helper は `postJSON` / `getJSON` / `delete` で、URL 構築は `sessionPath(id, suffix)` で `url.PathEscape` 込み。plan 初版の `c.post` / `c.get` / 文字列連結は誤り。正しい pattern に合わせる:
+
 ```go
 func (c *HTTPClient) CaptureScrollback(ctx context.Context, req ScrollbackRequest) (*ScrollbackResponse, error) {
-    path := "/session/" + req.ID + "/scrollback"
     var resp ScrollbackResponse
-    if err := c.post(ctx, path, req, &resp); err != nil {
+    if err := c.postJSON(ctx, sessionPath(req.ID, "/scrollback"), req, &resp); err != nil {
         return nil, fmt.Errorf("capture scrollback: %w", err)
     }
     return &resp, nil
 }
 
 func (c *HTTPClient) HistorySize(ctx context.Context, id string) (int, error) {
-    path := "/session/" + id + "/history-size"
     var resp HistorySizeResponse
-    if err := c.get(ctx, path, &resp); err != nil {
+    if err := c.getJSON(ctx, sessionPath(id, "/history-size"), &resp); err != nil {
         return 0, fmt.Errorf("history size: %w", err)
     }
     return resp.Lines, nil
 }
 ```
 
-既存の helper (`c.post`, `c.get`) を流用。既存 HTTPClient の他メソッド (CreateSession 等) と同じ pattern。
+既存の `DeleteSession` / `RenameSession` が `sessionPath` + `postJSON`/`delete` helper を使っているのと同じ style (`http_client.go:52-58`)。
 
 ### Step 4: RemoteProvider の stub を実装に差し替え
 
@@ -220,80 +255,119 @@ func (c *CompositeProvider) HistorySize(id string) (int, error) {
 }
 ```
 
-新規 helper:
+新規 helper の具体は Step 6.5 で定義 (`LocalSessionHost` を使う版)。
+
+**Host 分岐の局所化**: このファイル/関数に限定。providerForSession は変更せず、capture 専用の routing を追加する形。`if host == ""` 分岐は 1 箇所 (providerForCapture 内部) のみ。
+
+### Step 6: SessionProvider interface に Host lookup helper を追加
+
+codex review で判明した制約:
+- `providerForCapture` が session の host を知る必要がある
+- `SessionProvider` interface に新 method を追加する場合、**全 implementer に stub を追加する必要** がある
+- 影響範囲 (実測済):
+  - `cmd/lazyclaude/local_provider.go:localDaemonProvider` (本命 implementation)
+  - `internal/daemon/remote_provider.go:RemoteProvider` (compile-time check `var _ SessionProvider = (*RemoteProvider)(nil)` at L17)
+  - `cmd/lazyclaude/routing_integration_test.go:fakeSessionProvider` (統合テスト内)
+  - `internal/daemon/composite_provider_test.go:stubProvider` (他にも stub 系があれば要確認)
+
+**Import cycle 予備確認 (PM 側で実施済)**:
+- `internal/daemon/server.go` は既に `github.com/any-context/lazyclaude/internal/session` を import している (L25)
+- `internal/daemon/composite_provider.go` は `internal/session` を import していない (`internal/core/model` のみ)
+- `internal/session/*.go` は `internal/daemon` を import していない (事前 grep 済)
+- 従って `composite_provider.go` で `internal/session` を import して `*session.Session` を型に使うのは cyclic にならない。安全
+
+**ただし API 最小化のため**: `Session(id) *session.Session` ではなく `LocalSessionHost(id string) (host string, found bool)` にする。これで:
+- `composite_provider.go` は `internal/session` を import しなくて済む
+- interface の surface area が小さい
+- 他の implementer も 1 行 stub で済む
+
+ファイル: `internal/daemon/composite_provider.go` の `SessionLister` interface (既存) に追加:
+
 ```go
-// providerForCapture returns the provider that should serve scrollback /
-// history-size queries for the given session. Remote sessions MUST go
-// through their RemoteProvider because the local mirror window only has
-// the current viewport — the remote tmux's historical scrollback is not
-// replicated to the local pane. Local sessions use the local provider
-// which reads the local tmux pane's own buffer.
-//
-// Note: preview capture is NOT routed here. CapturePreview still uses the
-// mirror window because the current viewport is exactly what the user
-// sees and the mirror renders it correctly.
-//
-// If the session has Host != "" but no matching remote provider is
-// registered (e.g. the remote disconnected), returns nil so the caller
-// emits "no provider found" which the GUI surfaces as a capture error.
-func (c *CompositeProvider) providerForCapture(sessionID string) SessionProvider {
-    // Local store is the authoritative source for session metadata including
-    // Host. Look up the session and dispatch by Host.
-    sess := c.local.Session(sessionID) // NEW helper, see Step 6
-    if sess == nil {
-        // Fall back to the existing providerForSession for robustness; if
-        // not found there either the caller returns a not-found error.
-        return c.providerForSession(sessionID)
-    }
-    if sess.Host == "" {
-        return c.local
-    }
-    c.mu.RLock()
-    defer c.mu.RUnlock()
-    if rp, ok := c.remotes[sess.Host]; ok {
-        return rp
-    }
-    return nil
+type SessionLister interface {
+    HasSession(sessionID string) bool
+    Host() string
+    Sessions() ([]SessionInfo, error)
+
+    // LocalSessionHost returns the host of a session by ID, if known to
+    // this provider. Used by CompositeProvider.providerForCapture to
+    // dispatch capture ops by host without leaking session.Session type
+    // into the daemon package's interface surface.
+    // Returns ("", false) when the session is not found by this provider.
+    LocalSessionHost(id string) (host string, found bool)
 }
 ```
 
-**Host 分岐の局所化**: このファイル/関数に限定。providerForSession は変更せず、capture 専用の routing を追加する形。`if sess.Host == ""` 分岐は 1 箇所 (providerForCapture 内部) のみ。
+**重要**: 本当は `SessionLister` よりも capture routing 専用の helper として分離する方が綺麗だが、既存の interface 分割 pattern に従うと `SessionLister` が一番近い (既に `HasSession` も持っている)。または新規 `SessionResolver` interface を切り出して capture routing だけで使う案もあり、worker が実装時に判断可能。
 
-### Step 6: localDaemonProvider に Session lookup helper を追加
-
-`providerForCapture` が `c.local.Session(id)` を呼ぶので、`localDaemonProvider` に Session lookup を実装する。これは既存の `HasSession` の拡張。
-
+#### 6-a: localDaemonProvider の実装
 ファイル: `cmd/lazyclaude/local_provider.go`
-
 ```go
-// Session returns the session with the given ID from the local store, or
-// nil if not found. Used by CompositeProvider.providerForCapture to
-// dispatch capture ops by host.
-func (p *localDaemonProvider) Session(id string) *session.Session {
-    return p.mgr.Store().FindByID(id)
+func (p *localDaemonProvider) LocalSessionHost(id string) (string, bool) {
+    sess := p.mgr.Store().FindByID(id)
+    if sess == nil {
+        return "", false
+    }
+    return sess.Host, true
 }
 ```
 
-ファイル: `internal/daemon/composite_provider.go` の `SessionProvider` interface にも追加:
-
+#### 6-b: RemoteProvider の実装
+ファイル: `internal/daemon/remote_provider.go`
 ```go
-type SessionProvider interface {
-    // ... existing methods ...
-
-    // Session returns the full Session object for the given ID, or nil if
-    // not found. Used by composite provider for host-aware routing of
-    // capture ops.
-    Session(id string) *session.Session
+// LocalSessionHost returns the host for a session if it is in this remote
+// provider's cache. Used by capture routing to dispatch remote-originated
+// lookups to the correct provider.
+func (rp *RemoteProvider) LocalSessionHost(id string) (string, bool) {
+    rp.mu.Lock()
+    defer rp.mu.Unlock()
+    for _, s := range rp.sessions {
+        if s.ID == id {
+            return rp.host, true
+        }
+    }
+    return "", false
 }
 ```
 
-**注**: ここで `session.Session` に依存することになる。`internal/daemon` は `internal/session` を import している? 要確認、worker が実装時に cyclic import にならないか検証する。
+#### 6-c: fakeSessionProvider (統合テスト) の stub
+ファイル: `cmd/lazyclaude/routing_integration_test.go`
+```go
+func (f *fakeSessionProvider) LocalSessionHost(_ string) (string, bool) {
+    return "", false
+}
+```
 
-もし cyclic import リスクがある場合は代替案:
-- `LocalSession(id) (host string, ok bool)` のような最小 API にする
-- もしくは SessionProvider でなく `CompositeProvider` が直接 `localDaemonProvider` の concrete type を知る
+#### 6-d: その他の stub
+- `internal/daemon/composite_provider_test.go` の `stubProvider` と近隣のフェイクにも 1 行 stub 追加
+- Worker は実装時に `grep -rn 'SessionProvider' --include='*.go' .` で全 implementer を確認
 
-Worker は Step 5 実装前に import cycle を確認すること。
+### Step 6.5: providerForCapture の実装
+
+前 Step で決めた `LocalSessionHost` を使う:
+
+```go
+func (c *CompositeProvider) providerForCapture(sessionID string) SessionProvider {
+    // Try local first: most sessions are local, and even remote mirror
+    // sessions are registered in the local store (but with Host != "").
+    if host, ok := c.local.LocalSessionHost(sessionID); ok {
+        if host == "" {
+            return c.local
+        }
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+        if rp, ok := c.remotes[host]; ok {
+            return rp
+        }
+        return nil
+    }
+    // Fallback: not in local store (shouldn't happen normally). Try the
+    // existing providerForSession path which searches remote caches.
+    return c.providerForSession(sessionID)
+}
+```
+
+注: `composite_provider.go` の `CaptureScrollback` / `HistorySize` を Step 5 でこの helper に switch する。
 
 ### Step 7: Unit / integration tests
 
@@ -351,13 +425,17 @@ Worker は Step 5 実装前に import cycle を確認すること。
 
 | ファイル | 変更 |
 |---------|------|
-| `internal/daemon/api.go` | (既存の ScrollbackRequest/ScrollbackResponse/HistorySizeResponse を流用、追加なし。必要なら comment 更新) |
+| `internal/daemon/api.go` | `APIVersion` を 1 → 2 に bump (Step 0)、既存の ScrollbackRequest/ScrollbackResponse/HistorySizeResponse を流用 |
+| `internal/daemon/connection_impl_test.go` | `mockClientAPI` に CaptureScrollback / HistorySize stub 追加 (Step 2-a) |
 | `internal/daemon/server.go` | `/session/{id}/scrollback`, `/session/{id}/history-size` のルート追加、handleScrollback / handleHistorySize 実装 |
 | `internal/daemon/client.go` | ClientAPI に CaptureScrollback / HistorySize 追加 |
 | `internal/daemon/http_client.go` | HTTPClient.CaptureScrollback / HistorySize 実装 |
 | `internal/daemon/remote_provider.go` | CaptureScrollback / HistorySize を error stub から実装に差し替え (CapturePreview は stub のまま) |
 | `internal/daemon/composite_provider.go` | `providerForCapture` helper 追加、`CaptureScrollback` / `HistorySize` の routing をそれ経由に変更。`SessionProvider` interface に `Session(id)` 追加 |
-| `cmd/lazyclaude/local_provider.go` | `localDaemonProvider.Session(id)` 実装 |
+| `cmd/lazyclaude/local_provider.go` | `localDaemonProvider.LocalSessionHost(id)` 実装 |
+| `internal/daemon/remote_provider.go` (上記に加え) | `RemoteProvider.LocalSessionHost(id)` stub 実装 |
+| `cmd/lazyclaude/routing_integration_test.go` | `fakeSessionProvider.LocalSessionHost(id)` stub 追加 |
+| `internal/daemon/composite_provider_test.go` | 既存 `stubProvider` 等に `LocalSessionHost` stub 追加 |
 | `internal/daemon/server_capture_test.go` (新規) | handler unit test |
 | `internal/daemon/http_client_capture_test.go` (新規) | client unit test |
 | `internal/daemon/remote_provider_test.go` | CaptureScrollback / HistorySize test 追加 |
