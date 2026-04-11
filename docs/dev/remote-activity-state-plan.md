@@ -208,13 +208,15 @@ activityFwd := func(ev model.Event, sessionID string) {
 
 **注**: `mgr` (session.Manager) は既に root.go の scope にある。`mgr.Store().FindByID(sessionID)` は thread-safe (既存 API)。
 
-### Step 4: 既存の test / mock の signature 更新
+### Step 4: 既存の test の signature 更新
 
-`internal/daemon/remote_provider_test.go` と `cmd/lazyclaude/session_adapter_test.go` で `SSEActivityCallback` を使っている箇所があれば signature を更新。
+`SSEActivityCallback` を使っている箇所のみ更新する。codex review で確認した事実: 影響範囲は `internal/daemon/remote_provider_test.go` のみ。`cmd/lazyclaude/session_adapter_test.go` は pending-notification helper のテストで SSE callback を触らないので変更不要。
 
-grep 結果:
-- `internal/daemon/remote_provider_test.go`: `WithSSEActivity` を使ってる可能性あり、worker が確認して更新
-- `cmd/lazyclaude/session_adapter_test.go`: 同上
+Worker が実装時に最終確認:
+```bash
+grep -rn "SSEActivityCallback\|WithSSEActivity\|onSSEActivity" --include='*.go' .
+```
+ヒットした全箇所を新 signature `func(ev model.Event, sessionID string)` に合わせる。
 
 ### Step 5: Unit tests (新規)
 
@@ -341,11 +343,14 @@ func TestResolveActivityWindow_NilActivityNotification(t *testing.T) {
 5. `/codex --enable-review-gate` → APPROVED
 6. **手動検証** (要ユーザー):
    - [ ] Remote session で claude が実行中 → サイドバーに Running (●) 表示
-   - [ ] Remote session で permission 待ち → ツール popup が表示される (note: これは Bug 5 で別途修正されるまでは動かない可能性あり)
    - [ ] Remote session で stop (turn 完了) → Idle (✓)
    - [ ] Remote session で fullscreen 入る → 未読 badge がクリアされる (clearUnreadActivity が動く)
-   - [ ] Local session の activity が regression なく動く
+   - [ ] Local session の activity (Running / NeedsInput / Idle / Error) が regression なく動く
+   - [ ] Local session の permission popup (既存) が regression なく動く
    - [ ] Local session の unread badge クリアが regression なく動く
+
+**本 plan で修正されない項目** (Bug 5 で別途扱う):
+- Remote session の permission popup (`ToolNotification`) は引き続き表示されない。emission 経路が別 (`EventToolInfo` → `rp.notifications` → `CompositeProvider.PendingNotifications`) で、別 plan で解決する
 
 ## Out of Scope
 
