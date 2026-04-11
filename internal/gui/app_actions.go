@@ -128,15 +128,26 @@ func (a *App) syncPluginProjectOnce() {
 	}
 
 	// Try session tree first (preferred: project-scoped context).
+	// syncPluginProject handles both local and remote nodes: for remote
+	// it sets pluginState.remoteDisabled without touching projectDir,
+	// for local it sets projectDir and triggers the async refresh.
+	// Either signal is enough to short-circuit before the CWD fallback.
 	node := a.currentNode()
 	if node != nil {
 		a.syncPluginProject()
-		if a.pluginState.projectDir != "" {
+		if a.pluginState.projectDir != "" || a.pluginState.remoteDisabled {
 			return
 		}
 	}
 
 	// Fallback: no sessions yet — use process CWD so plugins load immediately.
+	// Explicitly clear remoteDisabled: we are going to refresh against local
+	// data, so the panels must leave any prior "remote disabled" state even
+	// if the caller had a remote node selected before landing here.
+	a.pluginState.remoteDisabled = false
+	if a.mcpServers != nil {
+		a.mcpState.remoteDisabled = false
+	}
 	a.runPluginAsync(func(ctx context.Context) error {
 		return a.plugins.Refresh(ctx)
 	})
@@ -156,10 +167,93 @@ func (a *App) syncPluginProject() {
 	if a.plugins == nil {
 		return
 	}
+
+	// clearRemoteDisabled resets both remoteDisabled flags. Used by the
+	// local-node branch AND the no-node early return so the panels do not
+	// stay stuck in "remote disabled" state after a remote session is
+	// closed and there is no node to drive the local branch.
+	clearRemoteDisabled := func() {
+		a.pluginState.remoteDisabled = false
+		if a.mcpServers != nil {
+			a.mcpState.remoteDisabled = false
+		}
+	}
+
 	node := a.currentNode()
 	if node == nil {
+		// Recovery path — only when the underlying tree is genuinely
+		// empty (not a transient filter-hides-everything or cursor-
+		// out-of-range state). Reset the providers to the CWD fallback
+		// so a cached pluginState.projectDir from an earlier local
+		// selection cannot bleed through into subsequent writes.
+		// Without this reset, the flow (local A → remote B → tree
+		// empties out-of-band) would leave pluginState.projectDir at
+		// "A" and the next plugin/MCP write would mutate an unrelated
+		// local repo. See codex P1 on commit a25ed88 for the scenario.
+		//
+		// Idempotent by the projectDir-equals-CWD short-circuit: once
+		// the reset has run the first time, subsequent layout passes
+		// observe projectDir == cwd and skip the re-spawn.
+		if len(a.cachedNodes) == 0 {
+			// Always clear the remoteDisabled flags on empty-tree
+			// recovery: even if projectDir already matches cwd (the
+			// user started lazyclaude in the lazyclaude repo, for
+			// instance), leaving the flags set would pin the panels
+			// to the remote placeholder and make guardRemoteOp reject
+			// local plugin/MCP actions forever.
+			clearRemoteDisabled()
+
+			cwd, _ := filepath.Abs(".")
+			if a.pluginState.projectDir != cwd {
+				// Panel cursors track the previous project's item
+				// count; swapping to the CWD fallback without
+				// zeroing them can leave installedCursor /
+				// marketCursor / mcpState.cursor out of range,
+				// which silently blocks write handlers that
+				// short-circuit on `cursor >= len(...)`. Mirror
+				// the local-node branch below.
+				a.pluginState.installedCursor = 0
+				a.pluginState.marketCursor = 0
+				a.pluginState.projectDir = cwd
+				a.plugins.SetProjectDir(cwd)
+				a.runPluginAsync(func(ctx context.Context) error {
+					return a.plugins.Refresh(ctx)
+				})
+				if a.mcpServers != nil {
+					a.mcpState.cursor = 0
+					a.mcpServers.SetProjectDir(cwd)
+					a.runMCPAsync(func(ctx context.Context) error {
+						return a.mcpServers.Refresh(ctx)
+					})
+				}
+			}
+		}
+		// Transient nil-node (filter hides everything, cursor out of
+		// range): preserve the previous flag and projectDir so the
+		// logical selection is intact. The write guards' flag fallback
+		// keeps writes honest until the tree resolves.
 		return
 	}
+
+	// Remote node: mark panels as disabled without touching provider state.
+	// We intentionally do NOT clear pluginState.projectDir or call
+	// SetProjectDir("") here:
+	//   - Clearing projectDir re-triggers syncPluginProjectOnce fallback
+	//     which runs Refresh against the process CWD.
+	//   - SetProjectDir("") makes plugin.ExecCLI run in the process CWD.
+	// Instead, flip remoteDisabled so the render layer shows a placeholder
+	// and write entry points bail out with a status message.
+	if _, isRemote := a.isRemoteNodeSelected(); isRemote {
+		a.pluginState.remoteDisabled = true
+		if a.mcpServers != nil {
+			a.mcpState.remoteDisabled = true
+		}
+		return
+	}
+
+	// Local node: clear the remote flag and proceed with the existing refresh.
+	clearRemoteDisabled()
+
 	var projectPath string
 	if node.Kind == ProjectNode && node.Project != nil {
 		projectPath = node.Project.Path
@@ -184,6 +278,70 @@ func (a *App) syncPluginProject() {
 			return a.mcpServers.Refresh(ctx)
 		})
 	}
+}
+
+// isRemoteNodeSelected reports whether the cursor is on a remote (SSH) node.
+// Returns (host, true) when the cursor is on a remote session/project,
+// ("", false) otherwise. Wraps currentSessionHost() so callers do not need
+// to interpret its (host, onNode) return shape.
+func (a *App) isRemoteNodeSelected() (string, bool) {
+	host, onNode := a.currentSessionHost()
+	if !onNode || host == "" {
+		return "", false
+	}
+	return host, true
+}
+
+// guardRemoteOp short-circuits a write handler when the cursor is on a
+// remote node, showing a status message. Returns true if the caller should
+// return early.
+//
+// Decision order:
+//
+//  1. Live local node → false (allow).
+//  2. Live remote node → true (block, status message).
+//  3. Nil node (filter hid every row, cursor briefly out of range) →
+//     fall back to pluginState.remoteDisabled / mcpState.remoteDisabled.
+//     When set, block; when clear, allow.
+//
+// Callers MUST have synced the panel state to the current cursor
+// before invoking writes — this is done automatically by the standard
+// cursor-moving paths (MoveCursorDown/Up, applySearchFilter,
+// closeSearch Esc restore, moveCursorToLastSession). Do NOT call
+// syncPluginProject from inside guardRemoteOp: the refresh it spawns
+// is asynchronous, so a write handler running immediately afterwards
+// would read stale cached Installed()/Servers() data from the previous
+// project and mutate items that no longer exist in the new context.
+//
+// The caller sites are AppActions methods invoked by the keydispatch
+// layer and do not receive a *gocui.Gui. setStatus requires a gui to
+// find the status view, so we re-enter the main goroutine via
+// gui.Update. This is the same pattern runPluginAsync / runMCPAsync
+// use for their own status writes and is consistent with the
+// plan-mandated wrapper shape.
+func (a *App) guardRemoteOp(feature string) bool {
+	host, onNode := a.currentSessionHost()
+
+	switch {
+	case onNode && host == "":
+		// Live local node — authoritative, ignore the cached flag.
+		return false
+	case onNode && host != "":
+		// Live remote node — guard regardless of flag state.
+	default:
+		// No resolvable node: fall back to the cached panel flag.
+		if !a.pluginState.remoteDisabled && !a.mcpState.remoteDisabled {
+			return false
+		}
+		host = "remote"
+	}
+
+	msg := fmt.Sprintf("%s on remote (%s) is not supported yet", feature, host)
+	a.gui.Update(func(g *gocui.Gui) error {
+		a.setStatus(g, msg)
+		return nil
+	})
+	return true
 }
 
 // --- Path helpers ---
@@ -338,12 +496,16 @@ func (a *App) createSession(localPath string) {
 
 // moveCursorToLastSession moves the cursor to the last session node in the
 // tree. Used after session creation to select the newly created session.
+// Re-syncs the plugin/MCP panels so their remoteDisabled flags and
+// cached project path follow the newly selected session — the write
+// guards rely on the panel state matching the cursor.
 func (a *App) moveCursorToLastSession() {
 	a.refreshTreeNodes()
 	nodes := a.treeNodes()
 	for i := len(nodes) - 1; i >= 0; i-- {
 		if nodes[i].Kind == SessionNode {
 			a.cursor = i
+			a.syncPluginProject()
 			return
 		}
 	}
@@ -368,6 +530,12 @@ func (a *App) DeleteSession() {
 				if a.cursor > 0 && a.cursor >= len(nodes) {
 					a.cursor--
 				}
+				// Re-sync the plugin/MCP panels: deleting the last
+				// session in a project pulls the cursor onto a
+				// neighbouring node which may belong to a different
+				// project (or host). The write guards need the panel
+				// state to track that jump.
+				a.syncPluginProject()
 				a.setStatus(g, "Session deleted")
 			}
 			return nil
@@ -701,6 +869,9 @@ func (a *App) PluginCursorUp() {
 }
 
 func (a *App) PluginInstall() {
+	if a.guardRemoteOp("Plugin editing") {
+		return
+	}
 	if a.plugins == nil || a.pluginState.tabIdx != keymap.PluginTabMarketplace {
 		return
 	}
@@ -715,6 +886,9 @@ func (a *App) PluginInstall() {
 }
 
 func (a *App) PluginUninstall() {
+	if a.guardRemoteOp("Plugin editing") {
+		return
+	}
 	if a.plugins == nil || a.pluginState.tabIdx != keymap.PluginTabPlugins {
 		return
 	}
@@ -736,6 +910,9 @@ func (a *App) PluginUninstall() {
 }
 
 func (a *App) PluginToggleEnabled() {
+	if a.guardRemoteOp("Plugin editing") {
+		return
+	}
 	if a.plugins == nil || a.pluginState.tabIdx != keymap.PluginTabPlugins {
 		return
 	}
@@ -750,6 +927,9 @@ func (a *App) PluginToggleEnabled() {
 }
 
 func (a *App) PluginUpdate() {
+	if a.guardRemoteOp("Plugin editing") {
+		return
+	}
 	if a.plugins == nil || a.pluginState.tabIdx != keymap.PluginTabPlugins {
 		return
 	}
@@ -764,6 +944,9 @@ func (a *App) PluginUpdate() {
 }
 
 func (a *App) PluginRefresh() {
+	if a.guardRemoteOp("Plugin editing") {
+		return
+	}
 	if a.plugins == nil {
 		return
 	}
@@ -819,6 +1002,9 @@ func (a *App) MCPCursorUp() {
 }
 
 func (a *App) MCPToggleDenied() {
+	if a.guardRemoteOp("MCP editing") {
+		return
+	}
 	if a.mcpServers == nil || a.pluginState.tabIdx != keymap.PluginTabMCP {
 		return
 	}
@@ -833,6 +1019,9 @@ func (a *App) MCPToggleDenied() {
 }
 
 func (a *App) MCPRefresh() {
+	if a.guardRemoteOp("MCP editing") {
+		return
+	}
 	if a.mcpServers == nil {
 		return
 	}

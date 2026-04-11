@@ -23,8 +23,9 @@ type MCPProvider interface {
 
 // MCPState holds the UI state for the MCP tab.
 type MCPState struct {
-	cursor  int
-	loading bool
+	cursor         int
+	loading        bool
+	remoteDisabled bool // true when cursor is on a remote (SSH) node
 }
 
 // NewMCPState creates a new MCPState.
