@@ -555,6 +555,68 @@ func TestRemoteProvider_HandleSSEEvent_Activity(t *testing.T) {
 	}
 }
 
+func TestRemoteProvider_SSEActivity_PassesSessionID(t *testing.T) {
+	// handleSSEEvent for EventActivity must call the callback with the
+	// session ID so that root.go's activityFwd can resolve the local
+	// mirror session's current tmux window ID.
+	//
+	// Production path: the daemon carries an 8-char session hint in
+	// NotificationEvent.SessionID (see windowToSessionHint), and
+	// handleSSEEvent matches it against the cached full UUID using the
+	// HasPrefix branch. We simulate that asymmetry here to ensure the
+	// callback receives the *expanded* full ID (which root.go needs to
+	// look up the local mirror via store.FindByID).
+	var gotSessionID string
+	var gotEvent model.Event
+	var cbCalls int
+
+	conn := &mockConnManager{state: Connected}
+	rp := NewRemoteProvider("remote-host", conn, WithSSEActivity(func(ev model.Event, sessionID string) {
+		cbCalls++
+		gotEvent = ev
+		gotSessionID = sessionID
+	}))
+
+	const fullID = "sess1234-abcd-ef01-2345-6789abcdef01"
+	const hintID = "sess1234" // 8-char prefix hint as the daemon emits
+	rp.mu.Lock()
+	rp.sessions = []SessionInfo{
+		{ID: fullID, Host: "remote-host", TmuxWindow: "lc-sess1234"},
+	}
+	rp.mu.Unlock()
+
+	rp.handleSSEEvent(NotificationEvent{
+		Type:      EventActivity,
+		SessionID: hintID,
+		Activity:  model.ActivityRunning,
+		ToolName:  "Bash",
+	})
+
+	if cbCalls != 1 {
+		t.Fatalf("callback invocations = %d, want 1", cbCalls)
+	}
+	// The callback must receive the cached full UUID, not the incoming
+	// 8-char hint, so that root.go's store.FindByID can resolve the
+	// local mirror session.
+	if gotSessionID != fullID {
+		t.Errorf("gotSessionID = %q, want %q (full cached ID, not hint)", gotSessionID, fullID)
+	}
+	if gotEvent.ActivityNotification == nil {
+		t.Fatal("ActivityNotification is nil")
+	}
+	if gotEvent.ActivityNotification.State != model.ActivityRunning {
+		t.Errorf("State = %v, want Running", gotEvent.ActivityNotification.State)
+	}
+	if gotEvent.ActivityNotification.ToolName != "Bash" {
+		t.Errorf("ToolName = %q, want Bash", gotEvent.ActivityNotification.ToolName)
+	}
+	// Best-effort Window is the remapped mirror name ("rm-" prefix).
+	// root.go's callback overrides this with the local tmux window ID.
+	if gotEvent.ActivityNotification.Window != "rm-sess1234" {
+		t.Errorf("Window = %q, want rm-sess1234", gotEvent.ActivityNotification.Window)
+	}
+}
+
 func TestRemoteProvider_HandleSSEEvent_ToolInfo(t *testing.T) {
 	conn := &mockConnManager{state: Connected}
 	rp := NewRemoteProvider("host", conn)

@@ -29,8 +29,14 @@ func WithPostCreate(hook PostCreateHook) RemoteProviderOption {
 }
 
 // SSEActivityCallback is called when an SSE activity event is received.
-// The window name is the REMOTE window (lc-xxxx); callers must remap to rm-xxxx.
-type SSEActivityCallback func(ev model.Event)
+//
+// The event carries a best-effort Window (the remapped mirror name
+// "rm-xxxx"), but the sessionID is the authoritative key: callers should
+// use it to look up the corresponding local mirror session and overwrite
+// Window with the mirror's current local tmux window ID ("@42"). This
+// keeps the broker's activity key space aligned with the sidebar lookup
+// (which keys by Session.TmuxWindow = local tmux window ID).
+type SSEActivityCallback func(ev model.Event, sessionID string)
 
 // WithSSEActivity sets the callback for SSE activity events.
 // Used to forward remote activity to the local broker for sidebar display.
@@ -167,12 +173,15 @@ func (rp *RemoteProvider) handleSSEEvent(ev NotificationEvent) {
 				rp.sessions[i].ToolName = ev.ToolName
 				// Forward to local broker for sidebar display.
 				if rp.onSSEActivity != nil {
+					// Window is a best-effort mirror name; the callback
+					// in root.go resolves the authoritative local tmux
+					// window ID using sessionID as a lookup hop.
 					mirrorWindow := remapRemoteWindow(rp.sessions[i].TmuxWindow)
 					rp.onSSEActivity(model.Event{ActivityNotification: &model.ActivityNotification{
 						Window:   mirrorWindow,
 						State:    ev.Activity,
 						ToolName: ev.ToolName,
-					}})
+					}}, rp.sessions[i].ID)
 				}
 				break
 			}
@@ -257,6 +266,7 @@ func (rp *RemoteProvider) CreateSession(path string) (*SessionCreateResponse, er
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
+	rp.addToCache(resp)
 	return resp, nil
 }
 
@@ -265,7 +275,11 @@ func (rp *RemoteProvider) Delete(id string) error {
 	if err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}
-	return client.DeleteSession(context.Background(), id)
+	if err := client.DeleteSession(context.Background(), id); err != nil {
+		return err
+	}
+	rp.removeFromCache(id)
+	return nil
 }
 
 func (rp *RemoteProvider) Rename(id, newName string) error {
@@ -381,9 +395,58 @@ func buildTmuxAttachCommand(tmuxTarget string) string {
 
 // --- WorktreeProvider ---
 
+// addToCache appends (or replaces) a session in rp.sessions based on resp.
+// This keeps the in-memory session cache coherent with the remote daemon
+// after a successful create call, without waiting for the next SSE
+// full_sync. Without this, SSE activity events keyed by the new session's
+// UUID would MISS the cache and the sidebar would never transition from
+// Unknown → Running/Idle until the user reconnects.
+//
+// Safe to call with rp.mu unlocked; this method takes the lock itself.
+func (rp *RemoteProvider) addToCache(resp *SessionCreateResponse) {
+	if resp == nil || resp.ID == "" {
+		return
+	}
+	info := SessionInfo{
+		ID:         resp.ID,
+		Name:       resp.Name,
+		Path:       resp.Path,
+		Host:       rp.host,
+		TmuxWindow: resp.TmuxWindow,
+		Role:       resp.Role,
+		Status:     "running",
+	}
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	for i := range rp.sessions {
+		if rp.sessions[i].ID == resp.ID {
+			rp.sessions[i] = info
+			return
+		}
+	}
+	rp.sessions = append(rp.sessions, info)
+}
+
+// removeFromCache drops a session from rp.sessions by ID.
+// Keeps the cache coherent with remote daemon state after a delete.
+func (rp *RemoteProvider) removeFromCache(id string) {
+	if id == "" {
+		return
+	}
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	for i := range rp.sessions {
+		if rp.sessions[i].ID == id {
+			rp.sessions = append(rp.sessions[:i], rp.sessions[i+1:]...)
+			return
+		}
+	}
+}
+
 // invokePostCreate calls the postCreate hook if one is registered.
 // projectRoot is the local grouping path; resp contains the newly created session details.
 func (rp *RemoteProvider) invokePostCreate(projectRoot string, resp *SessionCreateResponse) error {
+	rp.addToCache(resp)
 	if rp.postCreate != nil {
 		return rp.postCreate(rp.host, projectRoot, resp)
 	}

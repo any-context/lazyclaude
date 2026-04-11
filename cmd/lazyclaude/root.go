@@ -161,8 +161,8 @@ func newRootCmd() *cobra.Command {
 				hook := func(host, path string, resp *daemon.SessionCreateResponse) error {
 					return mirrorMgr.CreateMirror(host, path, resp)
 				}
-				activityFwd := func(ev model.Event) {
-					notifyBroker.Publish(ev)
+				activityFwd := func(ev model.Event, sessionID string) {
+					notifyBroker.Publish(resolveActivityWindow(mgr.Store(), ev, sessionID))
 				}
 				remoteProvider := daemon.NewRemoteProvider(host, remoteConn,
 					daemon.WithPostCreate(hook),
@@ -734,4 +734,36 @@ func findClaudeBinary() string {
 		}
 	}
 	return ""
+}
+
+// resolveActivityWindow rewrites a remote activity event so its Window
+// field points at the local mirror session's current tmux window ID
+// ("@42"). The sidebar keys windowActivity by Session.TmuxWindow (which
+// SyncWithTmux sets to the local tmux window ID for both local and remote
+// sessions), so emission and lookup must share the same key space to avoid
+// the "Unknown" state bug for remote sessions.
+//
+// Uses sessionID as a lookup hop into the local store instead of trusting
+// Window (which the RemoteProvider can only fill in as a best-effort
+// mirror name). Returns the event unchanged when:
+//   - ActivityNotification is nil (no remap target)
+//   - sessionID is empty (local MCP path — Window is already correct)
+//   - the session cannot be resolved, or its TmuxWindow is unknown
+//     (fall through with the best-effort Window rather than blanking it)
+//
+// A defensive copy of ActivityNotification is taken so callers' events
+// are not mutated in place.
+func resolveActivityWindow(store *session.Store, ev model.Event, sessionID string) model.Event {
+	if ev.ActivityNotification == nil || sessionID == "" {
+		return ev
+	}
+	localSess := store.FindByID(sessionID)
+	if localSess == nil || localSess.TmuxWindow == "" {
+		return ev
+	}
+	notif := *ev.ActivityNotification
+	notif.Window = localSess.TmuxWindow
+	out := ev
+	out.ActivityNotification = &notif
+	return out
 }

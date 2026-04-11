@@ -4,12 +4,17 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/any-context/lazyclaude/internal/core/config"
 	"github.com/any-context/lazyclaude/internal/core/model"
+	"github.com/any-context/lazyclaude/internal/core/tmux"
+	"github.com/any-context/lazyclaude/internal/session"
 )
 
 func TestSSE_FullSyncOnConnect(t *testing.T) {
@@ -197,21 +202,61 @@ func TestBrokerEventToNotification(t *testing.T) {
 	}
 }
 
-func TestWindowToSessionHint(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"lc-abc12345", "abc12345"},
-		{"@42", "@42"},
-		{"lc-", "lc-"},
-		{"short", "short"},
+func TestSessionIDForWindow(t *testing.T) {
+	// Helper builds a server with a minimal session store.
+	setup := func(t *testing.T) *DaemonServer {
+		t.Helper()
+		tmp := t.TempDir()
+		paths := config.TestPaths(tmp)
+		store := session.NewStore(paths.StateFile())
+		mgr := session.NewManager(store, tmux.NewMockClient(), paths, nil)
+		srv := &DaemonServer{
+			mgr: mgr,
+			log: log.New(io.Discard, "", 0),
+		}
+		return srv
 	}
 
-	for _, tt := range tests {
-		got := windowToSessionHint(tt.input)
-		if got != tt.want {
-			t.Errorf("windowToSessionHint(%q) = %q, want %q", tt.input, got, tt.want)
+	t.Run("matches by tmux window ID", func(t *testing.T) {
+		srv := setup(t)
+		srv.mgr.Store().Add(session.Session{
+			ID:         "abcd1234-5678-90ef-1122-334455667788",
+			Name:       "s1",
+			Path:       "/proj",
+			TmuxWindow: "@42",
+			Status:     session.StatusRunning,
+		}, "/proj")
+		got := srv.sessionIDForWindow("@42")
+		if got != "abcd1234-5678-90ef-1122-334455667788" {
+			t.Errorf("want full UUID, got %q", got)
 		}
-	}
+	})
+
+	t.Run("matches by canonical window name", func(t *testing.T) {
+		srv := setup(t)
+		srv.mgr.Store().Add(session.Session{
+			ID:     "0123456789abcdef-1111-2222-3333-444455556666",
+			Name:   "s2",
+			Path:   "/proj",
+			Status: session.StatusRunning,
+		}, "/proj")
+		got := srv.sessionIDForWindow("lc-01234567")
+		if got != "0123456789abcdef-1111-2222-3333-444455556666" {
+			t.Errorf("want full UUID for canonical name, got %q", got)
+		}
+	})
+
+	t.Run("empty window returns empty", func(t *testing.T) {
+		srv := setup(t)
+		if got := srv.sessionIDForWindow(""); got != "" {
+			t.Errorf("want empty, got %q", got)
+		}
+	})
+
+	t.Run("miss returns empty", func(t *testing.T) {
+		srv := setup(t)
+		if got := srv.sessionIDForWindow("@99"); got != "" {
+			t.Errorf("want empty on miss, got %q", got)
+		}
+	})
 }

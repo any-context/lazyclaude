@@ -116,13 +116,23 @@ func (m *MirrorManager) addMirrorSession(p mirrorParams, groupPath string) error
 		return fmt.Errorf("create mirror window: %w", err)
 	}
 
+	// Resolve the mirror's local tmux window ID ("@N") immediately so the
+	// store entry starts with the same key the sidebar uses for activity
+	// lookup. Without this, the session sits at TmuxWindow = mirrorName
+	// ("rm-xxxx") for up to 2s until SyncWithTmux runs, and any activity
+	// event that arrives in that window is written under the wrong key —
+	// which reverts to "Unknown" once sync flips TmuxWindow to "@N".
+	// Fallback to mirrorName (the previous behavior) if the lookup fails;
+	// GC-driven SyncWithTmux will correct it on the next pass.
+	tmuxWindow := resolveMirrorTmuxID(m.tmux, mirrorName)
+
 	sess := session.Session{
 		ID:         p.ID,
 		Name:       p.Name,
 		Path:       p.Path,
 		Host:       p.Host,
 		Status:     session.StatusRunning,
-		TmuxWindow: mirrorName,
+		TmuxWindow: tmuxWindow,
 		Role:       p.Role,
 	}
 	m.store.Add(sess, groupPath)
@@ -194,4 +204,23 @@ func (m *MirrorManager) createMirrorWindow(host, remoteWindow, localWindowName s
 		Command:  command,
 		StartDir: abs,
 	})
+}
+
+// resolveMirrorTmuxID looks up the local tmux window ID ("@N") for a
+// mirror window that was just created by name. Returns the mirrorName
+// unchanged on lookup failure (ListWindows error, session not present,
+// or the window not found yet), so the store entry is never left empty.
+// The fallback matches the historical behavior and will self-heal once
+// SyncWithTmux runs.
+func resolveMirrorTmuxID(client tmux.Client, mirrorName string) string {
+	windows, err := client.ListWindows(context.Background(), "lazyclaude")
+	if err != nil {
+		return mirrorName
+	}
+	for _, w := range windows {
+		if w.Name == mirrorName {
+			return w.ID
+		}
+	}
+	return mirrorName
 }
