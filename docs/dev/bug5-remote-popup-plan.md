@@ -154,12 +154,20 @@ remoteProvider := daemon.NewRemoteProvider(host, remoteConn,
 
 **対称性**: `resolveActivityWindow` (Bug 4) と同じ pattern。違いは ActivityNotification の Window 置換ではなく ToolNotification の Window 置換。defensive copy は不要 (SSE から来た notification は既に新しいインスタンス)。
 
-### Step B5: 互換性 shim (`remapRemoteWindow` 保持)
+### Step B5: 互換性 shim (`remapRemoteWindow` 保持、dead code として)
 
-`CompositeProvider.PendingNotifications` の `remapRemoteWindow` は **削除せず残す**。理由:
-- 古い remote daemon (SessionID を送らない) と接続した際、ToolNotification.Window が既に mirror 名 "lc-xxxx" のままで届く可能性
-- Phase B fix が callback 側で何もしない (sessionID 空 or localSess 無し) ケースで、後段の `remapRemoteWindow` が fallback として動く
-- 削除は別途 cleanup plan で扱う (本 plan の scope 外)
+`CompositeProvider.PendingNotifications` の `remapRemoteWindow` は **削除せず残す**。ただし fallback 動作の評価 (codex LOW 指摘反映):
+
+**重要な実態**: `dispatchToolNotification` は現時点で常に `resolveNotifyWindow` が返す tmux window ID (`"@3"` 等) を `ToolNotification.Window` に格納する (`internal/server/server.go:455-503`)。つまり:
+- 古い remote daemon (SessionID 送らない) と接続しても、`Window` は `"@N"` 形式であり `lc-` prefix では来ない
+- `remapRemoteWindow` は **old daemon 時も no-op のまま**、fallback として機能しない
+- **Mixed-version 運用 (local = 新、remote daemon = 旧) では Bug 5 の action routing は動作しない**
+
+**運用方針**: Phase B は **local と remote daemon の両方を同時に update する前提**。Release notes / 運用ドキュメントに明記する。
+
+**remapRemoteWindow を残す理由**: 理論上の backwards-compat や、将来的に何らかの経路で `lc-xxxx` 形式の window が来た際の defensive no-op としての存在意義のみ。実質 dead code だが、削除は別 cleanup plan で (本 plan の scope 外、touch しない)。
+
+**代替 fallback の検討**: Phase B 自体が old daemon 互換を保証できないので、追加の fallback 実装 (例: `"@N"` を session store 上の TmuxWindow と突き合わせる client-side lookup) は本 plan では入れない。必要なら将来 Bug 5.1 で追加。
 
 ### Step B6: Tests
 
@@ -291,6 +299,7 @@ remoteProvider := daemon.NewRemoteProvider(host, remoteConn,
 
 - Bug 4 (`f673a30`) の `sessionIDForWindow` helper を前提 (merge 済)
 - `daemon-arch` HEAD 以降で実装
+- **Mixed-version 非対応**: 本 fix は local TUI と remote daemon の **両方が Phase B 以降** であることを前提とする。片方が旧 version の場合、action routing は動作しない (popup は表示されるが accept/reject が remote に届かない)。運用上、local と remote daemon を同時に install し直す必要あり。Release notes に明記
 
 ## Open Questions (解決済)
 
