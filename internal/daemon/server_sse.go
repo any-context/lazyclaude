@@ -151,7 +151,8 @@ func (s *DaemonServer) sessionIDForWindow(window string) string {
 	if window == "" {
 		return ""
 	}
-	for _, sess := range s.mgr.Sessions() {
+	sessions := s.mgr.Sessions()
+	for _, sess := range sessions {
 		if sess.TmuxWindow == window || sess.WindowName() == window {
 			return sess.ID
 		}
@@ -161,7 +162,7 @@ func (s *DaemonServer) sessionIDForWindow(window string) string {
 	// window as "lc-xxxx" where xxxx is already the first 8 chars of
 	// the UUID.
 	if after, ok := strings.CutPrefix(window, "lc-"); ok && after != "" {
-		for _, sess := range s.mgr.Sessions() {
+		for _, sess := range sessions {
 			if strings.HasPrefix(sess.ID, after) {
 				return sess.ID
 			}

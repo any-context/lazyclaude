@@ -266,6 +266,7 @@ func (rp *RemoteProvider) CreateSession(path string) (*SessionCreateResponse, er
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
+	rp.addToCache(resp)
 	return resp, nil
 }
 
@@ -274,7 +275,11 @@ func (rp *RemoteProvider) Delete(id string) error {
 	if err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}
-	return client.DeleteSession(context.Background(), id)
+	if err := client.DeleteSession(context.Background(), id); err != nil {
+		return err
+	}
+	rp.removeFromCache(id)
+	return nil
 }
 
 func (rp *RemoteProvider) Rename(id, newName string) error {
@@ -390,9 +395,58 @@ func buildTmuxAttachCommand(tmuxTarget string) string {
 
 // --- WorktreeProvider ---
 
+// addToCache appends (or replaces) a session in rp.sessions based on resp.
+// This keeps the in-memory session cache coherent with the remote daemon
+// after a successful create call, without waiting for the next SSE
+// full_sync. Without this, SSE activity events keyed by the new session's
+// UUID would MISS the cache and the sidebar would never transition from
+// Unknown → Running/Idle until the user reconnects.
+//
+// Safe to call with rp.mu unlocked; this method takes the lock itself.
+func (rp *RemoteProvider) addToCache(resp *SessionCreateResponse) {
+	if resp == nil || resp.ID == "" {
+		return
+	}
+	info := SessionInfo{
+		ID:         resp.ID,
+		Name:       resp.Name,
+		Path:       resp.Path,
+		Host:       rp.host,
+		TmuxWindow: resp.TmuxWindow,
+		Role:       resp.Role,
+		Status:     "running",
+	}
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	for i := range rp.sessions {
+		if rp.sessions[i].ID == resp.ID {
+			rp.sessions[i] = info
+			return
+		}
+	}
+	rp.sessions = append(rp.sessions, info)
+}
+
+// removeFromCache drops a session from rp.sessions by ID.
+// Keeps the cache coherent with remote daemon state after a delete.
+func (rp *RemoteProvider) removeFromCache(id string) {
+	if id == "" {
+		return
+	}
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	for i := range rp.sessions {
+		if rp.sessions[i].ID == id {
+			rp.sessions = append(rp.sessions[:i], rp.sessions[i+1:]...)
+			return
+		}
+	}
+}
+
 // invokePostCreate calls the postCreate hook if one is registered.
 // projectRoot is the local grouping path; resp contains the newly created session details.
 func (rp *RemoteProvider) invokePostCreate(projectRoot string, resp *SessionCreateResponse) error {
+	rp.addToCache(resp)
 	if rp.postCreate != nil {
 		return rp.postCreate(rp.host, projectRoot, resp)
 	}

@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"strings"
 	"testing"
@@ -208,7 +210,10 @@ func TestSessionIDForWindow(t *testing.T) {
 		paths := config.TestPaths(tmp)
 		store := session.NewStore(paths.StateFile())
 		mgr := session.NewManager(store, tmux.NewMockClient(), paths, nil)
-		srv := &DaemonServer{mgr: mgr}
+		srv := &DaemonServer{
+			mgr: mgr,
+			log: log.New(io.Discard, "", 0),
+		}
 		return srv
 	}
 
