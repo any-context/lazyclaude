@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // --- mock SSH executor ---
@@ -74,9 +75,8 @@ func TestSSHReadFile_FileExistsReturnsContents(t *testing.T) {
 	t.Parallel()
 	exec := newMockExec(mockSSHResponse{out: []byte(`{"mcpServers":{}}`)})
 	mgr := NewManager("/unused", exec)
-	mgr.SetHost("remote-host")
 
-	got, err := mgr.sshReadFile(context.Background(), `"$HOME/.claude.json"`)
+	got, err := mgr.sshReadFile(context.Background(), "remote-host", `"$HOME/.claude.json"`)
 	if err != nil {
 		t.Fatalf("sshReadFile error = %v", err)
 	}
@@ -108,9 +108,8 @@ func TestSSHReadFile_MissingFileReturnsEmpty(t *testing.T) {
 	// with a zero exit code, so the mock returns nil out + nil err.
 	exec := newMockExec(mockSSHResponse{out: nil})
 	mgr := NewManager("/unused", exec)
-	mgr.SetHost("remote-host")
 
-	got, err := mgr.sshReadFile(context.Background(), `'/tmp/proj/.mcp.json'`)
+	got, err := mgr.sshReadFile(context.Background(), "remote-host", `'/tmp/proj/.mcp.json'`)
 	if err != nil {
 		t.Fatalf("sshReadFile error = %v", err)
 	}
@@ -124,9 +123,8 @@ func TestSSHReadFile_SSHError(t *testing.T) {
 	wantErr := errors.New("ssh: connect: Connection refused")
 	exec := newMockExec(mockSSHResponse{err: wantErr})
 	mgr := NewManager("/unused", exec)
-	mgr.SetHost("dead-host")
 
-	_, err := mgr.sshReadFile(context.Background(), `"$HOME/.claude.json"`)
+	_, err := mgr.sshReadFile(context.Background(), "dead-host", `"$HOME/.claude.json"`)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -139,11 +137,10 @@ func TestSSHWriteFile_Success(t *testing.T) {
 	t.Parallel()
 	exec := newMockExec(mockSSHResponse{}) // one Run call, empty output
 	mgr := NewManager("/unused", exec)
-	mgr.SetHost("remote-host")
 
 	payload := "{\n  \"deniedMcpServers\": [\n    { \"serverName\": \"memory\" }\n  ]\n}\n"
 	remotePath := `'/tmp/proj/.claude/settings.local.json'`
-	if err := mgr.sshWriteFile(context.Background(), remotePath, payload); err != nil {
+	if err := mgr.sshWriteFile(context.Background(), "remote-host", remotePath, payload); err != nil {
 		t.Fatalf("sshWriteFile error = %v", err)
 	}
 
@@ -180,9 +177,8 @@ func TestSSHWriteFile_SSHError(t *testing.T) {
 	wantErr := errors.New("ssh: connect timeout")
 	exec := newMockExec(mockSSHResponse{err: wantErr})
 	mgr := NewManager("/unused", exec)
-	mgr.SetHost("remote-host")
 
-	err := mgr.sshWriteFile(context.Background(), `'/tmp/x'`, "data")
+	err := mgr.sshWriteFile(context.Background(), "remote-host", `'/tmp/x'`, "data")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -364,6 +360,86 @@ func TestManagerToggleDenied_RemotePreservesUnrelatedKeys(t *testing.T) {
 	}
 }
 
+// blockingSSHExecutor blocks every Run call on a shared channel so the
+// test can inject a concurrent SetHost between the capture point and
+// the actual SSH dispatch.
+type blockingSSHExecutor struct {
+	mu      sync.Mutex
+	calls   []mockSSHCall
+	release chan struct{}
+}
+
+func (b *blockingSSHExecutor) Run(_ context.Context, host, command string) ([]byte, error) {
+	b.mu.Lock()
+	b.calls = append(b.calls, mockSSHCall{host: host, command: command})
+	b.mu.Unlock()
+	<-b.release
+	return nil, nil
+}
+
+func (b *blockingSSHExecutor) Copy(_ context.Context, _, _, _ string) error { return nil }
+
+func (b *blockingSSHExecutor) callsSnapshot() []mockSSHCall {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]mockSSHCall, len(b.calls))
+	copy(out, b.calls)
+	return out
+}
+
+func TestManagerRefresh_RemoteHostCaptured(t *testing.T) {
+	t.Parallel()
+	// Regression: an async Refresh must keep targeting the host that
+	// was live when Refresh was invoked, even if the user navigates
+	// to a different host (or back to local) mid-flight. The SSH
+	// helpers must NOT re-read m.host inside the goroutine.
+	exec := &blockingSSHExecutor{release: make(chan struct{}, 4)}
+	mgr := NewManager("/unused", exec)
+	mgr.SetHost("host-A")
+	mgr.SetProjectDir("/proj")
+
+	done := make(chan error, 1)
+	go func() {
+		done <- mgr.Refresh(context.Background())
+	}()
+
+	// Let the goroutine reach the blocking Run call, then swap the
+	// manager's host out from under it.
+	waitForCallCount(t, exec, 1)
+	mgr.SetHost("host-B")
+	// Release all pending SSH reads so Refresh can finish.
+	close(exec.release)
+
+	if err := <-done; err != nil {
+		t.Fatalf("Refresh error = %v", err)
+	}
+
+	calls := exec.callsSnapshot()
+	if len(calls) == 0 {
+		t.Fatal("expected at least one SSH call")
+	}
+	for _, c := range calls {
+		if c.host != "host-A" {
+			t.Errorf("race: ssh call targeted %q, want host-A (the captured host)", c.host)
+		}
+	}
+}
+
+// waitForCallCount spins briefly until the blocking executor has
+// recorded at least `want` calls. Used to sequence the test around the
+// blocking Run without sleeps.
+func waitForCallCount(t *testing.T, exec *blockingSSHExecutor, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(exec.callsSnapshot()) >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for %d ssh call(s)", want)
+}
+
 func TestManagerSetHost_RoundTripToLocal(t *testing.T) {
 	t.Parallel()
 	// Build a local config on disk. After SetHost("") the manager
@@ -397,9 +473,9 @@ func TestManagerSetHost_RoundTripToLocal(t *testing.T) {
 // extractQuotedPayload pulls the base64 payload out of an sshWriteFile
 // command. The command shape is:
 //
-//	mkdir -p "$(dirname PATH)" && printf %s 'BASE64' | base64 -d > PATH
+//	mkdir -p "$(dirname PATH)" && printf '%s' 'BASE64' | base64 -d > PATH
 //
-// The payload is the single-quoted literal between `printf %s ` and
+// The payload is the single-quoted literal between `printf '%s' ` and
 // ` | base64 -d`. Because the payload is pure base64 (A-Za-z0-9+/=)
 // the unquoting is unambiguous.
 func extractQuotedPayload(t *testing.T, cmd string) string {

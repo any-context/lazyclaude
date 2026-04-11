@@ -83,7 +83,7 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	if host == "" {
 		userServers, projectServers, denied, err = m.refreshLocal(projDir)
 	} else {
-		userServers, projectServers, denied, err = m.refreshRemote(ctx, projDir)
+		userServers, projectServers, denied, err = m.refreshRemote(ctx, host, projDir)
 	}
 	if err != nil {
 		return err
@@ -127,10 +127,13 @@ func (m *Manager) refreshLocal(projDir string) (map[string]ServerConfig, map[str
 // refreshRemote reads the three config files from the remote host via
 // SSH. Project-level files (.mcp.json and settings.local.json) are
 // optional: read errors fall back to empty, matching the local path.
-func (m *Manager) refreshRemote(ctx context.Context, projDir string) (map[string]ServerConfig, map[string]ServerConfig, []string, error) {
+//
+// host is captured by Refresh under m.mu and passed through so the SSH
+// helpers cannot be redirected mid-flight by a concurrent SetHost.
+func (m *Manager) refreshRemote(ctx context.Context, host, projDir string) (map[string]ServerConfig, map[string]ServerConfig, []string, error) {
 	// User-level config: mandatory. An SSH failure must propagate so
 	// the caller sees a real error instead of an empty list.
-	userJSON, err := m.sshReadFile(ctx, remoteUserConfigPath)
+	userJSON, err := m.sshReadFile(ctx, host, remoteUserConfigPath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("read user config: %w", err)
 	}
@@ -146,13 +149,13 @@ func (m *Manager) refreshRemote(ctx context.Context, projDir string) (map[string
 	var denied []string
 	if projDir != "" {
 		mcpJSONPath := shell.Quote(projDir + "/.mcp.json")
-		if projectJSON, readErr := m.sshReadFile(ctx, mcpJSONPath); readErr == nil && projectJSON != "" {
+		if projectJSON, readErr := m.sshReadFile(ctx, host, mcpJSONPath); readErr == nil && projectJSON != "" {
 			// .mcp.json is optional — ignore parse errors to match local.
 			projectServers, _ = parseClaudeJSON([]byte(projectJSON))
 		}
 
 		settingsPath := shell.Quote(projDir + "/.claude/settings.local.json")
-		if settingsJSON, readErr := m.sshReadFile(ctx, settingsPath); readErr == nil && settingsJSON != "" {
+		if settingsJSON, readErr := m.sshReadFile(ctx, host, settingsPath); readErr == nil && settingsJSON != "" {
 			denied, _ = parseDeniedServers([]byte(settingsJSON))
 		}
 	}
@@ -209,12 +212,15 @@ func (m *Manager) ToggleDenied(ctx context.Context, serverName string) error {
 			return err
 		}
 	} else {
-		if err := m.toggleDeniedRemote(ctx, projDir, serverName, currentlyDenied); err != nil {
+		if err := m.toggleDeniedRemote(ctx, host, projDir, serverName, currentlyDenied); err != nil {
 			return err
 		}
 	}
 
-	// Re-read to update cached state.
+	// Re-read to update cached state. This deliberately re-reads
+	// m.host rather than reusing the captured snapshot: if the user
+	// navigated away during the write, the cache should reflect the
+	// now-current selection, not the host whose file we just mutated.
 	return m.Refresh(ctx)
 }
 
@@ -238,10 +244,12 @@ func (m *Manager) toggleDeniedLocal(projDir, serverName string, currentlyDenied 
 
 // toggleDeniedRemote performs the read-modify-write against the remote
 // settings.local.json while preserving all unrelated top-level keys.
-func (m *Manager) toggleDeniedRemote(ctx context.Context, projDir, serverName string, currentlyDenied bool) error {
+// host is captured by the caller so the entire RMW targets a single
+// machine even if SetHost is racing from the GUI goroutine.
+func (m *Manager) toggleDeniedRemote(ctx context.Context, host, projDir, serverName string, currentlyDenied bool) error {
 	settingsPath := shell.Quote(projDir + "/.claude/settings.local.json")
 
-	existingJSON, err := m.sshReadFile(ctx, settingsPath)
+	existingJSON, err := m.sshReadFile(ctx, host, settingsPath)
 	if err != nil {
 		return fmt.Errorf("read remote settings: %w", err)
 	}
@@ -257,7 +265,7 @@ func (m *Manager) toggleDeniedRemote(ctx context.Context, projDir, serverName st
 		return fmt.Errorf("build updated settings: %w", err)
 	}
 
-	if err := m.sshWriteFile(ctx, settingsPath, string(newJSON)); err != nil {
+	if err := m.sshWriteFile(ctx, host, settingsPath, string(newJSON)); err != nil {
 		return fmt.Errorf("write remote settings: %w", err)
 	}
 	return nil

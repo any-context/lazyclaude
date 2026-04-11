@@ -34,9 +34,15 @@ import (
 // directly to the remote user's shell which parses it once. Adding a
 // wrapper would collide with shell.Quote's single-quoting and produce
 // syntax errors.
-func (m *Manager) sshReadFile(ctx context.Context, remotePath string) (string, error) {
+//
+// host is passed explicitly (rather than read from m.host) so that an
+// async Refresh/ToggleDenied goroutine keeps targeting the host that
+// was live at call entry. Reading m.host here would race with
+// SetHost(...) from the GUI goroutine and silently redirect the
+// operation to a different machine.
+func (m *Manager) sshReadFile(ctx context.Context, host, remotePath string) (string, error) {
 	cmd := fmt.Sprintf("if [ -f %s ]; then cat %s; fi", remotePath, remotePath)
-	out, err := m.ssh.Run(ctx, m.host, cmd)
+	out, err := m.ssh.Run(ctx, host, cmd)
 	if err != nil {
 		return "", fmt.Errorf("ssh read %s: %w", remotePath, err)
 	}
@@ -48,8 +54,11 @@ func (m *Manager) sshReadFile(ctx context.Context, remotePath string) (string, e
 // (including quotes, $, backticks, newlines) need no shell escaping.
 // The parent directory is created with mkdir -p.
 //
-// remotePath must be pre-quoted in the same way as sshReadFile.
-func (m *Manager) sshWriteFile(ctx context.Context, remotePath, content string) error {
+// remotePath must be pre-quoted in the same way as sshReadFile. host
+// is also passed explicitly so that an async caller captures the value
+// once and the helper cannot be redirected mid-flight by a concurrent
+// SetHost.
+func (m *Manager) sshWriteFile(ctx context.Context, host, remotePath, content string) error {
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
 	// $(dirname ...) is evaluated on the remote side. The encoded
 	// payload is ASCII-safe (A-Za-z0-9+/=) so shell.Quote gives a
@@ -63,7 +72,7 @@ func (m *Manager) sshWriteFile(ctx context.Context, remotePath, content string) 
 		shell.Quote(encoded),
 		remotePath,
 	)
-	if _, err := m.ssh.Run(ctx, m.host, cmd); err != nil {
+	if _, err := m.ssh.Run(ctx, host, cmd); err != nil {
 		return fmt.Errorf("ssh write %s: %w", remotePath, err)
 	}
 	return nil
