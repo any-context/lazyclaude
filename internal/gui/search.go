@@ -161,6 +161,15 @@ func (a *App) applySearchFilter() {
 		if len(filtered) > 0 {
 			a.cursor = 0
 		}
+		// Re-sync the plugin/MCP panels so their remoteDisabled flags
+		// (and any cached project context) match the filtered cursor.
+		// Without this, searching from a remote selection into a local
+		// match would leave the plugin/MCP panels showing the stale
+		// "remote disabled" placeholder even though the new cursor is
+		// local. The write-guard handles this at the key-press layer,
+		// but the render layer also needs to refresh for the UI to be
+		// coherent.
+		a.syncPluginProject()
 	case "plugins":
 		a.pluginState.SetCursor(0)
 	case "logs":

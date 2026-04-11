@@ -395,6 +395,62 @@ func TestGuardRemoteOp_AllClear_ReturnsFalse(t *testing.T) {
 		"local cursor with cleared flag must not trigger the guard")
 }
 
+func TestGuardRemoteOp_StaleFlagOnLocalNode_LiveNodeWins(t *testing.T) {
+	// Regression for the codex P2 follow-up: if some cursor-moving path
+	// (applySearchFilter, cursor clamp in layout, moveCursorToLastSession)
+	// lands the cursor on a LIVE LOCAL node without calling
+	// syncPluginProject, the cached remoteDisabled flag may still be
+	// set. The guard must trust the live node and allow the operation.
+	// OR-ing the flag unconditionally would wrongly block local writes.
+	app, _, _ := newRemoteDisabledApp(t)
+	attachProjectsAndRefresh(app, remoteAndLocalProjects())
+
+	// Cursor lands on the local project (index 0) directly, without
+	// syncPluginProject being called first. The flag is artificially
+	// left in the stale "remote" state.
+	app.cursor = 0
+	require.NotNil(t, app.currentNode())
+	app.pluginState.remoteDisabled = true
+	app.mcpState.remoteDisabled = true
+
+	assert.False(t, app.guardRemoteOp("Plugin editing"),
+		"live local node must override a stale remoteDisabled flag")
+}
+
+func TestApplySearchFilter_SessionsPanel_ReSyncsPluginPanel(t *testing.T) {
+	// Regression for the codex P2 follow-up: applySearchFilter moves
+	// a.cursor when the user searches, but historically did not invoke
+	// syncPluginProject. That left the plugin/MCP panels rendering the
+	// stale remote placeholder after a user searched from a remote
+	// selection into a local match. The fix calls syncPluginProject
+	// from applySearchFilter so both the flag and the cached project
+	// path are refreshed along with the cursor.
+	app, mp, _ := newRemoteDisabledApp(t)
+	attachProjectsAndRefresh(app, remoteAndLocalProjects())
+
+	// Start on the remote node so the flag gets set.
+	app.cursor = 2
+	app.syncPluginProject()
+	require.True(t, app.pluginState.remoteDisabled)
+
+	// Simulate the user searching for "local" — in the real code the
+	// editor updates dialog.SearchQuery and calls applySearchFilter.
+	app.dialog.Kind = DialogSearch
+	app.dialog.SearchPanel = "sessions"
+	app.dialog.SearchQuery = "local"
+	app.applySearchFilter()
+
+	// After the filter snaps the cursor to the first match (the local
+	// project), the panels must observe the local selection.
+	assert.False(t, app.pluginState.remoteDisabled,
+		"applySearchFilter must re-sync plugin panel when cursor lands on local")
+	assert.False(t, app.mcpState.remoteDisabled,
+		"applySearchFilter must re-sync MCP panel when cursor lands on local")
+	assert.Equal(t, "/tmp/local", app.pluginState.projectDir,
+		"applySearchFilter must flow the new projectDir into plugin state")
+	assert.Equal(t, []string{"/tmp/local"}, mp.setProjectCallsSnapshot())
+}
+
 func TestSyncPluginProject_InitialNoNode_FlagStaysFalse(t *testing.T) {
 	app, _, _ := newRemoteDisabledApp(t)
 	// No session provider attached — currentNode() returns nil.

@@ -257,18 +257,22 @@ func (a *App) isRemoteNodeSelected() (string, bool) {
 // remote node, showing a status message. Returns true if the caller should
 // return early.
 //
-// Two independent signals are consulted:
-//  1. isRemoteNodeSelected() — the current cursor actually resolves to a
-//     remote session/project.
-//  2. pluginState.remoteDisabled / mcpState.remoteDisabled — the cached
-//     panel flag, set by syncPluginProject the last time the cursor moved
-//     on to a remote node.
+// Decision policy (kept in this order deliberately):
 //
-// The flag fallback covers the edge case where currentNode() returns nil
-// transiently (e.g. the sessions-panel search filter hides every row, or
-// a tree refresh left the cursor briefly out of range). Without it, a
-// write key pressed during that window would bypass the guard and run
-// against the preserved local provider state.
+//  1. If currentSessionHost() can resolve a node, that resolution is
+//     authoritative. A live local node ALWAYS beats the cached flag:
+//     several cursor-moving paths (applySearchFilter, cursor clamps in
+//     layout, moveCursorToLastSession) mutate a.cursor without calling
+//     syncPluginProject, so pluginState.remoteDisabled may be stale. If
+//     we ORed the flag in here, a user who searched "local" from a
+//     remote selection would see their next plugin action wrongly
+//     rejected until they manually nudged the cursor.
+//
+//  2. If the current node cannot be resolved (nil — e.g. the search
+//     filter hid every row, or the cursor is briefly out of range),
+//     fall back to the cached remoteDisabled flag. This covers the
+//     transient "logical selection is still remote" case that the
+//     node-level check cannot see.
 //
 // The caller sites (PluginInstall, PluginRefresh, MCPToggleDenied, ...)
 // are AppActions methods invoked by the keydispatch layer and do not
@@ -277,14 +281,22 @@ func (a *App) isRemoteNodeSelected() (string, bool) {
 // same pattern runPluginAsync / runMCPAsync use for their own status
 // writes and is consistent with the plan-mandated wrapper shape.
 func (a *App) guardRemoteOp(feature string) bool {
-	host, isRemote := a.isRemoteNodeSelected()
-	flagSet := a.pluginState.remoteDisabled || a.mcpState.remoteDisabled
-	if !isRemote && !flagSet {
+	host, onNode := a.currentSessionHost()
+
+	switch {
+	case onNode && host == "":
+		// Live local node — authoritative, ignore the cached flag.
 		return false
-	}
-	if host == "" {
+	case onNode && host != "":
+		// Live remote node — guard regardless of flag state.
+	default:
+		// No resolvable node: fall back to the cached panel flag.
+		if !a.pluginState.remoteDisabled && !a.mcpState.remoteDisabled {
+			return false
+		}
 		host = "remote"
 	}
+
 	msg := fmt.Sprintf("%s on remote (%s) is not supported yet", feature, host)
 	a.gui.Update(func(g *gocui.Gui) error {
 		a.setStatus(g, msg)
