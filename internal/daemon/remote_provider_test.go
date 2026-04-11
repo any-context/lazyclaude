@@ -512,6 +512,97 @@ func TestRemoteProvider_NoHook_NoError(t *testing.T) {
 	}
 }
 
+func TestRemoteProvider_CaptureScrollback(t *testing.T) {
+	var gotReq ScrollbackRequest
+	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
+		"POST /session/s1/scrollback": func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			testWriteJSON(w, ScrollbackResponse{Content: "remote-body"})
+		},
+	})
+	defer srv.Close()
+
+	resp, err := rp.CaptureScrollback("s1", 120, 10, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Content != "remote-body" {
+		t.Errorf("content=%q, want remote-body", resp.Content)
+	}
+	if gotReq.ID != "s1" || gotReq.Width != 120 || gotReq.StartLine != 10 || gotReq.EndLine != 50 {
+		t.Errorf("got request=%+v", gotReq)
+	}
+}
+
+func TestRemoteProvider_CaptureScrollback_NoClient(t *testing.T) {
+	conn := &mockConnManager{state: Disconnected, err: fmt.Errorf("not connected")}
+	rp := NewRemoteProvider("host", conn)
+	if _, err := rp.CaptureScrollback("s1", 80, 0, 10); err == nil {
+		t.Fatal("expected error when client unavailable")
+	}
+}
+
+func TestRemoteProvider_HistorySize(t *testing.T) {
+	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
+		"GET /session/s1/history-size": func(w http.ResponseWriter, _ *http.Request) {
+			testWriteJSON(w, HistorySizeResponse{Lines: 987})
+		},
+	})
+	defer srv.Close()
+
+	n, err := rp.HistorySize("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 987 {
+		t.Errorf("lines=%d, want 987", n)
+	}
+}
+
+func TestRemoteProvider_HistorySize_NoClient(t *testing.T) {
+	conn := &mockConnManager{state: Disconnected, err: fmt.Errorf("not connected")}
+	rp := NewRemoteProvider("host", conn)
+	if _, err := rp.HistorySize("s1"); err == nil {
+		t.Fatal("expected error when client unavailable")
+	}
+}
+
+func TestRemoteProvider_LocalSessionHost(t *testing.T) {
+	conn := &mockConnManager{state: Connected}
+	rp := NewRemoteProvider("host-A", conn)
+
+	// Unknown id → (, false).
+	if host, ok := rp.LocalSessionHost("nope"); ok || host != "" {
+		t.Errorf("nope: host=%q, ok=%v", host, ok)
+	}
+
+	// Seed the cache with a session.
+	rp.mu.Lock()
+	rp.sessions = []SessionInfo{{ID: "s1", Name: "cached"}}
+	rp.mu.Unlock()
+
+	host, ok := rp.LocalSessionHost("s1")
+	if !ok {
+		t.Fatal("s1: want ok=true")
+	}
+	if host != "host-A" {
+		t.Errorf("host=%q, want host-A", host)
+	}
+}
+
+// CapturePreview is intentionally still a stub; the mirror window path
+// handles remote previews. If this test starts failing it means someone
+// re-routed preview capture without updating the plan.
+func TestRemoteProvider_CapturePreview_StillStubbed(t *testing.T) {
+	conn := &mockConnManager{state: Connected}
+	rp := NewRemoteProvider("host", conn)
+	if _, err := rp.CapturePreview("s1", 80, 24); err == nil {
+		t.Fatal("CapturePreview should still return an error (mirror path)")
+	}
+}
+
 func TestRemoteProvider_ConnectionError(t *testing.T) {
 	conn := &mockConnManager{
 		state: Disconnected,

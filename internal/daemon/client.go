@@ -54,6 +54,18 @@ type ClientAPI interface {
 	// MsgSessions lists sessions available for messaging.
 	MsgSessions(ctx context.Context) (*MsgSessionsResponse, error)
 
+	// --- Capture ---
+
+	// CaptureScrollback retrieves a range of scrollback lines for a session.
+	// Used by the fullscreen copy mode for remote sessions where the local
+	// mirror window's tmux buffer does not contain the remote tmux's
+	// historical scrollback.
+	CaptureScrollback(ctx context.Context, req ScrollbackRequest) (*ScrollbackResponse, error)
+
+	// HistorySize returns the pane's scrollback history size for a session.
+	// Used together with CaptureScrollback by the fullscreen copy mode.
+	HistorySize(ctx context.Context, id string) (int, error)
+
 	// --- System Info ---
 
 	// CWD returns the daemon process's working directory.

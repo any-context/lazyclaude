@@ -130,6 +130,30 @@ func (c *HTTPClient) MsgSessions(ctx context.Context) (*MsgSessionsResponse, err
 	return &resp, nil
 }
 
+// --- Capture ---
+
+// CaptureScrollback retrieves a range of scrollback lines for a session via
+// POST /session/{id}/scrollback. Used by the fullscreen copy-mode path for
+// remote sessions.
+func (c *HTTPClient) CaptureScrollback(ctx context.Context, req ScrollbackRequest) (*ScrollbackResponse, error) {
+	var resp ScrollbackResponse
+	if err := c.postJSON(ctx, sessionPath(req.ID, "/scrollback"), req, &resp); err != nil {
+		return nil, fmt.Errorf("capture scrollback: %w", err)
+	}
+	return &resp, nil
+}
+
+// HistorySize fetches the pane scrollback history size via
+// GET /session/{id}/history-size. Used together with CaptureScrollback by
+// the fullscreen copy mode.
+func (c *HTTPClient) HistorySize(ctx context.Context, id string) (int, error) {
+	var resp HistorySizeResponse
+	if err := c.getJSON(ctx, sessionPath(id, "/history-size"), &resp); err != nil {
+		return 0, fmt.Errorf("history size: %w", err)
+	}
+	return resp.Lines, nil
+}
+
 // --- System Info ---
 
 func (c *HTTPClient) CWD(ctx context.Context) (string, error) {

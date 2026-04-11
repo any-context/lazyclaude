@@ -323,14 +323,47 @@ func (rp *RemoteProvider) CapturePreview(_ string, _, _ int) (*PreviewResponse, 
 	return nil, fmt.Errorf("CapturePreview not supported on remote provider (use mirror window)")
 }
 
-// CaptureScrollback is a no-op for remote sessions.
-func (rp *RemoteProvider) CaptureScrollback(_ string, _, _, _ int) (*ScrollbackResponse, error) {
-	return nil, fmt.Errorf("CaptureScrollback not supported on remote provider (use mirror window)")
+// CaptureScrollback retrieves scrollback via the remote daemon API. This is
+// the fullscreen copy-mode path for remote sessions: the local mirror
+// window's tmux buffer does not contain the remote tmux's historical
+// scrollback, so we ask the remote daemon to run capture-pane against its
+// own tmux server.
+func (rp *RemoteProvider) CaptureScrollback(id string, width, startLine, endLine int) (*ScrollbackResponse, error) {
+	client, err := rp.conn.Client()
+	if err != nil {
+		return nil, fmt.Errorf("capture scrollback: %w", err)
+	}
+	return client.CaptureScrollback(context.Background(), ScrollbackRequest{
+		ID:        id,
+		Width:     width,
+		StartLine: startLine,
+		EndLine:   endLine,
+	})
 }
 
-// HistorySize is a no-op for remote sessions.
-func (rp *RemoteProvider) HistorySize(_ string) (int, error) {
-	return 0, fmt.Errorf("HistorySize not supported on remote provider (use mirror window)")
+// HistorySize returns the remote tmux pane's scrollback history size via
+// the daemon API. Same rationale as CaptureScrollback.
+func (rp *RemoteProvider) HistorySize(id string) (int, error) {
+	client, err := rp.conn.Client()
+	if err != nil {
+		return 0, fmt.Errorf("history size: %w", err)
+	}
+	return client.HistorySize(context.Background(), id)
+}
+
+// LocalSessionHost returns the host for a session if it is known to this
+// remote provider's cache. Used by CompositeProvider.providerForCapture to
+// dispatch capture ops to the correct backend without leaking the
+// session.Session type into the daemon package's interface surface.
+func (rp *RemoteProvider) LocalSessionHost(id string) (string, bool) {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	for _, s := range rp.sessions {
+		if s.ID == id {
+			return rp.host, true
+		}
+	}
+	return "", false
 }
 
 // LaunchLazygit launches lazygit on the remote host via SSH -t.

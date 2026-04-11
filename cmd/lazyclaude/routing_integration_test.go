@@ -105,9 +105,10 @@ type fakeSessionProvider struct {
 
 // --- daemon.SessionLister ---
 
-func (f *fakeSessionProvider) HasSession(_ string) bool              { return false }
-func (f *fakeSessionProvider) Host() string                          { return f.host }
-func (f *fakeSessionProvider) Sessions() ([]daemon.SessionInfo, error) { return nil, nil }
+func (f *fakeSessionProvider) HasSession(_ string) bool                { return false }
+func (f *fakeSessionProvider) LocalSessionHost(_ string) (string, bool) { return "", false }
+func (f *fakeSessionProvider) Host() string                            { return f.host }
+func (f *fakeSessionProvider) Sessions() ([]daemon.SessionInfo, error)  { return nil, nil }
 
 // --- daemon.SessionMutator ---
 

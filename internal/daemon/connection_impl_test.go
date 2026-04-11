@@ -42,8 +42,12 @@ func (m *mockClientAPI) MsgCreate(context.Context, MsgCreateRequest) (*MsgCreate
 	return nil, nil
 }
 func (m *mockClientAPI) MsgSessions(context.Context) (*MsgSessionsResponse, error) { return nil, nil }
-func (m *mockClientAPI) Shutdown(context.Context, ShutdownRequest) error            { return nil }
-func (m *mockClientAPI) CWD(context.Context) (string, error)                       { return "", nil }
+func (m *mockClientAPI) CaptureScrollback(context.Context, ScrollbackRequest) (*ScrollbackResponse, error) {
+	return &ScrollbackResponse{}, nil
+}
+func (m *mockClientAPI) HistorySize(context.Context, string) (int, error) { return 0, nil }
+func (m *mockClientAPI) Shutdown(context.Context, ShutdownRequest) error  { return nil }
+func (m *mockClientAPI) CWD(context.Context) (string, error)              { return "", nil }
 func (m *mockClientAPI) SubscribeNotifications(context.Context) (<-chan NotificationEvent, error) {
 	return nil, nil
 }

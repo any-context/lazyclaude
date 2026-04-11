@@ -36,6 +36,18 @@ func (p *localDaemonProvider) HasSession(sessionID string) bool {
 	return p.mgr.Store().FindByID(sessionID) != nil
 }
 
+// LocalSessionHost returns the Host field of the session with the given ID
+// from the local store. Remote mirror sessions are registered in the local
+// store with Host set to the SSH host, so this helper lets the composite
+// provider dispatch capture operations to the right backend.
+func (p *localDaemonProvider) LocalSessionHost(id string) (string, bool) {
+	sess := p.mgr.Store().FindByID(id)
+	if sess == nil {
+		return "", false
+	}
+	return sess.Host, true
+}
+
 func (p *localDaemonProvider) Host() string { return "" }
 
 func (p *localDaemonProvider) Sessions() ([]daemon.SessionInfo, error) {

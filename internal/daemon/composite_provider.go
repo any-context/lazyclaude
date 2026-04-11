@@ -15,6 +15,16 @@ type SessionLister interface {
 	HasSession(sessionID string) bool
 	Host() string
 	Sessions() ([]SessionInfo, error)
+
+	// LocalSessionHost returns the host of a session by ID, if known to
+	// this provider. Used by CompositeProvider.providerForCapture to
+	// dispatch capture ops by host without leaking the session.Session
+	// type into the daemon package's interface surface.
+	//
+	// Returns ("", true) for a session on the local host, (host, true)
+	// for a remote-originated session, and ("", false) when the session
+	// is not found by this provider.
+	LocalSessionHost(id string) (host string, found bool)
 }
 
 // SessionMutator provides session create/delete/rename operations.
@@ -215,18 +225,23 @@ func (c *CompositeProvider) CapturePreview(id string, width, height int) (*Previ
 	return p.CapturePreview(id, width, height)
 }
 
-// CaptureScrollback captures scrollback, routing to the correct provider.
+// CaptureScrollback captures scrollback. Remote sessions go through the
+// remote daemon API because the local mirror window's tmux buffer does not
+// contain the remote tmux's historical scrollback. Local sessions still
+// use the local provider. CapturePreview is not rerouted (it works via the
+// mirror window already), so capture routing is local-only for that path.
 func (c *CompositeProvider) CaptureScrollback(id string, width, startLine, endLine int) (*ScrollbackResponse, error) {
-	p := c.providerForSession(id)
+	p := c.providerForCapture(id)
 	if p == nil {
 		return nil, fmt.Errorf("no provider found for session %q", id)
 	}
 	return p.CaptureScrollback(id, width, startLine, endLine)
 }
 
-// HistorySize returns scrollback size, routing to the correct provider.
+// HistorySize returns scrollback size. Remote sessions go through the
+// remote daemon API for the same reason as CaptureScrollback.
 func (c *CompositeProvider) HistorySize(id string) (int, error) {
-	p := c.providerForSession(id)
+	p := c.providerForCapture(id)
 	if p == nil {
 		return 0, fmt.Errorf("no provider found for session %q", id)
 	}
@@ -336,6 +351,48 @@ func (c *CompositeProvider) providerForSession(sessionID string) SessionProvider
 	if c.local.HasSession(sessionID) {
 		return c.local
 	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, rp := range c.remotes {
+		if rp.HasSession(sessionID) {
+			return rp
+		}
+	}
+	return nil
+}
+
+// providerForCapture returns the provider that should service scrollback /
+// history_size lookups for the given session. Unlike providerForSession
+// (which returns the local provider for remote mirror sessions so that
+// attach / send-keys / preview work via the mirror window), capture routing
+// must dispatch by the session's true host because the remote tmux server's
+// historical scrollback is only reachable via the remote daemon API.
+//
+// Lookup flow:
+//  1. Ask c.local for the session's host.
+//     - host == ""  → session is local, return c.local.
+//     - host != ""  → session is a remote mirror, look up the registered
+//       remote provider for that host and return it.
+//  2. If c.local does not know the session, fall back to the generic
+//     providerForSession search (covers pathological cases where the local
+//     store has not yet learnt about the session).
+func (c *CompositeProvider) providerForCapture(sessionID string) SessionProvider {
+	if host, ok := c.local.LocalSessionHost(sessionID); ok {
+		if host == "" {
+			return c.local
+		}
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+		if rp, ok := c.remotes[host]; ok {
+			return rp
+		}
+		return nil
+	}
+	// Fallback: session is not in the local store. This should not
+	// normally happen because every remote mirror session is inserted
+	// into the local store with Host != "". Scan registered remotes
+	// directly instead of routing through providerForSession, which
+	// would redundantly re-check c.local.
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	for _, rp := range c.remotes {

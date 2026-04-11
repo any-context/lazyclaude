@@ -10,7 +10,14 @@ import (
 
 // APIVersion is the current daemon API version. Checked at connection time
 // via /health. A mismatch indicates the remote binary needs updating.
-const APIVersion = 1
+//
+// Version history:
+//   - 1: initial daemon API (session CRUD, worktree, messaging, SSE)
+//   - 2: adds POST /session/{id}/scrollback and GET /session/{id}/history-size
+//        so that remote fullscreen copy mode can read the remote tmux server's
+//        scrollback directly (the local mirror window's tmux buffer does not
+//        contain the remote tmux's historical scrollback).
+const APIVersion = 2
 
 // --- Session CRUD ---
 

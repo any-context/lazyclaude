@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -95,6 +96,12 @@ func NewDaemonServer(
 	mux.HandleFunc("DELETE /session/{id}", s.withAuth(s.handleSessionDelete))
 	mux.HandleFunc("POST /session/{id}/rename", s.withAuth(s.handleSessionRename))
 	mux.HandleFunc("GET /sessions", s.withAuth(s.handleSessionList))
+
+	// Capture (scrollback / history size). Added in API v2 so that remote
+	// fullscreen copy mode can read the remote tmux server's scrollback
+	// directly (the local mirror window's tmux buffer is empty).
+	mux.HandleFunc("POST /session/{id}/scrollback", s.withAuth(s.handleScrollback))
+	mux.HandleFunc("GET /session/{id}/history-size", s.withAuth(s.handleHistorySize))
 
 	// Worktree
 	mux.HandleFunc("POST /worktree/create", s.withAuth(s.handleWorktreeCreate))
@@ -282,6 +289,72 @@ func (s *DaemonServer) handleSessionList(w http.ResponseWriter, r *http.Request)
 		items[i] = sessionToInfo(sess)
 	}
 	writeJSON(w, http.StatusOK, SessionListResponse{Sessions: items})
+}
+
+// --- Capture handlers ---
+
+// handleScrollback captures a range of scrollback lines for a session by
+// running tmux capture-pane on the daemon's own tmux server. This is the
+// fullscreen copy-mode path for remote sessions: the local mirror window's
+// tmux buffer does not contain the remote tmux's historical scrollback, so
+// the TUI asks the remote daemon to capture from its own server.
+func (s *DaemonServer) handleScrollback(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+	var req ScrollbackRequest
+	if err := readJSON(w, r, &req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	sess := s.mgr.Store().FindByID(id)
+	if sess == nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	target := sess.TmuxTarget()
+	content, err := s.tmux.CapturePaneANSIRange(r.Context(), target, req.StartLine, req.EndLine)
+	if err != nil {
+		s.log.Printf("session/%s/scrollback: %v", id, err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, ScrollbackResponse{Content: content})
+}
+
+// handleHistorySize returns the pane's scrollback history size (number of
+// lines currently held in the tmux pane's history buffer). Used together
+// with handleScrollback by the fullscreen copy-mode.
+func (s *DaemonServer) handleHistorySize(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+	sess := s.mgr.Store().FindByID(id)
+	if sess == nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	target := sess.TmuxTarget()
+	out, err := s.tmux.ShowMessage(r.Context(), target, "#{history_size}")
+	if err != nil {
+		s.log.Printf("session/%s/history-size: %v", id, err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	// tmux #{history_size} is always a plain integer. If we get anything
+	// else the pane is in an unexpected state; surface it as 502 so the
+	// client can distinguish from a legitimate "0 history lines".
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		s.log.Printf("session/%s/history-size: parse %q: %v", id, out, err)
+		http.Error(w, "invalid history size from tmux", http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, HistorySizeResponse{Lines: n})
 }
 
 // --- Worktree handlers ---
