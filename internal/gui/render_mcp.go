@@ -9,10 +9,6 @@ import (
 
 // renderMCPList renders the MCP servers list view.
 func (a *App) renderMCPList(v *gocui.View, maxWidth int, focused bool) {
-	if a.mcpState.remoteDisabled {
-		renderRemoteDisabledPlaceholder(v, "MCP editing on remote hosts is not supported in this build.\n\nSwitch cursor to a local session to manage MCP servers.")
-		return
-	}
 	if a.mcpServers == nil {
 		fmt.Fprintln(v, "")
 		fmt.Fprintln(v, presentation.Dim+"  No MCP provider"+presentation.Reset)
@@ -50,12 +46,6 @@ func (a *App) renderMCPList(v *gocui.View, maxWidth int, focused bool) {
 
 // renderMCPPreview renders the right panel when MCP tab is active.
 func (a *App) renderMCPPreview(v *gocui.View) {
-	if a.mcpState.remoteDisabled {
-		v.Title = " Preview "
-		fmt.Fprintln(v, "")
-		fmt.Fprintln(v, presentation.Dim+"  Remote session — MCP editing not supported"+presentation.Reset)
-		return
-	}
 	if a.mcpServers == nil || a.mcpState.loading {
 		v.Title = " Preview "
 		return

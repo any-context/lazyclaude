@@ -40,7 +40,7 @@ func TestManagerRefresh(t *testing.T) {
 		"deniedMcpServers": [{ "serverName": "memory" }]
 	}`)
 
-	mgr := NewManager(userCfg)
+	mgr := NewManager(userCfg, nil)
 	mgr.SetProjectDir(projDir)
 
 	if err := mgr.Refresh(context.Background()); err != nil {
@@ -85,7 +85,7 @@ func TestManagerToggleDenied(t *testing.T) {
 	mustMkdir(t, projDir)
 	mustMkdir(t, filepath.Join(projDir, ".claude"))
 
-	mgr := NewManager(userCfg)
+	mgr := NewManager(userCfg, nil)
 	mgr.SetProjectDir(projDir)
 
 	if err := mgr.Refresh(context.Background()); err != nil {
@@ -143,7 +143,7 @@ func TestManagerToggleDenied_unknown_server(t *testing.T) {
 	projDir := filepath.Join(dir, "project")
 	mustMkdir(t, projDir)
 
-	mgr := NewManager(userCfg)
+	mgr := NewManager(userCfg, nil)
 	mgr.SetProjectDir(projDir)
 	_ = mgr.Refresh(context.Background())
 
@@ -164,7 +164,7 @@ func TestManagerRefresh_no_project(t *testing.T) {
 		}
 	}`)
 
-	mgr := NewManager(userCfg)
+	mgr := NewManager(userCfg, nil)
 	// No project dir set — should still read user config.
 
 	if err := mgr.Refresh(context.Background()); err != nil {

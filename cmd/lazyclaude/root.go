@@ -295,7 +295,7 @@ func newRootCmd() *cobra.Command {
 			// MCP manager: reads ~/.claude.json + project deny lists
 			home, _ := os.UserHomeDir()
 			userClaudeJSON := filepath.Join(home, ".claude.json")
-			mcpMgr := mcp.NewManager(userClaudeJSON)
+			mcpMgr := mcp.NewManager(userClaudeJSON, ssh)
 			app.SetMCP(&mcpAdapter{mgr: mcpMgr})
 
 			// Wire the notify broker (nil-safe: falls back to file polling only).
@@ -681,8 +681,8 @@ type mcpAdapter struct {
 	mgr *mcp.Manager
 }
 
-func (a *mcpAdapter) SetProjectDir(dir string) {
-	a.mgr.SetProjectDir(dir)
+func (a *mcpAdapter) SetRemote(host, projectDir string) {
+	a.mgr.SetRemote(host, projectDir)
 }
 
 func (a *mcpAdapter) Refresh(ctx context.Context) error {

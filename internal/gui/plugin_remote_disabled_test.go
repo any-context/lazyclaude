@@ -122,18 +122,25 @@ func (m *mockPluginProvider) setProjectCallsSnapshot() []string {
 	return out
 }
 
+// mockRemoteCall captures one SetRemote invocation so tests can
+// assert both fields moved together.
+type mockRemoteCall struct {
+	host       string
+	projectDir string
+}
+
 type mockMCPProvider struct {
 	mu              sync.Mutex
-	setProjectCalls []string
+	setRemoteCalls  []mockRemoteCall
 	refreshCount    int
 	toggleCalls     []string
 	servers         []MCPItem
 }
 
-func (m *mockMCPProvider) SetProjectDir(dir string) {
+func (m *mockMCPProvider) SetRemote(host, projectDir string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.setProjectCalls = append(m.setProjectCalls, dir)
+	m.setRemoteCalls = append(m.setRemoteCalls, mockRemoteCall{host: host, projectDir: projectDir})
 }
 
 func (m *mockMCPProvider) Refresh(_ context.Context) error {
@@ -166,12 +173,24 @@ func (m *mockMCPProvider) refreshCountSnapshot() int {
 	return m.refreshCount
 }
 
-func (m *mockMCPProvider) setProjectCallsSnapshot() []string {
+func (m *mockMCPProvider) setRemoteCallsSnapshot() []mockRemoteCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]string, len(m.setProjectCalls))
-	copy(out, m.setProjectCalls)
+	out := make([]mockRemoteCall, len(m.setRemoteCalls))
+	copy(out, m.setRemoteCalls)
 	return out
+}
+
+// lastSetRemote returns the most recent SetRemote call or a zero
+// value when none has been recorded. Tests use this when only the
+// terminal state matters.
+func (m *mockMCPProvider) lastSetRemote() mockRemoteCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.setRemoteCalls) == 0 {
+		return mockRemoteCall{}
+	}
+	return m.setRemoteCalls[len(m.setRemoteCalls)-1]
 }
 
 // miniSessionProvider is a minimal SessionProvider that exposes a caller-
@@ -266,7 +285,13 @@ func waitFor(t *testing.T, fn func() bool, msg string) {
 
 // --- Step 2/3: syncPluginProject / syncPluginProjectOnce ---
 
-func TestSyncPluginProject_RemoteNode_SkipsRefreshAndFlipsFlag(t *testing.T) {
+func TestSyncPluginProject_RemoteNode_PluginDisabledMCPRouted(t *testing.T) {
+	// Phase 2: on a remote node the plugin panel stays disabled
+	// (Phase 3 territory) while the MCP panel is routed through the
+	// SSH code path. The test asserts the split:
+	//   - plugin.remoteDisabled set, plugin provider untouched
+	//   - mcp.remoteDisabled CLEARED, host+projectDir forwarded,
+	//     Refresh kicked off
 	app, mp, mm := newRemoteDisabledApp(t)
 	attachProjectsAndRefresh(app, remoteAndLocalProjects())
 
@@ -274,13 +299,42 @@ func TestSyncPluginProject_RemoteNode_SkipsRefreshAndFlipsFlag(t *testing.T) {
 	app.cursor = 2
 	app.syncPluginProject()
 
+	// Plugin: still disabled, provider untouched.
 	assert.True(t, app.pluginState.remoteDisabled, "plugin remoteDisabled must be set on remote cursor")
-	assert.True(t, app.mcpState.remoteDisabled, "mcp remoteDisabled must be set on remote cursor")
 	assert.Empty(t, mp.setProjectCallsSnapshot(), "plugin SetProjectDir must not be called on remote")
-	assert.Empty(t, mm.setProjectCallsSnapshot(), "mcp SetProjectDir must not be called on remote")
 	assert.Zero(t, mp.refreshCountSnapshot(), "plugin Refresh must not be called on remote")
-	assert.Zero(t, mm.refreshCountSnapshot(), "mcp Refresh must not be called on remote")
 	assert.Empty(t, app.pluginState.projectDir, "pluginState.projectDir must not be set on remote")
+
+	// MCP: routed to SSH. SetRemote must atomically carry both the
+	// host and the remote project path in a single call.
+	assert.False(t, app.mcpState.remoteDisabled, "mcp remoteDisabled must clear on remote cursor (Phase 2)")
+	assert.Equal(t,
+		[]mockRemoteCall{{host: "ssh-host", projectDir: "/remote/path"}},
+		mm.setRemoteCallsSnapshot(),
+		"mcp SetRemote must fire once with (remote host, remote project path)")
+	waitFor(t, func() bool { return mm.refreshCountSnapshot() >= 1 }, "mcp Refresh must run on remote")
+}
+
+func TestSyncPluginProject_RemoteNode_DedupesOnRepeatedSync(t *testing.T) {
+	// syncPluginProject is called from every cursor movement. On a
+	// remote node the dedupe key (host|projectDir) must prevent
+	// repeat SSH refreshes when the underlying selection has not
+	// actually changed.
+	app, _, mm := newRemoteDisabledApp(t)
+	attachProjectsAndRefresh(app, remoteAndLocalProjects())
+
+	app.cursor = 2
+	app.syncPluginProject()
+	waitFor(t, func() bool { return mm.refreshCountSnapshot() >= 1 }, "first refresh")
+	first := mm.refreshCountSnapshot()
+
+	for i := 0; i < 5; i++ {
+		app.syncPluginProject()
+	}
+	assert.Equal(t, first, mm.refreshCountSnapshot(),
+		"repeated sync on the same remote node must NOT re-spawn Refresh")
+	assert.Len(t, mm.setRemoteCallsSnapshot(), 1,
+		"repeated sync on the same remote node must NOT re-call SetRemote")
 }
 
 func TestSyncPluginProject_LocalNode_RefreshesAndClearsFlag(t *testing.T) {
@@ -289,16 +343,23 @@ func TestSyncPluginProject_LocalNode_RefreshesAndClearsFlag(t *testing.T) {
 
 	// Simulate coming from a prior remote selection.
 	app.pluginState.remoteDisabled = true
-	app.mcpState.remoteDisabled = true
+	app.mcpState.remoteKey = "ssh-host|/remote/path"
 
 	// Cursor on local project (index 0).
 	app.cursor = 0
 	app.syncPluginProject()
 
 	assert.False(t, app.pluginState.remoteDisabled, "plugin remoteDisabled must clear on local cursor")
-	assert.False(t, app.mcpState.remoteDisabled, "mcp remoteDisabled must clear on local cursor")
+	assert.False(t, app.mcpState.remoteDisabled, "mcp remoteDisabled must stay clear on local cursor")
 	assert.Equal(t, []string{"/tmp/local"}, mp.setProjectCallsSnapshot())
-	assert.Equal(t, []string{"/tmp/local"}, mm.setProjectCallsSnapshot())
+	// SetRemote("", local) must fire so the provider atomically
+	// restores the local code path AND installs the local project
+	// dir in one lock acquisition.
+	assert.Equal(t,
+		[]mockRemoteCall{{host: "", projectDir: "/tmp/local"}},
+		mm.setRemoteCallsSnapshot(),
+		"mcp SetRemote(\"\", local) must fire on remote->local transition")
+	assert.Empty(t, app.mcpState.remoteKey, "remoteKey dedupe must clear on local transition")
 	waitFor(t, func() bool { return mp.refreshCountSnapshot() >= 1 }, "plugin Refresh must run on local")
 	waitFor(t, func() bool { return mm.refreshCountSnapshot() >= 1 }, "mcp Refresh must run on local")
 }
@@ -368,7 +429,14 @@ func TestSyncPluginProject_TreeEmpties_ClearsFlagEvenWhenProjectDirIsCWD(t *test
 	// `projectDir != cwd` guard skipped the recovery entirely and
 	// left remoteDisabled stuck true. The flag clear must happen
 	// independently of that refresh-gating check.
-	app, _, _ := newRemoteDisabledApp(t)
+	//
+	// Phase 2 Codex follow-up: even when projectDir==cwd already,
+	// the empty-tree recovery MUST still issue SetRemote("", cwd)
+	// unconditionally. The manager may be holding (remoteHost,
+	// remoteDir) from the preceding remote selection — skipping
+	// the atomic reset would let a subsequent MCP write target the
+	// old remote host through the nil-node guardRemoteOp fallback.
+	app, _, mm := newRemoteDisabledApp(t)
 	cwd, err := filepath.Abs(".")
 	require.NoError(t, err)
 
@@ -413,6 +481,15 @@ func TestSyncPluginProject_TreeEmpties_ClearsFlagEvenWhenProjectDirIsCWD(t *test
 	assert.False(t, app.pluginState.remoteDisabled,
 		"flag must clear on empty-tree recovery even when projectDir already equals CWD")
 	assert.False(t, app.mcpState.remoteDisabled)
+
+	// The atomic (host, projectDir) reset must run even though the
+	// refresh-gating `projectDir != cwd` check is false.
+	last := mm.lastSetRemote()
+	assert.Empty(t, last.host,
+		"empty-tree recovery must atomically clear the manager's host "+
+			"even when projectDir==cwd short-circuits the refresh")
+	assert.Equal(t, cwd, last.projectDir,
+		"empty-tree recovery must install the CWD fallback via SetRemote")
 }
 
 func TestSyncPluginProject_EmptyTreeReset_ResetsPanelCursors(t *testing.T) {
@@ -473,17 +550,24 @@ func TestSyncPluginProject_FilterHidesRemote_FlagPreserved(t *testing.T) {
 	// Edge case surfaced by codex review: an active sessions-panel
 	// search filter can make currentNode() return nil even though the
 	// underlying tree still contains a remote node. In that transient
-	// state the remoteDisabled flag must NOT clear — otherwise the next
-	// write handler falls through the guard and runs against the
-	// preserved local provider state.
-	app, _, _ := newRemoteDisabledApp(t)
+	// state the pluginState.remoteDisabled flag must NOT clear —
+	// otherwise the next plugin write falls through the guard and runs
+	// against the preserved local provider state.
+	//
+	// Phase 2: the MCP panel is no longer "disabled" on remote, but
+	// the dedupe key (remoteKey) must survive the transient so that
+	// returning to the same remote selection does not re-spawn a
+	// wasteful SSH refresh.
+	app, _, mm := newRemoteDisabledApp(t)
 	attachProjectsAndRefresh(app, remoteAndLocalProjects())
 
 	// Put the cursor on the remote node first so the flag is legitimately set.
 	app.cursor = 2
 	app.syncPluginProject()
 	require.True(t, app.pluginState.remoteDisabled)
-	require.True(t, app.mcpState.remoteDisabled)
+	waitFor(t, func() bool { return mm.refreshCountSnapshot() >= 1 }, "baseline refresh")
+	require.Equal(t, "ssh-host|/remote/path", app.mcpState.remoteKey,
+		"precondition: remoteKey must be set after remote sync")
 
 	// Simulate filter yielding zero rows: keep cachedNodes non-empty
 	// but force currentNode() to return nil by parking the cursor out
@@ -498,8 +582,12 @@ func TestSyncPluginProject_FilterHidesRemote_FlagPreserved(t *testing.T) {
 
 	assert.True(t, app.pluginState.remoteDisabled,
 		"plugin remoteDisabled must survive transient nil-node (filter edge case)")
-	assert.True(t, app.mcpState.remoteDisabled,
-		"mcp remoteDisabled must survive transient nil-node (filter edge case)")
+	assert.Equal(t, "ssh-host|/remote/path", app.mcpState.remoteKey,
+		"mcpState.remoteKey must survive transient nil-node so dedupe still short-circuits")
+	// SetRemote must NOT have been re-called (no second entry beyond
+	// the initial remote sync).
+	assert.Len(t, mm.setRemoteCallsSnapshot(), 1,
+		"transient nil-node must not re-invoke SetRemote")
 }
 
 func TestGuardRemoteOp_FilterHidesRemote_FlagFallbackBlocks(t *testing.T) {
@@ -562,15 +650,15 @@ func TestGuardRemoteOp_StaleFlagOnLocalNode_LiveNodeWins(t *testing.T) {
 func TestMoveCursorToLastSession_SyncsPluginPanel(t *testing.T) {
 	// Regression: moveCursorToLastSession moves a.cursor after a
 	// session create/delete but historically did not re-sync the
-	// plugin/MCP panels. The write guards rely on panel state
-	// matching the cursor — otherwise a local→remote cursor jump
-	// would let the write path run with stale local projectDir.
+	// plugin/MCP panels. Without the re-sync, a local→remote cursor
+	// jump would leave the plugin write guard thinking it was still
+	// on the local selection.
 	//
 	// remoteAndLocalProjects() places the remote project second,
 	// so the "last session" resolves to the remote-s1 SessionNode.
 	// We start on the local project and expect moveCursorToLastSession
-	// to flip the flag to remote.
-	app, _, _ := newRemoteDisabledApp(t)
+	// to flip the panels over to the remote selection.
+	app, _, mm := newRemoteDisabledApp(t)
 	attachProjectsAndRefresh(app, remoteAndLocalProjects())
 
 	app.cursor = 0 // local project
@@ -587,8 +675,13 @@ func TestMoveCursorToLastSession_SyncsPluginPanel(t *testing.T) {
 
 	assert.True(t, app.pluginState.remoteDisabled,
 		"moveCursorToLastSession must re-sync plugin panel to remote")
-	assert.True(t, app.mcpState.remoteDisabled,
-		"moveCursorToLastSession must re-sync mcp panel to remote")
+	// Phase 2: mcp is routed to SSH (not disabled). Assert the
+	// (host, projectDir) atomically forwarded through SetRemote.
+	last := mm.lastSetRemote()
+	assert.Equal(t, "ssh-host", last.host,
+		"moveCursorToLastSession must re-sync mcp panel to the remote host")
+	assert.Equal(t, "/remote/path/rs1", last.projectDir,
+		"moveCursorToLastSession must re-sync mcp panel to the remote session path")
 }
 
 func TestCloseSearch_EscRestore_ReSyncsPluginPanel(t *testing.T) {
@@ -598,7 +691,7 @@ func TestCloseSearch_EscRestore_ReSyncsPluginPanel(t *testing.T) {
 	// "start on remote → type local query → Esc" the plugin/MCP
 	// panels would keep showing the local project (from applySearchFilter)
 	// even though the cursor was back on the remote row.
-	app, _, _ := newRemoteDisabledApp(t)
+	app, _, mm := newRemoteDisabledApp(t)
 	attachProjectsAndRefresh(app, remoteAndLocalProjects())
 
 	// Start on remote, establish the expected flag state.
@@ -622,8 +715,13 @@ func TestCloseSearch_EscRestore_ReSyncsPluginPanel(t *testing.T) {
 
 	assert.True(t, app.pluginState.remoteDisabled,
 		"Esc restore must re-sync plugin panel back to remote")
-	assert.True(t, app.mcpState.remoteDisabled,
-		"Esc restore must re-sync MCP panel back to remote")
+	// Phase 2: MCP must be re-routed to the remote host+path rather
+	// than flagged as disabled.
+	last := mm.lastSetRemote()
+	assert.Equal(t, "ssh-host", last.host,
+		"Esc restore must re-point MCP panel at the remote host")
+	assert.Equal(t, "/remote/path", last.projectDir,
+		"Esc restore must re-point MCP panel at the remote project dir")
 }
 
 func TestApplySearchFilter_SessionsPanel_ReSyncsPluginPanel(t *testing.T) {
@@ -671,6 +769,10 @@ func TestSyncPluginProject_InitialNoNode_FlagStaysFalse(t *testing.T) {
 }
 
 func TestSyncPluginProjectOnce_RemoteStartup_SkipsCWDFallback(t *testing.T) {
+	// Phase 2: on a remote startup the plugin panel stays disabled
+	// (projectDir untouched), but the MCP panel is routed to the
+	// remote host. The Once path must short-circuit BEFORE the CWD
+	// fallback so the local CWD plugin refresh is not emitted.
 	app, mp, mm := newRemoteDisabledApp(t)
 	attachProjectsAndRefresh(app, remoteAndLocalProjects())
 
@@ -678,12 +780,20 @@ func TestSyncPluginProjectOnce_RemoteStartup_SkipsCWDFallback(t *testing.T) {
 	app.syncPluginProjectOnce()
 
 	assert.True(t, app.pluginState.remoteDisabled)
-	assert.True(t, app.mcpState.remoteDisabled)
+	assert.False(t, app.mcpState.remoteDisabled, "MCP is enabled on remote in Phase 2")
+
+	// Plugin provider untouched.
 	assert.Empty(t, mp.setProjectCallsSnapshot(), "remote startup must not trigger plugin SetProjectDir")
-	assert.Empty(t, mm.setProjectCallsSnapshot(), "remote startup must not trigger mcp SetProjectDir")
 	assert.Zero(t, mp.refreshCountSnapshot(), "remote startup must not trigger plugin Refresh")
-	assert.Zero(t, mm.refreshCountSnapshot(), "remote startup must not trigger mcp Refresh")
 	assert.Empty(t, app.pluginState.projectDir, "projectDir must stay unset so we don't poison future sync")
+
+	// MCP provider forwarded to the remote host atomically.
+	assert.Equal(t,
+		[]mockRemoteCall{{host: "ssh-host", projectDir: "/remote/path"}},
+		mm.setRemoteCallsSnapshot(),
+		"remote startup must forward (host, projectDir) via SetRemote")
+	waitFor(t, func() bool { return mm.refreshCountSnapshot() >= 1 },
+		"remote startup must trigger a single mcp Refresh")
 }
 
 func TestSyncPluginProjectOnce_NoNode_FallbackRefreshes(t *testing.T) {
@@ -696,8 +806,11 @@ func TestSyncPluginProjectOnce_NoNode_FallbackRefreshes(t *testing.T) {
 	assert.False(t, app.pluginState.remoteDisabled)
 	assert.False(t, app.mcpState.remoteDisabled)
 	assert.Equal(t, ".", app.pluginState.projectDir, "fallback must mark projectDir as initialised")
-	// MCP SetProjectDir is called with an absolute CWD in the fallback.
-	assert.Len(t, mm.setProjectCallsSnapshot(), 1, "fallback must call mcp SetProjectDir once")
+	// MCP SetRemote is called once with ("", abs(CWD)) in the fallback.
+	calls := mm.setRemoteCallsSnapshot()
+	require.Len(t, calls, 1, "fallback must call mcp SetRemote once")
+	assert.Empty(t, calls[0].host, "fallback SetRemote must install the local code path")
+	assert.NotEmpty(t, calls[0].projectDir, "fallback SetRemote must carry the CWD projectDir")
 	waitFor(t, func() bool { return mp.refreshCountSnapshot() >= 1 }, "fallback must call plugin Refresh")
 	waitFor(t, func() bool { return mm.refreshCountSnapshot() >= 1 }, "fallback must call mcp Refresh")
 }
@@ -718,26 +831,19 @@ func TestSyncPluginProjectOnce_FallbackResetsPriorRemoteFlag(t *testing.T) {
 
 // --- Step 5: write entry point guards ---
 
-func TestWriteGuards_RemoteNode_GuardReturnsTrue(t *testing.T) {
-	// Directly exercise guardRemoteOp: if it returns true for a remote
-	// cursor, the callers (PluginInstall et al.) cannot reach their
-	// runPluginAsync / runMCPAsync invocations, so there is nothing
-	// to wait for. This replaces an earlier variant that called each
-	// entry point and slept for goroutines that should never exist.
+func TestWriteGuards_RemoteNode_PluginBlockedMCPAllowed(t *testing.T) {
+	// Phase 2: the plugin write guards still block on a remote
+	// cursor (Phase 3 territory), but MCP writes are NO LONGER
+	// guarded — they run through the SSH code path.
 	app, mp, mm := newRemoteDisabledApp(t)
 	attachProjectsAndRefresh(app, remoteAndLocalProjects())
 	app.cursor = 2 // remote project
 
 	assert.True(t, app.guardRemoteOp("Plugin editing"),
-		"guard must short-circuit on remote cursor")
+		"plugin guard must short-circuit on remote cursor")
 
-	// Defence in depth: calling the entry points should also be a
-	// no-op at the provider level because the guard runs before the
-	// provider calls. These assertions are synchronous — if the guard
-	// failed, the code path after it runs on the calling goroutine up
-	// to the runPluginAsync launch, which itself invokes the provider
-	// before the goroutine starts (SetProjectDir is synchronous in the
-	// local branch). So counter != 0 would be visible immediately.
+	// Calling plugin entry points must be a no-op at the provider
+	// level because the guard runs before the provider calls.
 	app.pluginState.tabIdx = keymap.PluginTabMarketplace
 	app.PluginInstall()
 	app.pluginState.tabIdx = keymap.PluginTabPlugins
@@ -745,17 +851,19 @@ func TestWriteGuards_RemoteNode_GuardReturnsTrue(t *testing.T) {
 	app.PluginToggleEnabled()
 	app.PluginUpdate()
 	app.PluginRefresh()
-	app.pluginState.tabIdx = keymap.PluginTabMCP
-	app.MCPToggleDenied()
-	app.MCPRefresh()
 
 	assert.Zero(t, mp.refreshCountSnapshot(), "plugin Refresh must not run on remote guard")
-	assert.Zero(t, mm.refreshCountSnapshot(), "mcp Refresh must not run on remote guard")
 	assert.Empty(t, mp.installCalls, "plugin Install must not run on remote guard")
 	assert.Empty(t, mp.uninstallCalls, "plugin Uninstall must not run on remote guard")
 	assert.Empty(t, mp.toggleCalls, "plugin ToggleEnabled must not run on remote guard")
 	assert.Empty(t, mp.updateCalls, "plugin Update must not run on remote guard")
-	assert.Empty(t, mm.toggleCalls, "mcp ToggleDenied must not run on remote guard")
+
+	// MCP entry points are unguarded in Phase 2. MCPRefresh reaches
+	// the provider even on a remote cursor.
+	app.pluginState.tabIdx = keymap.PluginTabMCP
+	app.MCPRefresh()
+	waitFor(t, func() bool { return mm.refreshCountSnapshot() >= 1 },
+		"MCPRefresh must reach the provider on remote cursor (Phase 2)")
 }
 
 func TestWriteGuards_LocalNode_ProviderCalled(t *testing.T) {
@@ -855,29 +963,10 @@ func TestRenderRemoteDisabledPlaceholder_ResetsOrigin(t *testing.T) {
 	assert.Equal(t, 0, oy, "placeholder must reset origin y so text is visible")
 }
 
-func TestRenderMCPList_RemoteDisabled_ShowsPlaceholder(t *testing.T) {
-	app, _, _ := newRemoteDisabledApp(t)
-	app.mcpState.remoteDisabled = true
-
-	v := makeTestView(app, "mcp-list")
-	app.renderMCPList(v, 80, false)
-
-	buf := stripANSI(v.Buffer())
-	assert.Contains(t, buf, "MCP editing on remote hosts is not supported")
-	assert.Contains(t, buf, "Switch cursor to a local session")
-}
-
-func TestRenderMCPPreview_RemoteDisabled_ShowsPlaceholder(t *testing.T) {
-	app, _, _ := newRemoteDisabledApp(t)
-	app.mcpState.remoteDisabled = true
-
-	v := makeTestView(app, "mcp-preview")
-	app.renderMCPPreview(v)
-
-	buf := stripANSI(v.Buffer())
-	assert.Contains(t, buf, "Remote session")
-	assert.Contains(t, buf, "MCP editing not supported")
-}
+// Phase 2 removed the remote-disabled placeholder for MCP — MCP now
+// runs through the SSH code path. The render layer falls through to
+// the normal MCPProvider output, so the previous placeholder tests
+// no longer have a feature to exercise.
 
 func TestRenderPluginPreview_RemoteDisabled_ShowsPlaceholder(t *testing.T) {
 	cases := []struct {

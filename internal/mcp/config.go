@@ -23,6 +23,42 @@ type deniedEntry struct {
 	ServerName string `json:"serverName"`
 }
 
+// parseClaudeJSON parses the mcpServers map from a claude.json byte
+// payload. Empty input returns an empty map to match the local ReadFile
+// semantics used elsewhere.
+func parseClaudeJSON(data []byte) (map[string]ServerConfig, error) {
+	if len(data) == 0 {
+		return map[string]ServerConfig{}, nil
+	}
+	var cj claudeJSON
+	if err := json.Unmarshal(data, &cj); err != nil {
+		return nil, fmt.Errorf("parse claude.json: %w", err)
+	}
+	if cj.MCPServers == nil {
+		return map[string]ServerConfig{}, nil
+	}
+	return cj.MCPServers, nil
+}
+
+// parseDeniedServers extracts the deniedMcpServers names from a
+// settings.local.json byte payload. Empty input returns a nil slice.
+func parseDeniedServers(data []byte) ([]string, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var sl settingsLocal
+	if err := json.Unmarshal(data, &sl); err != nil {
+		return nil, fmt.Errorf("parse settings.local.json: %w", err)
+	}
+	names := make([]string, 0, len(sl.DeniedMcpServers))
+	for _, e := range sl.DeniedMcpServers {
+		if e.ServerName != "" {
+			names = append(names, e.ServerName)
+		}
+	}
+	return names, nil
+}
+
 // ReadClaudeJSON reads MCP server definitions from a claude.json file.
 // The file may be ~/.claude.json or {project}/.mcp.json.
 func ReadClaudeJSON(path string) (map[string]ServerConfig, error) {
@@ -30,16 +66,11 @@ func ReadClaudeJSON(path string) (map[string]ServerConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-
-	var cj claudeJSON
-	if err := json.Unmarshal(data, &cj); err != nil {
+	servers, err := parseClaudeJSON(data)
+	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
-
-	if cj.MCPServers == nil {
-		return map[string]ServerConfig{}, nil
-	}
-	return cj.MCPServers, nil
+	return servers, nil
 }
 
 // ReadDeniedServers reads the deniedMcpServers list from a settings.local.json file.
@@ -52,19 +83,45 @@ func ReadDeniedServers(path string) ([]string, error) {
 		}
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-
-	var sl settingsLocal
-	if err := json.Unmarshal(data, &sl); err != nil {
+	names, err := parseDeniedServers(data)
+	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	return names, nil
+}
 
-	names := make([]string, 0, len(sl.DeniedMcpServers))
-	for _, e := range sl.DeniedMcpServers {
-		if e.ServerName != "" {
-			names = append(names, e.ServerName)
+// updateDeniedInJSON takes the current settings.local.json bytes and
+// returns bytes with the deniedMcpServers key updated to reflect the
+// desired denied list. Empty input is treated as "{}" so first-time
+// writes work transparently. Unrelated top-level keys (permissions,
+// hooks, model, etc.) are preserved byte-for-byte via
+// map[string]json.RawMessage. A trailing newline is appended for
+// POSIX-cleanliness.
+func updateDeniedInJSON(existing []byte, denied []string) ([]byte, error) {
+	existingMap := make(map[string]json.RawMessage)
+	if len(existing) > 0 {
+		if err := json.Unmarshal(existing, &existingMap); err != nil {
+			return nil, fmt.Errorf("parse existing settings: %w", err)
 		}
 	}
-	return names, nil
+	if len(denied) == 0 {
+		delete(existingMap, "deniedMcpServers")
+	} else {
+		entries := make([]deniedEntry, len(denied))
+		for i, name := range denied {
+			entries[i] = deniedEntry{ServerName: name}
+		}
+		raw, err := json.Marshal(entries)
+		if err != nil {
+			return nil, fmt.Errorf("marshal denied: %w", err)
+		}
+		existingMap["deniedMcpServers"] = raw
+	}
+	out, err := json.MarshalIndent(existingMap, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal settings: %w", err)
+	}
+	return append(out, '\n'), nil
 }
 
 // WriteDeniedServers updates the deniedMcpServers list in a settings.local.json file.
@@ -75,37 +132,15 @@ func WriteDeniedServers(path string, denied []string) error {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
 
-	// Read existing file into a generic map to preserve other keys.
-	existing := make(map[string]json.RawMessage)
 	data, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	if len(data) > 0 {
-		if err := json.Unmarshal(data, &existing); err != nil {
-			return fmt.Errorf("parse %s: %w", path, err)
-		}
-	}
 
-	if len(denied) == 0 {
-		delete(existing, "deniedMcpServers")
-	} else {
-		entries := make([]deniedEntry, len(denied))
-		for i, name := range denied {
-			entries[i] = deniedEntry{ServerName: name}
-		}
-		raw, err := json.Marshal(entries)
-		if err != nil {
-			return fmt.Errorf("marshal denied: %w", err)
-		}
-		existing["deniedMcpServers"] = raw
-	}
-
-	out, err := json.MarshalIndent(existing, "", "  ")
+	out, err := updateDeniedInJSON(data, denied)
 	if err != nil {
-		return fmt.Errorf("marshal settings: %w", err)
+		return err
 	}
-	out = append(out, '\n')
 
 	return atomicWriteFile(path, out, 0o644)
 }
