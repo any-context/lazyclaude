@@ -76,11 +76,20 @@ func (a *App) layoutFilterIndicator(g *gocui.Gui, panelRect Rect) error {
 // If cancel is true, restores the pre-search cursor position and clears filter.
 // If cancel is false (Enter), persists the filter so items stay filtered.
 func (a *App) closeSearch(g *gocui.Gui, cancel bool) {
+	resyncSessions := false
 	if cancel {
 		// Restore cursor positions from before search.
 		switch a.dialog.SearchPanel {
 		case "sessions":
 			a.cursor = a.dialog.SearchPreCursor
+			// Defer the plugin/MCP re-sync until AFTER the search
+			// query and active filter are cleared below. If we
+			// called syncPluginProject right here, currentNode()
+			// would still see the filtered tree and the restored
+			// pre-search cursor index may lie outside the filtered
+			// range, producing a nil node and leaving the panel
+			// state unchanged.
+			resyncSessions = true
 		case "plugins":
 			a.pluginState.SetCursor(a.dialog.SearchPreCursor)
 		case "logs":
@@ -105,6 +114,15 @@ func (a *App) closeSearch(g *gocui.Gui, cancel bool) {
 	a.dialog.SearchQuery = ""
 	a.dialog.SearchPanel = ""
 	a.dialog.SearchPreCursor = 0
+
+	// Now that the filter state is fully cleared, re-sync the
+	// plugin/MCP panels to whatever the restored cursor resolves to.
+	// See comment above — this must happen after the query/filter
+	// reset so currentNode() reads the unfiltered tree.
+	if resyncSessions {
+		a.syncPluginProject()
+	}
+
 	g.DeleteView(searchInputView)
 	g.Cursor = false
 

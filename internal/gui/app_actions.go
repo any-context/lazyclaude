@@ -257,30 +257,46 @@ func (a *App) isRemoteNodeSelected() (string, bool) {
 // remote node, showing a status message. Returns true if the caller should
 // return early.
 //
-// Decision policy (kept in this order deliberately):
+// Call shape: each write entry point (PluginInstall, PluginRefresh,
+// MCPToggleDenied, ...) invokes guardRemoteOp as the first statement.
+// The guard takes two steps:
 //
-//  1. If currentSessionHost() can resolve a node, that resolution is
-//     authoritative. A live local node ALWAYS beats the cached flag:
-//     several cursor-moving paths (applySearchFilter, cursor clamps in
-//     layout, moveCursorToLastSession) mutate a.cursor without calling
-//     syncPluginProject, so pluginState.remoteDisabled may be stale. If
-//     we ORed the flag in here, a user who searched "local" from a
-//     remote selection would see their next plugin action wrongly
-//     rejected until they manually nudged the cursor.
+//  1. Re-sync the plugin/MCP panels to the current cursor. Several
+//     cursor-moving paths (moveCursorToLastSession, layout cursor
+//     clamps, closeSearch Esc restore, ...) mutate a.cursor without
+//     calling syncPluginProject themselves. Without a re-sync here,
+//     a live local node below could bypass the guard while the
+//     provider state still points at the previous (possibly remote or
+//     CWD-fallback) context. syncPluginProject is idempotent on the
+//     same cursor thanks to its projectPath-equals-cache short-circuit,
+//     so re-calling it on every write is cheap.
 //
-//  2. If the current node cannot be resolved (nil — e.g. the search
-//     filter hid every row, or the cursor is briefly out of range),
-//     fall back to the cached remoteDisabled flag. This covers the
-//     transient "logical selection is still remote" case that the
-//     node-level check cannot see.
+//  2. Decide based on the now-fresh state:
+//     - live local node → return false (allow the write)
+//     - live remote node → block and status-message
+//     - nil node (filter hides every row, cursor out of range, empty
+//       tree) → fall back to pluginState.remoteDisabled /
+//       mcpState.remoteDisabled; when set, block; when clear, allow.
 //
-// The caller sites (PluginInstall, PluginRefresh, MCPToggleDenied, ...)
-// are AppActions methods invoked by the keydispatch layer and do not
-// receive a *gocui.Gui. setStatus requires a gui to find the status
-// view, so we re-enter the main goroutine via gui.Update. This is the
-// same pattern runPluginAsync / runMCPAsync use for their own status
-// writes and is consistent with the plan-mandated wrapper shape.
+// The caller sites are AppActions methods invoked by the keydispatch
+// layer and do not receive a *gocui.Gui. setStatus requires a gui to
+// find the status view, so we re-enter the main goroutine via
+// gui.Update. This is the same pattern runPluginAsync / runMCPAsync
+// use for their own status writes and is consistent with the
+// plan-mandated wrapper shape.
 func (a *App) guardRemoteOp(feature string) bool {
+	// Snap the panel state to the current cursor before making any
+	// decision. Several cursor-moving paths (moveCursorToLastSession,
+	// layout cursor clamps, closeSearch on Esc) bypass
+	// syncPluginProject, which can leave pluginState.projectDir and
+	// remoteDisabled out of sync with the live node. Without this
+	// re-sync the local-node bypass below would let a plugin/MCP
+	// write run against the stale provider context (wrong project
+	// dir, or CWD fallback). syncPluginProject is idempotent on the
+	// same cursor because it short-circuits when projectPath matches
+	// pluginState.projectDir, so calling it on every write is cheap.
+	a.syncPluginProject()
+
 	host, onNode := a.currentSessionHost()
 
 	switch {

@@ -370,17 +370,27 @@ func TestSyncPluginProject_FilterHidesRemote_FlagPreserved(t *testing.T) {
 		"mcp remoteDisabled must survive transient nil-node (filter edge case)")
 }
 
-func TestGuardRemoteOp_FlagSetButNoNode_StillGuards(t *testing.T) {
-	// Defence in depth: even if syncPluginProject somehow left the
-	// remoteDisabled flag set and the cursor then landed on nil, the
-	// write guard must still return true so mutate-local-by-accident
-	// cannot slip through.
+func TestGuardRemoteOp_FilterHidesRemote_FlagFallbackBlocks(t *testing.T) {
+	// Edge case: sessions-panel filter yields no matches while the
+	// underlying tree still holds a remote node, so cachedNodes is
+	// non-empty but currentNode() returns nil. syncPluginProject
+	// preserves the remoteDisabled flag in that case (len(cachedNodes)
+	// > 0), and the guard must fall back to the flag so writes stay
+	// blocked.
 	app, _, _ := newRemoteDisabledApp(t)
-	app.pluginState.remoteDisabled = true
+	attachProjectsAndRefresh(app, remoteAndLocalProjects())
+
+	// Legitimately set the flag by selecting the remote node first.
+	app.cursor = 2
+	app.syncPluginProject()
+	require.True(t, app.pluginState.remoteDisabled)
+
+	// Park cursor out of range (simulates filter that hides every row).
+	app.cursor = len(app.cachedNodes) + 10
 	require.Nil(t, app.currentNode())
 
 	assert.True(t, app.guardRemoteOp("Plugin editing"),
-		"flag-only state must keep the guard effective")
+		"nil-node + non-empty tree must fall back to the flag and block")
 }
 
 func TestGuardRemoteOp_AllClear_ReturnsFalse(t *testing.T) {
@@ -415,6 +425,66 @@ func TestGuardRemoteOp_StaleFlagOnLocalNode_LiveNodeWins(t *testing.T) {
 
 	assert.False(t, app.guardRemoteOp("Plugin editing"),
 		"live local node must override a stale remoteDisabled flag")
+}
+
+func TestGuardRemoteOp_ReSyncsBeforeDecision(t *testing.T) {
+	// Regression for codex P1 follow-up: the guard must re-sync the
+	// panel state to the current cursor before making its decision,
+	// otherwise a cursor-moving path that bypassed syncPluginProject
+	// (layout clamps, moveCursorToLastSession, closeSearch Esc) could
+	// leave pluginState.projectDir stale and the local-node bypass
+	// would allow writes against the wrong provider context.
+	app, mp, _ := newRemoteDisabledApp(t)
+	attachProjectsAndRefresh(app, remoteAndLocalProjects())
+
+	// Cursor lands directly on local without going through
+	// syncPluginProject.
+	app.cursor = 0
+	require.Empty(t, app.pluginState.projectDir,
+		"precondition: syncPluginProject has not run yet")
+
+	allowed := !app.guardRemoteOp("Plugin editing")
+	require.True(t, allowed, "local cursor must be allowed")
+
+	assert.Equal(t, "/tmp/local", app.pluginState.projectDir,
+		"guardRemoteOp must re-sync pluginState.projectDir before bypassing")
+	assert.Equal(t, []string{"/tmp/local"}, mp.setProjectCallsSnapshot(),
+		"plugin provider must receive SetProjectDir during the re-sync")
+}
+
+func TestCloseSearch_EscRestore_ReSyncsPluginPanel(t *testing.T) {
+	// Regression for codex P2 follow-up: when Esc cancels a sessions
+	// search, the cursor snaps back to the pre-search row but
+	// closeSearch historically did not call syncPluginProject. After
+	// "start on remote → type local query → Esc" the plugin/MCP
+	// panels would keep showing the local project (from applySearchFilter)
+	// even though the cursor was back on the remote row.
+	app, _, _ := newRemoteDisabledApp(t)
+	attachProjectsAndRefresh(app, remoteAndLocalProjects())
+
+	// Start on remote, establish the expected flag state.
+	app.cursor = 2
+	app.syncPluginProject()
+	require.True(t, app.pluginState.remoteDisabled)
+
+	// Simulate the search flow: dialog opens, query types, filter
+	// snaps to local, Esc restores the original cursor.
+	app.dialog.Kind = DialogSearch
+	app.dialog.SearchPanel = "sessions"
+	app.dialog.SearchPreCursor = 2
+	app.dialog.SearchQuery = "local"
+	app.applySearchFilter()
+	require.False(t, app.pluginState.remoteDisabled,
+		"precondition: applySearchFilter moved the panels to local")
+
+	// Esc — closeSearch restores the pre-search cursor and must
+	// re-sync the plugin/MCP panels back to the remote selection.
+	app.closeSearch(app.gui, true)
+
+	assert.True(t, app.pluginState.remoteDisabled,
+		"Esc restore must re-sync plugin panel back to remote")
+	assert.True(t, app.mcpState.remoteDisabled,
+		"Esc restore must re-sync MCP panel back to remote")
 }
 
 func TestApplySearchFilter_SessionsPanel_ReSyncsPluginPanel(t *testing.T) {
