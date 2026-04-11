@@ -50,7 +50,9 @@ func NewManager(userConfig string, ssh daemon.SSHExecutor) *Manager {
 
 // SetProjectDir sets the project directory for subsequent operations.
 // For remote managers the directory must be an absolute path valid on
-// the remote host.
+// the remote host. Prefer SetRemote when callers also need to change
+// the host — otherwise the two setters introduce a mixed-pair window
+// that an async Refresh could observe.
 func (m *Manager) SetProjectDir(dir string) {
 	m.mu.Lock()
 	m.projectDir = dir
@@ -58,10 +60,27 @@ func (m *Manager) SetProjectDir(dir string) {
 }
 
 // SetHost switches the manager between local and SSH-backed modes.
-// An empty host restores the local code path.
+// An empty host restores the local code path. Prefer SetRemote when
+// callers also need to change projectDir atomically.
 func (m *Manager) SetHost(host string) {
 	m.mu.Lock()
 	m.host = host
+	m.mu.Unlock()
+}
+
+// SetRemote atomically updates both host and projectDir under a
+// single lock acquisition. This is the preferred setter for GUI code
+// paths because it eliminates the mixed-pair window that SetHost
+// followed by SetProjectDir would expose to a concurrent Refresh /
+// ToggleDenied running on a previously-spawned goroutine.
+//
+// Passing host="" installs the local code path; passing host="" with
+// an empty dir is equivalent to "no target, operate in user-config
+// only" mode.
+func (m *Manager) SetRemote(host, projectDir string) {
+	m.mu.Lock()
+	m.host = host
+	m.projectDir = projectDir
 	m.mu.Unlock()
 }
 

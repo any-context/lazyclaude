@@ -122,25 +122,25 @@ func (m *mockPluginProvider) setProjectCallsSnapshot() []string {
 	return out
 }
 
+// mockRemoteCall captures one SetRemote invocation so tests can
+// assert both fields moved together.
+type mockRemoteCall struct {
+	host       string
+	projectDir string
+}
+
 type mockMCPProvider struct {
 	mu              sync.Mutex
-	setProjectCalls []string
-	setHostCalls    []string
+	setRemoteCalls  []mockRemoteCall
 	refreshCount    int
 	toggleCalls     []string
 	servers         []MCPItem
 }
 
-func (m *mockMCPProvider) SetProjectDir(dir string) {
+func (m *mockMCPProvider) SetRemote(host, projectDir string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.setProjectCalls = append(m.setProjectCalls, dir)
-}
-
-func (m *mockMCPProvider) SetHost(host string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.setHostCalls = append(m.setHostCalls, host)
+	m.setRemoteCalls = append(m.setRemoteCalls, mockRemoteCall{host: host, projectDir: projectDir})
 }
 
 func (m *mockMCPProvider) Refresh(_ context.Context) error {
@@ -173,20 +173,24 @@ func (m *mockMCPProvider) refreshCountSnapshot() int {
 	return m.refreshCount
 }
 
-func (m *mockMCPProvider) setProjectCallsSnapshot() []string {
+func (m *mockMCPProvider) setRemoteCallsSnapshot() []mockRemoteCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]string, len(m.setProjectCalls))
-	copy(out, m.setProjectCalls)
+	out := make([]mockRemoteCall, len(m.setRemoteCalls))
+	copy(out, m.setRemoteCalls)
 	return out
 }
 
-func (m *mockMCPProvider) setHostCallsSnapshot() []string {
+// lastSetRemote returns the most recent SetRemote call or a zero
+// value when none has been recorded. Tests use this when only the
+// terminal state matters.
+func (m *mockMCPProvider) lastSetRemote() mockRemoteCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]string, len(m.setHostCalls))
-	copy(out, m.setHostCalls)
-	return out
+	if len(m.setRemoteCalls) == 0 {
+		return mockRemoteCall{}
+	}
+	return m.setRemoteCalls[len(m.setRemoteCalls)-1]
 }
 
 // miniSessionProvider is a minimal SessionProvider that exposes a caller-
@@ -301,10 +305,13 @@ func TestSyncPluginProject_RemoteNode_PluginDisabledMCPRouted(t *testing.T) {
 	assert.Zero(t, mp.refreshCountSnapshot(), "plugin Refresh must not be called on remote")
 	assert.Empty(t, app.pluginState.projectDir, "pluginState.projectDir must not be set on remote")
 
-	// MCP: routed to SSH.
+	// MCP: routed to SSH. SetRemote must atomically carry both the
+	// host and the remote project path in a single call.
 	assert.False(t, app.mcpState.remoteDisabled, "mcp remoteDisabled must clear on remote cursor (Phase 2)")
-	assert.Equal(t, []string{"ssh-host"}, mm.setHostCallsSnapshot(), "mcp SetHost must receive the remote host")
-	assert.Equal(t, []string{"/remote/path"}, mm.setProjectCallsSnapshot(), "mcp SetProjectDir must receive the remote project path")
+	assert.Equal(t,
+		[]mockRemoteCall{{host: "ssh-host", projectDir: "/remote/path"}},
+		mm.setRemoteCallsSnapshot(),
+		"mcp SetRemote must fire once with (remote host, remote project path)")
 	waitFor(t, func() bool { return mm.refreshCountSnapshot() >= 1 }, "mcp Refresh must run on remote")
 }
 
@@ -326,8 +333,8 @@ func TestSyncPluginProject_RemoteNode_DedupesOnRepeatedSync(t *testing.T) {
 	}
 	assert.Equal(t, first, mm.refreshCountSnapshot(),
 		"repeated sync on the same remote node must NOT re-spawn Refresh")
-	assert.Len(t, mm.setHostCallsSnapshot(), 1,
-		"repeated sync on the same remote node must NOT re-call SetHost")
+	assert.Len(t, mm.setRemoteCallsSnapshot(), 1,
+		"repeated sync on the same remote node must NOT re-call SetRemote")
 }
 
 func TestSyncPluginProject_LocalNode_RefreshesAndClearsFlag(t *testing.T) {
@@ -345,10 +352,13 @@ func TestSyncPluginProject_LocalNode_RefreshesAndClearsFlag(t *testing.T) {
 	assert.False(t, app.pluginState.remoteDisabled, "plugin remoteDisabled must clear on local cursor")
 	assert.False(t, app.mcpState.remoteDisabled, "mcp remoteDisabled must stay clear on local cursor")
 	assert.Equal(t, []string{"/tmp/local"}, mp.setProjectCallsSnapshot())
-	assert.Equal(t, []string{"/tmp/local"}, mm.setProjectCallsSnapshot())
-	// SetHost("") must be called so the provider restores the local code path.
-	assert.Equal(t, []string{""}, mm.setHostCallsSnapshot(),
-		"mcp SetHost(\"\") must fire on remote->local transition")
+	// SetRemote("", local) must fire so the provider atomically
+	// restores the local code path AND installs the local project
+	// dir in one lock acquisition.
+	assert.Equal(t,
+		[]mockRemoteCall{{host: "", projectDir: "/tmp/local"}},
+		mm.setRemoteCallsSnapshot(),
+		"mcp SetRemote(\"\", local) must fire on remote->local transition")
 	assert.Empty(t, app.mcpState.remoteKey, "remoteKey dedupe must clear on local transition")
 	waitFor(t, func() bool { return mp.refreshCountSnapshot() >= 1 }, "plugin Refresh must run on local")
 	waitFor(t, func() bool { return mm.refreshCountSnapshot() >= 1 }, "mcp Refresh must run on local")
@@ -558,10 +568,10 @@ func TestSyncPluginProject_FilterHidesRemote_FlagPreserved(t *testing.T) {
 		"plugin remoteDisabled must survive transient nil-node (filter edge case)")
 	assert.Equal(t, "ssh-host|/remote/path", app.mcpState.remoteKey,
 		"mcpState.remoteKey must survive transient nil-node so dedupe still short-circuits")
-	// SetHost must NOT have been re-called (no second entry beyond the
-	// initial remote sync).
-	assert.Len(t, mm.setHostCallsSnapshot(), 1,
-		"transient nil-node must not re-invoke SetHost")
+	// SetRemote must NOT have been re-called (no second entry beyond
+	// the initial remote sync).
+	assert.Len(t, mm.setRemoteCallsSnapshot(), 1,
+		"transient nil-node must not re-invoke SetRemote")
 }
 
 func TestGuardRemoteOp_FilterHidesRemote_FlagFallbackBlocks(t *testing.T) {
@@ -649,13 +659,13 @@ func TestMoveCursorToLastSession_SyncsPluginPanel(t *testing.T) {
 
 	assert.True(t, app.pluginState.remoteDisabled,
 		"moveCursorToLastSession must re-sync plugin panel to remote")
-	// Phase 2: mcp is routed to SSH (not disabled). Assert the host
-	// forwarded through the provider rather than the dead placeholder
-	// flag from Phase 1.
-	hosts := mm.setHostCallsSnapshot()
-	require.NotEmpty(t, hosts, "SetHost must be called when cursor lands on remote")
-	assert.Equal(t, "ssh-host", hosts[len(hosts)-1],
+	// Phase 2: mcp is routed to SSH (not disabled). Assert the
+	// (host, projectDir) atomically forwarded through SetRemote.
+	last := mm.lastSetRemote()
+	assert.Equal(t, "ssh-host", last.host,
 		"moveCursorToLastSession must re-sync mcp panel to the remote host")
+	assert.Equal(t, "/remote/path/rs1", last.projectDir,
+		"moveCursorToLastSession must re-sync mcp panel to the remote session path")
 }
 
 func TestCloseSearch_EscRestore_ReSyncsPluginPanel(t *testing.T) {
@@ -689,12 +699,13 @@ func TestCloseSearch_EscRestore_ReSyncsPluginPanel(t *testing.T) {
 
 	assert.True(t, app.pluginState.remoteDisabled,
 		"Esc restore must re-sync plugin panel back to remote")
-	// Phase 2: MCP must be re-routed to the remote host rather than
-	// flagged as disabled.
-	hosts := mm.setHostCallsSnapshot()
-	require.NotEmpty(t, hosts, "SetHost must fire when restoring remote selection")
-	assert.Equal(t, "ssh-host", hosts[len(hosts)-1],
+	// Phase 2: MCP must be re-routed to the remote host+path rather
+	// than flagged as disabled.
+	last := mm.lastSetRemote()
+	assert.Equal(t, "ssh-host", last.host,
 		"Esc restore must re-point MCP panel at the remote host")
+	assert.Equal(t, "/remote/path", last.projectDir,
+		"Esc restore must re-point MCP panel at the remote project dir")
 }
 
 func TestApplySearchFilter_SessionsPanel_ReSyncsPluginPanel(t *testing.T) {
@@ -760,11 +771,11 @@ func TestSyncPluginProjectOnce_RemoteStartup_SkipsCWDFallback(t *testing.T) {
 	assert.Zero(t, mp.refreshCountSnapshot(), "remote startup must not trigger plugin Refresh")
 	assert.Empty(t, app.pluginState.projectDir, "projectDir must stay unset so we don't poison future sync")
 
-	// MCP provider forwarded to the remote host.
-	assert.Equal(t, []string{"ssh-host"}, mm.setHostCallsSnapshot(),
-		"remote startup must forward the host to the MCP provider")
-	assert.Equal(t, []string{"/remote/path"}, mm.setProjectCallsSnapshot(),
-		"remote startup must forward the remote project path to the MCP provider")
+	// MCP provider forwarded to the remote host atomically.
+	assert.Equal(t,
+		[]mockRemoteCall{{host: "ssh-host", projectDir: "/remote/path"}},
+		mm.setRemoteCallsSnapshot(),
+		"remote startup must forward (host, projectDir) via SetRemote")
 	waitFor(t, func() bool { return mm.refreshCountSnapshot() >= 1 },
 		"remote startup must trigger a single mcp Refresh")
 }
@@ -779,8 +790,11 @@ func TestSyncPluginProjectOnce_NoNode_FallbackRefreshes(t *testing.T) {
 	assert.False(t, app.pluginState.remoteDisabled)
 	assert.False(t, app.mcpState.remoteDisabled)
 	assert.Equal(t, ".", app.pluginState.projectDir, "fallback must mark projectDir as initialised")
-	// MCP SetProjectDir is called with an absolute CWD in the fallback.
-	assert.Len(t, mm.setProjectCallsSnapshot(), 1, "fallback must call mcp SetProjectDir once")
+	// MCP SetRemote is called once with ("", abs(CWD)) in the fallback.
+	calls := mm.setRemoteCallsSnapshot()
+	require.Len(t, calls, 1, "fallback must call mcp SetRemote once")
+	assert.Empty(t, calls[0].host, "fallback SetRemote must install the local code path")
+	assert.NotEmpty(t, calls[0].projectDir, "fallback SetRemote must carry the CWD projectDir")
 	waitFor(t, func() bool { return mp.refreshCountSnapshot() >= 1 }, "fallback must call plugin Refresh")
 	waitFor(t, func() bool { return mm.refreshCountSnapshot() >= 1 }, "fallback must call mcp Refresh")
 }

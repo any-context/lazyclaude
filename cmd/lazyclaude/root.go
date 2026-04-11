@@ -681,12 +681,8 @@ type mcpAdapter struct {
 	mgr *mcp.Manager
 }
 
-func (a *mcpAdapter) SetProjectDir(dir string) {
-	a.mgr.SetProjectDir(dir)
-}
-
-func (a *mcpAdapter) SetHost(host string) {
-	a.mgr.SetHost(host)
+func (a *mcpAdapter) SetRemote(host, projectDir string) {
+	a.mgr.SetRemote(host, projectDir)
 }
 
 func (a *mcpAdapter) Refresh(ctx context.Context) error {

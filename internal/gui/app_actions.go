@@ -148,14 +148,16 @@ func (a *App) syncPluginProjectOnce() {
 	if a.mcpServers != nil {
 		a.mcpState.remoteDisabled = false
 		a.mcpState.remoteKey = ""
-		a.mcpServers.SetHost("")
 	}
 	a.runPluginAsync(func(ctx context.Context) error {
 		return a.plugins.Refresh(ctx)
 	})
 	if a.mcpServers != nil {
 		cwd, _ := filepath.Abs(".")
-		a.mcpServers.SetProjectDir(cwd)
+		// Atomically install the local target so any in-flight async
+		// goroutine spawned from a previous remote selection cannot
+		// observe a (host, projectDir) mixed pair mid-swap.
+		a.mcpServers.SetRemote("", cwd)
 		a.runMCPAsync(func(ctx context.Context) error {
 			return a.mcpServers.Refresh(ctx)
 		})
@@ -171,16 +173,15 @@ func (a *App) syncPluginProject() {
 	}
 
 	// clearRemoteDisabled resets the plugin remoteDisabled flag and
-	// switches the MCP provider back to the local code path. Used by
-	// the local-node branch AND the no-node early return so the panels
-	// do not stay stuck in "remote disabled" state after a remote
-	// session is closed and there is no node to drive the local branch.
+	// the MCP dedupe cache. It deliberately does NOT touch the MCP
+	// provider's host/projectDir — the caller path is responsible for
+	// calling SetRemote atomically with the final target so that no
+	// async goroutine can observe a mid-swap mixed pair.
 	clearRemoteDisabled := func() {
 		a.pluginState.remoteDisabled = false
 		if a.mcpServers != nil {
 			a.mcpState.remoteDisabled = false
 			a.mcpState.remoteKey = ""
-			a.mcpServers.SetHost("")
 		}
 	}
 
@@ -226,7 +227,10 @@ func (a *App) syncPluginProject() {
 				})
 				if a.mcpServers != nil {
 					a.mcpState.cursor = 0
-					a.mcpServers.SetProjectDir(cwd)
+					// Atomic SetRemote: clear any leftover remote
+					// host and install the local CWD projectDir in
+					// one lock acquisition.
+					a.mcpServers.SetRemote("", cwd)
 					a.runMCPAsync(func(ctx context.Context) error {
 						return a.mcpServers.Refresh(ctx)
 					})
@@ -246,7 +250,7 @@ func (a *App) syncPluginProject() {
 	//     pluginState.projectDir or call SetProjectDir("") — see the
 	//     Phase 1 rationale below.
 	//   - MCP panel: Phase 2 drives the provider through its SSH code
-	//     path. SetHost + SetProjectDir flip the manager into remote
+	//     path. SetRemote atomically flips the manager into remote
 	//     mode and runMCPAsync loads the remote server list.
 	if host, isRemote := a.isRemoteNodeSelected(); isRemote {
 		a.pluginState.remoteDisabled = true
@@ -268,8 +272,10 @@ func (a *App) syncPluginProject() {
 			if remoteProjectPath != "" && a.mcpState.remoteKey != key {
 				a.mcpState.remoteKey = key
 				a.mcpState.cursor = 0
-				a.mcpServers.SetHost(host)
-				a.mcpServers.SetProjectDir(remoteProjectPath)
+				// Atomic: one lock acquisition installs both
+				// host and projectDir, so a racing async
+				// goroutine cannot observe a mixed pair.
+				a.mcpServers.SetRemote(host, remoteProjectPath)
 				a.runMCPAsync(func(ctx context.Context) error {
 					return a.mcpServers.Refresh(ctx)
 				})
@@ -287,7 +293,25 @@ func (a *App) syncPluginProject() {
 	} else if node.Session != nil {
 		projectPath = a.configDirForSession(node.Session)
 	}
-	if projectPath == "" || projectPath == a.pluginState.projectDir {
+	if projectPath == "" {
+		return
+	}
+
+	// Atomically install the local MCP target BEFORE the refresh
+	// short-circuit. Even when projectPath matches the cached
+	// pluginState.projectDir (local-to-same-local cursor movement, or
+	// remote→local where the cache points to this local project),
+	// this guarantees the provider's (host, projectDir) pair is
+	// consistent with the live cursor. Without the unconditional
+	// SetRemote here, a remote→local transition into a cached
+	// project would leave the manager holding (remoteHost, remoteDir)
+	// — a subsequent MCPRefresh / MCPToggleDenied would then target
+	// the wrong machine.
+	if a.mcpServers != nil {
+		a.mcpServers.SetRemote("", projectPath)
+	}
+
+	if projectPath == a.pluginState.projectDir {
 		return
 	}
 	a.pluginState.projectDir = projectPath
@@ -300,7 +324,6 @@ func (a *App) syncPluginProject() {
 
 	if a.mcpServers != nil {
 		a.mcpState.cursor = 0
-		a.mcpServers.SetProjectDir(projectPath)
 		a.runMCPAsync(func(ctx context.Context) error {
 			return a.mcpServers.Refresh(ctx)
 		})
