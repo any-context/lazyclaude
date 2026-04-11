@@ -166,3 +166,102 @@ func TestResolveActivityWindow_NilActivityNotification(t *testing.T) {
 		t.Errorf("out.ActivityNotification = %v, want nil", out.ActivityNotification)
 	}
 }
+
+// --- rewriteToolNotificationWindow (Bug 5 Phase B) ---
+//
+// These tests mirror TestResolveActivityWindow_* but cover the
+// ToolNotification code path used by RemoteProvider's SSEToolInfo
+// callback in cmd/lazyclaude/root.go. The helper rewrites the remote
+// tmux window ID to the local mirror's tmux window ID so Accept/Reject
+// on the permission popup reaches the correct pane.
+
+func TestRewriteToolNotificationWindow_RemapsRemoteWindow(t *testing.T) {
+	store := session.NewStore("")
+	store.Add(session.Session{
+		ID:         "sess-123",
+		Name:       "remote-1",
+		Host:       "remote-host",
+		Path:       "/project",
+		TmuxWindow: "@42", // local tmux window ID of the mirror
+	}, "/project")
+
+	n := &model.ToolNotification{
+		ToolName: "Edit",
+		Window:   "@22", // remote tmux window ID as emitted by daemon
+	}
+
+	rewriteToolNotificationWindow(store, n, "sess-123")
+
+	if n.Window != "@42" {
+		t.Errorf("n.Window = %q, want @42", n.Window)
+	}
+	if n.ToolName != "Edit" {
+		t.Errorf("n.ToolName = %q, want Edit (unchanged)", n.ToolName)
+	}
+}
+
+func TestRewriteToolNotificationWindow_EmptySessionID_NoRewrite(t *testing.T) {
+	store := session.NewStore("")
+	store.Add(session.Session{
+		ID:         "sess-123",
+		Name:       "s1",
+		Path:       "/project",
+		TmuxWindow: "@42",
+	}, "/project")
+
+	n := &model.ToolNotification{ToolName: "Bash", Window: "@22"}
+
+	rewriteToolNotificationWindow(store, n, "")
+
+	if n.Window != "@22" {
+		t.Errorf("n.Window = %q, want @22 (unchanged on empty sessionID)", n.Window)
+	}
+}
+
+func TestRewriteToolNotificationWindow_SessionNotFound_NoRewrite(t *testing.T) {
+	store := session.NewStore("")
+
+	n := &model.ToolNotification{ToolName: "Read", Window: "@22"}
+
+	rewriteToolNotificationWindow(store, n, "missing-session")
+
+	if n.Window != "@22" {
+		t.Errorf("n.Window = %q, want @22 (unchanged when session missing)", n.Window)
+	}
+}
+
+func TestRewriteToolNotificationWindow_NilNotification_NoCrash(t *testing.T) {
+	store := session.NewStore("")
+	store.Add(session.Session{
+		ID:         "sess-123",
+		Name:       "s1",
+		Path:       "/project",
+		TmuxWindow: "@42",
+	}, "/project")
+
+	// Must not panic on nil notification (guard against other Event
+	// variants routed through the same callback path).
+	rewriteToolNotificationWindow(store, nil, "sess-123")
+}
+
+func TestRewriteToolNotificationWindow_EmptyTmuxWindow_NoRewrite(t *testing.T) {
+	// Session exists in store but TmuxWindow is empty (mirror not yet
+	// synced by SyncWithTmux). Rewriting to "" would break downstream
+	// lookups — the helper must fall through unchanged.
+	store := session.NewStore("")
+	store.Add(session.Session{
+		ID:         "sess-456",
+		Name:       "pending",
+		Host:       "remote-host",
+		Path:       "/project",
+		TmuxWindow: "",
+	}, "/project")
+
+	n := &model.ToolNotification{ToolName: "Bash", Window: "@22"}
+
+	rewriteToolNotificationWindow(store, n, "sess-456")
+
+	if n.Window != "@22" {
+		t.Errorf("n.Window = %q, want @22 (unchanged when TmuxWindow empty)", n.Window)
+	}
+}

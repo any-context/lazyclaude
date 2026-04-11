@@ -202,6 +202,72 @@ func TestBrokerEventToNotification(t *testing.T) {
 	}
 }
 
+// TestBrokerEventToNotification_ToolInfo_SetsSessionID verifies that
+// the daemon's SSE handler tags outgoing EventToolInfo events with the
+// authoritative session UUID resolved from the tmux window, so that
+// local RemoteProvider callbacks can rewrite ToolNotification.Window
+// to the local mirror's tmux window ID (Bug 5 Phase B action routing
+// fix). Without this tag, the popup would appear on the local mirror
+// but Accept/Reject would target a non-existent pane.
+func TestBrokerEventToNotification_ToolInfo_SetsSessionID(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	const sessID = "abcd1234-5678-90ef-1122-334455667788"
+	srv.mgr.Store().Add(session.Session{
+		ID:         sessID,
+		Name:       "s1",
+		Path:       "/proj",
+		TmuxWindow: "@42",
+		Status:     session.StatusRunning,
+	}, "/proj")
+
+	evt := model.Event{Notification: &model.ToolNotification{
+		ToolName:  "Edit",
+		Window:    "@42",
+		Timestamp: time.Now(),
+	}}
+
+	got := srv.brokerEventToNotification(evt)
+	if got == nil {
+		t.Fatal("brokerEventToNotification returned nil")
+	}
+	if got.Type != EventToolInfo {
+		t.Errorf("Type = %q, want %q", got.Type, EventToolInfo)
+	}
+	if got.SessionID != sessID {
+		t.Errorf("SessionID = %q, want %q", got.SessionID, sessID)
+	}
+	if got.ToolNotification == nil {
+		t.Fatal("ToolNotification is nil")
+	}
+	if got.ToolNotification.Window != "@42" {
+		t.Errorf("ToolNotification.Window = %q, want @42 (unchanged)", got.ToolNotification.Window)
+	}
+}
+
+// TestBrokerEventToNotification_ToolInfo_EmptySessionID_OnMiss verifies
+// that when the tmux window does not match any local session (e.g. the
+// daemon has not yet observed the session), SessionID is emitted as an
+// empty string rather than a stray value. Clients must be able to
+// detect the absence and degrade gracefully.
+func TestBrokerEventToNotification_ToolInfo_EmptySessionID_OnMiss(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	evt := model.Event{Notification: &model.ToolNotification{
+		ToolName:  "Bash",
+		Window:    "@99", // no matching session
+		Timestamp: time.Now(),
+	}}
+
+	got := srv.brokerEventToNotification(evt)
+	if got == nil {
+		t.Fatal("brokerEventToNotification returned nil")
+	}
+	if got.SessionID != "" {
+		t.Errorf("SessionID = %q, want empty on miss", got.SessionID)
+	}
+}
+
 func TestSessionIDForWindow(t *testing.T) {
 	// Helper builds a server with a minimal session store.
 	setup := func(t *testing.T) *DaemonServer {

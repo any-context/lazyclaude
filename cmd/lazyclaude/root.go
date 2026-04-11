@@ -164,9 +164,13 @@ func newRootCmd() *cobra.Command {
 				activityFwd := func(ev model.Event, sessionID string) {
 					notifyBroker.Publish(resolveActivityWindow(mgr.Store(), ev, sessionID))
 				}
+				toolInfoFwd := func(n *model.ToolNotification, sessionID string) {
+					rewriteToolNotificationWindow(mgr.Store(), n, sessionID)
+				}
 				remoteProvider := daemon.NewRemoteProvider(host, remoteConn,
 					daemon.WithPostCreate(hook),
 					daemon.WithSSEActivity(activityFwd),
+					daemon.WithSSEToolInfo(toolInfoFwd),
 				)
 				lc.Register("remote-conn-"+host, func() {
 					remoteProvider.StopSSE()
@@ -766,4 +770,39 @@ func resolveActivityWindow(store *session.Store, ev model.Event, sessionID strin
 	out := ev
 	out.ActivityNotification = &notif
 	return out
+}
+
+// rewriteToolNotificationWindow rewrites a remote tool notification's
+// Window field from the remote tmux window ID (e.g. "@22") to the local
+// mirror session's tmux window ID (e.g. "@42"), using sessionID as a
+// lookup hop into the local store. This is the ToolNotification twin of
+// resolveActivityWindow and completes the SessionID hop pattern for the
+// permission popup action routing path (Bug 5 Phase B).
+//
+// Without this rewrite, the gui layer keys pending permission popups by
+// ToolNotification.Window — which for remote sessions arrives as the
+// remote tmux window ID — so SendChoice is dispatched to a pane that
+// does not exist on the local tmux server and Accept/Reject never reach
+// the remote claude process.
+//
+// The notification is mutated in place (SSE pushes a fresh instance per
+// event, so there is no shared-state risk). Returns without mutating
+// when:
+//   - n is nil (other Event variants through the same callback path),
+//   - sessionID is empty (old daemon without Phase B wire format),
+//   - the session is not in the local store, or
+//   - the local session has no TmuxWindow yet (mirror not synced).
+//
+// In those cases the original Window is preserved so behavior degrades
+// to the pre-fix (popup appears but action is not routed), matching the
+// defensive pattern used by resolveActivityWindow.
+func rewriteToolNotificationWindow(store *session.Store, n *model.ToolNotification, sessionID string) {
+	if n == nil || sessionID == "" {
+		return
+	}
+	localSess := store.FindByID(sessionID)
+	if localSess == nil || localSess.TmuxWindow == "" {
+		return
+	}
+	n.Window = localSess.TmuxWindow
 }

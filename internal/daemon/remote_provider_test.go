@@ -735,6 +735,127 @@ func TestRemoteProvider_HandleSSEEvent_ToolInfo(t *testing.T) {
 	}
 }
 
+func TestRemoteProvider_SSEToolInfo_Callback_Rewrites(t *testing.T) {
+	// handleSSEEvent for EventToolInfo must invoke the registered
+	// SSEToolInfoCallback with the authoritative SessionID before
+	// buffering the notification, so root.go can rewrite Window to
+	// the local mirror tmux window ID. The Window rewrite must be
+	// reflected in the notification that is ultimately returned from
+	// PendingNotifications (mutation in place is intentional — SSE
+	// pushes a fresh instance per event).
+	var (
+		gotSessionID string
+		gotNotif     *model.ToolNotification
+		cbCalls      int
+	)
+
+	conn := &mockConnManager{state: Connected}
+	rp := NewRemoteProvider("remote-host", conn, WithSSEToolInfo(func(n *model.ToolNotification, sessionID string) {
+		cbCalls++
+		gotSessionID = sessionID
+		gotNotif = n
+		// Simulate root.go's lookup rewrite.
+		n.Window = "@42"
+	}))
+
+	rp.handleSSEEvent(NotificationEvent{
+		Type:      EventToolInfo,
+		SessionID: "sess-123",
+		ToolNotification: &model.ToolNotification{
+			ToolName: "Edit",
+			Window:   "@22", // remote tmux window ID
+		},
+	})
+
+	if cbCalls != 1 {
+		t.Fatalf("callback invocations = %d, want 1", cbCalls)
+	}
+	if gotSessionID != "sess-123" {
+		t.Errorf("gotSessionID = %q, want sess-123", gotSessionID)
+	}
+	if gotNotif == nil {
+		t.Fatal("callback received nil notification")
+	}
+
+	notifs := rp.PendingNotifications()
+	if len(notifs) != 1 {
+		t.Fatalf("got %d buffered notifications, want 1", len(notifs))
+	}
+	if notifs[0].Window != "@42" {
+		t.Errorf("buffered Window = %q, want @42 (callback rewrite)", notifs[0].Window)
+	}
+	if notifs[0].ToolName != "Edit" {
+		t.Errorf("buffered ToolName = %q, want Edit", notifs[0].ToolName)
+	}
+}
+
+func TestRemoteProvider_SSEToolInfo_EmptySessionID_NoRewrite(t *testing.T) {
+	// With an empty SessionID (old daemon without Phase B wire
+	// format), the callback is still invoked so root.go can decide
+	// what to do. The production callback is a no-op in that case,
+	// which we simulate here. The notification must be buffered with
+	// its original Window untouched so behavior degrades to the
+	// pre-fix (popup visible, action not routed).
+	var cbCalls int
+	conn := &mockConnManager{state: Connected}
+	rp := NewRemoteProvider("remote-host", conn, WithSSEToolInfo(func(n *model.ToolNotification, sessionID string) {
+		cbCalls++
+		// Production guard: bail out on empty sessionID or nil n.
+		if sessionID == "" || n == nil {
+			return
+		}
+		n.Window = "SHOULD NOT HAPPEN"
+	}))
+
+	rp.handleSSEEvent(NotificationEvent{
+		Type:      EventToolInfo,
+		SessionID: "",
+		ToolNotification: &model.ToolNotification{
+			ToolName: "Read",
+			Window:   "@22",
+		},
+	})
+
+	if cbCalls != 1 {
+		t.Fatalf("callback invocations = %d, want 1", cbCalls)
+	}
+	notifs := rp.PendingNotifications()
+	if len(notifs) != 1 {
+		t.Fatalf("got %d notifications, want 1", len(notifs))
+	}
+	if notifs[0].Window != "@22" {
+		t.Errorf("Window = %q, want @22 (untouched)", notifs[0].Window)
+	}
+}
+
+func TestRemoteProvider_SSEToolInfo_NoCallback_Passthrough(t *testing.T) {
+	// With no callback registered, handleSSEEvent must still buffer
+	// the ToolNotification so the legacy path (file polling fallback
+	// or local mirror setups) is not regressed.
+	conn := &mockConnManager{state: Connected}
+	rp := NewRemoteProvider("remote-host", conn)
+
+	rp.handleSSEEvent(NotificationEvent{
+		Type:      EventToolInfo,
+		SessionID: "sess-999",
+		ToolNotification: &model.ToolNotification{
+			ToolName: "Write",
+			Window:   "@7",
+		},
+	})
+
+	notifs := rp.PendingNotifications()
+	if len(notifs) != 1 {
+		t.Fatalf("got %d notifications, want 1", len(notifs))
+	}
+	if notifs[0].Window != "@7" {
+		t.Errorf("Window = %q, want @7 (passthrough)", notifs[0].Window)
+	}
+	if notifs[0].ToolName != "Write" {
+		t.Errorf("ToolName = %q, want Write", notifs[0].ToolName)
+	}
+}
+
 func TestRemoteProvider_HandleSSEEvent_FullSync(t *testing.T) {
 	conn := &mockConnManager{state: Connected}
 	rp := NewRemoteProvider("remote", conn)

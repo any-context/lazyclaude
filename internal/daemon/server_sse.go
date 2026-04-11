@@ -82,9 +82,10 @@ func (s *DaemonServer) brokerEventToNotification(evt model.Event) *NotificationE
 	case evt.Notification != nil:
 		n := evt.Notification
 		return &NotificationEvent{
-			ID:   s.nextEventID(),
-			Type: EventToolInfo,
-			Time: n.Timestamp,
+			ID:        s.nextEventID(),
+			Type:      EventToolInfo,
+			Time:      n.Timestamp,
+			SessionID: s.sessionIDForWindow(n.Window),
 			ToolNotification: &model.ToolNotification{
 				ToolName:  n.ToolName,
 				Input:     n.Input,
