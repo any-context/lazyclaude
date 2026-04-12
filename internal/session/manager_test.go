@@ -757,6 +757,35 @@ func TestManager_launchWorktreeSession_RoleWorker_UsesWorkerPrompt(t *testing.T)
 
 // --- claudeEnv tests ---
 
+// --- buildClaudeCommand tests ---
+
+func TestBuildClaudeCommand_IncludesSessionID(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+
+	sess := session.Session{
+		ID:   "aaaabbbb-cccc-dddd-eeee-ffffffffffff",
+		Name: "test",
+		Path: "/tmp/test",
+	}
+	cmd := mgr.BuildClaudeCommand(sess)
+	assert.Contains(t, cmd, "--session-id aaaabbbb-cccc-dddd-eeee-ffffffffffff")
+}
+
+func TestBuildClaudeCommand_SkipsSessionID_WhenResumeFlag(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+
+	sess := session.Session{
+		ID:    "aaaabbbb-cccc-dddd-eeee-ffffffffffff",
+		Name:  "test",
+		Path:  "/tmp/test",
+		Flags: []string{"--resume"},
+	}
+	cmd := mgr.BuildClaudeCommand(sess)
+	assert.NotContains(t, cmd, "--session-id")
+}
+
 func TestClaudeEnv_InjectsSessionID(t *testing.T) {
 	t.Parallel()
 	env := session.ClaudeEnv("sess-abc")

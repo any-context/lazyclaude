@@ -362,7 +362,7 @@ func (m *Manager) launchErrorSession(ctx context.Context, sess Session, buildErr
 // in a worktree session. Writes a temp launcher script and returns
 // the command, start directory, optional cleanup function, and error.
 func (m *Manager) buildLaunchCommand(sess Session, systemPrompt, userPrompt string) (claudeCmd string, startDir string, cleanup func(), err error) {
-	launcher, launcherErr := writeWorktreeLauncher(systemPrompt, userPrompt, m.paths.RuntimeDir)
+	launcher, launcherErr := writeWorktreeLauncher(systemPrompt, userPrompt, m.paths.RuntimeDir, sess.ID)
 	if launcherErr != nil {
 		return "", "", nil, fmt.Errorf("write launcher: %w", launcherErr)
 	}
@@ -373,7 +373,7 @@ func (m *Manager) buildLaunchCommand(sess Session, systemPrompt, userPrompt stri
 // writeWorktreeLauncher writes a shell script that launches claude with
 // --append-system-prompt and an optional user prompt as positional argument.
 // Returns the script path. The script self-deletes after execution.
-func writeWorktreeLauncher(systemPrompt, userPrompt, runtimeDir string) (string, error) {
+func writeWorktreeLauncher(systemPrompt, userPrompt, runtimeDir, sessionID string) (string, error) {
 	f, err := os.CreateTemp("", "lazyclaude-wt-*.sh")
 	if err != nil {
 		return "", fmt.Errorf("create temp script: %w", err)
@@ -384,6 +384,8 @@ func writeWorktreeLauncher(systemPrompt, userPrompt, runtimeDir string) (string,
 	// Self-delete the launcher script (already read by shell at this point).
 	sb.WriteString("rm -f \"$0\"\n")
 	sb.WriteString("exec claude")
+	sb.WriteString(" --session-id ")
+	sb.WriteString(sessionID)
 
 	// Inject hooks via --settings file so ~/.claude/settings.json stays untouched.
 	// Using a file avoids shell quoting issues with nested single quotes in hook commands.
@@ -485,8 +487,23 @@ func (m *Manager) ToggleProjectExpanded(projectID string) {
 	m.store.ToggleProjectExpanded(projectID)
 }
 
+// hasSessionFlag returns true if flags already contain --resume or --session-id,
+// indicating that the caller manages session identity explicitly.
+func hasSessionFlag(flags []string) bool {
+	for _, f := range flags {
+		if f == "--resume" || strings.HasPrefix(f, "--session-id") {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Manager) buildClaudeCommand(sess Session) string {
 	claudeArgs := "claude"
+
+	if !hasSessionFlag(sess.Flags) {
+		claudeArgs += " --session-id " + sess.ID
+	}
 
 	// Inject hooks via --settings file so ~/.claude/settings.json stays untouched.
 	// The path is NOT wrapped in shell.Quote because the entire claudeArgs string
