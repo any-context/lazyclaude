@@ -603,16 +603,6 @@ func (m *controlManager) ensureConnected() {
 	}
 }
 
-// Client returns the active control client, or nil if not connected.
-func (m *controlManager) Client() *tmux.ControlClient {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.client != nil && !m.client.Closed() {
-		return m.client
-	}
-	return nil
-}
-
 func (m *controlManager) close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 )
 
 // findAliveLockJS is shared JavaScript that reads all lock files, validates PID
@@ -73,22 +72,6 @@ func WriteHooksSettingsFile(runtimeDir string) (string, error) {
 		return "", fmt.Errorf("write hooks settings file: %w", err)
 	}
 	return path, nil
-}
-
-// BuildHooksJSON returns the hooks settings JSON string for embedding in scripts.
-// Uses SetEscapeHTML(false) to preserve JS operators (=>) in hook commands.
-func BuildHooksJSON() (string, error) {
-	settings := map[string]any{
-		"hooks": buildHooksMap(),
-	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(settings); err != nil {
-		return "", fmt.Errorf("marshal hooks settings: %w", err)
-	}
-	// Encoder adds a trailing newline; trim it for clean heredoc embedding.
-	return strings.TrimSpace(buf.String()), nil
 }
 
 // buildHooksMap returns the hooks structure with all lazyclaude hook types.

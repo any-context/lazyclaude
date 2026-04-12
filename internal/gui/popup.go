@@ -241,7 +241,6 @@ func generateDiffFromContents(oldFilePath, newContents string) string {
 
 func (a *App) hasPopup() bool                              { return a.popups.HasVisible() }
 func (a *App) popupCount() int                             { return a.popups.Count() }
-func (a *App) visiblePopupCount() int                      { return a.popups.VisibleCount() }
 func (a *App) activePopup() *model.ToolNotification        { return a.popups.ActiveNotification() }
 func (a *App) activeEntry() *popupEntry                    { return a.popups.ActiveEntry() }
 func (a *App) pushPopup(n *model.ToolNotification)         { a.popups.PushPopup(newPopupFromNotification(n)) }
@@ -250,7 +249,6 @@ func (a *App) popupFocusNext()                             { a.popups.FocusNext(
 func (a *App) popupFocusPrev()                             { a.popups.FocusPrev() }
 func (a *App) suspendAllPopups()                           { a.popups.SuspendAll() }
 func (a *App) unsuspendAll()                               { a.popups.UnsuspendAll() }
-func (a *App) visibleIndexOf(stackIdx int) int             { return a.popups.VisibleIndexOf(stackIdx) }
 
 func popupCascadeOffset(baseX, baseY, index int) (int, int) {
 	return baseX + index*2, baseY + index

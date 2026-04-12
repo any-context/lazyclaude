@@ -6,34 +6,6 @@ import (
 	"strings"
 )
 
-// DetectRemotePath extracts the remote working directory from OSC 7 (pane_path).
-// Format: file://hostname/path. Returns the path if hostname differs from local.
-func DetectRemotePath() string {
-	panePath := os.Getenv("LAZYCLAUDE_PANE_PATH")
-	if panePath == "" || !strings.HasPrefix(panePath, "file://") {
-		return ""
-	}
-	// Extract hostname and path
-	rest := panePath[len("file://"):]
-	slashIdx := strings.Index(rest, "/")
-	if slashIdx < 0 {
-		return ""
-	}
-	oscHost := rest[:slashIdx]
-	remotePath := rest[slashIdx:]
-
-	// Only use if hostname differs from local
-	localHost, err := os.Hostname()
-	if err != nil {
-		return remotePath
-	}
-	localShort := strings.Split(localHost, ".")[0]
-	if oscHost == localHost || oscHost == localShort {
-		return "" // same host, not remote
-	}
-	return remotePath
-}
-
 // DetectSSHHost returns the SSH hostname if the originating pane is running ssh.
 // Uses environment variables set by lazyclaude.tmux from the pane's tmux format variables.
 func DetectSSHHost() string {

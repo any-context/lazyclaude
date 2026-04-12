@@ -445,18 +445,6 @@ func newIntegrationStack(t *testing.T, cursor cursorState, pendingHost string) *
 	}
 }
 
-// findSessionByHost returns the first session matching the given host.
-// Helper for assertions — tests create exactly one session each, so there
-// is no ambiguity in practice.
-func findSessionByHost(mgr *session.Manager, host string) *session.Session {
-	for _, s := range mgr.Sessions() {
-		if s.Host == host {
-			return &s
-		}
-	}
-	return nil
-}
-
 // findProjectByPathHost returns the project with the given path+host tuple.
 // Host is derived from the project's sessions (PM or first worker) because
 // session.Project has no Host field of its own.

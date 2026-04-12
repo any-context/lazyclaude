@@ -414,6 +414,11 @@ type notificationDrainer interface {
 // "lc-" prefix to the local mirror "rm-" prefix so that the GUI can
 // match notifications to mirror windows.
 //
+// Since Bug 5 introduced SSEToolInfoCallback, the callback path rewrites
+// Window via rewriteToolNotificationWindow (SessionID hop) at SSE receive
+// time, so the mirror window is already correct. remapRemoteWindow here
+// serves as a fallback for providers where SSEToolInfoCallback is not set.
+//
 // Lock order: c.mu (RLock) -> rp.mu (Lock via PendingNotifications).
 // This is safe as long as no code path acquires rp.mu first then c.mu.
 // RemoteProvider.handleSSEEvent holds only rp.mu and never calls
