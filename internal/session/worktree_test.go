@@ -147,7 +147,7 @@ branch refs/heads/main
 }
 
 func TestWriteWorktreeLauncher_BasicContent(t *testing.T) {
-	path, err := writeWorktreeLauncher("system prompt here", "user task", t.TempDir())
+	path, err := writeWorktreeLauncher("system prompt here", "user task", t.TempDir(), "test-uuid-1234")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,10 +177,13 @@ func TestWriteWorktreeLauncher_BasicContent(t *testing.T) {
 	if !strings.Contains(content, "exec claude") {
 		t.Error("should exec claude")
 	}
+	if !strings.Contains(content, "--session-id 'test-uuid-1234'") {
+		t.Error("should contain --session-id")
+	}
 }
 
 func TestWriteWorktreeLauncher_EmptyUserPrompt(t *testing.T) {
-	path, err := writeWorktreeLauncher("system only", "", t.TempDir())
+	path, err := writeWorktreeLauncher("system only", "", t.TempDir(), "test-uuid-empty")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +220,7 @@ func TestWriteWorktreeLauncher_SpecialChars(t *testing.T) {
 	// Prompt with single quotes, newlines, and Japanese text
 	system := "Don't modify /project"
 	user := "日本語プロンプト\nwith 'quotes' and $vars"
-	path, err := writeWorktreeLauncher(system, user, t.TempDir())
+	path, err := writeWorktreeLauncher(system, user, t.TempDir(), "test-uuid-special")
 	if err != nil {
 		t.Fatal(err)
 	}
