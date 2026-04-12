@@ -340,25 +340,7 @@ func (a *App) setupGlobalKeybindings() error {
 		if host == "" {
 			return nil
 		}
-		if a.connectFn == nil {
-			a.showError(g, "Remote connection not available")
-			return nil
-		}
-		debugLog("ConnectDialog: host=%q connectFn=%v", host, a.connectFn != nil)
-		a.setStatus(g, "Connecting to "+host+"...")
-		go func() {
-			debugLog("ConnectDialog: calling connectFn host=%q", host)
-			err := a.connectFn(host)
-			debugLog("ConnectDialog: connectFn result: %v", err)
-			a.gui.Update(func(g *gocui.Gui) error {
-				if err != nil {
-					a.showError(g, fmt.Sprintf("Connection failed: %v", err))
-				} else {
-					a.setStatus(g, "Connected to "+host)
-				}
-				return nil
-			})
-		}()
+		a.connectToHost(g, host)
 		return nil
 	}); err != nil {
 		return err
@@ -370,7 +352,66 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// 11. Keybind help overlay bindings
+	// 11. Connect chooser bindings (j/k/Arrow/Enter/Esc)
+	connectChooserMove := func(delta int) func(*gocui.Gui, *gocui.View) error {
+		return func(g *gocui.Gui, v *gocui.View) error {
+			maxIdx := len(a.dialog.ConnectHosts) // last index = "Manual input"
+			a.dialog.ConnectCursor += delta
+			if a.dialog.ConnectCursor < 0 {
+				a.dialog.ConnectCursor = 0
+			}
+			if a.dialog.ConnectCursor > maxIdx {
+				a.dialog.ConnectCursor = maxIdx
+			}
+			renderConnectChooser(v, a.dialog.ConnectHosts, a.dialog.ConnectCursor)
+			return nil
+		}
+	}
+	for _, key := range []gocui.Key{gocui.KeyArrowDown, gocui.KeyArrowUp} {
+		delta := 1
+		if key == gocui.KeyArrowUp {
+			delta = -1
+		}
+		if err := a.gui.SetKeybinding("connect-chooser", key, gocui.ModNone, connectChooserMove(delta)); err != nil {
+			return err
+		}
+	}
+	for _, ch := range []rune{'j', 'k'} {
+		delta := 1
+		if ch == 'k' {
+			delta = -1
+		}
+		if err := a.gui.SetKeybinding("connect-chooser", ch, gocui.ModNone, connectChooserMove(delta)); err != nil {
+			return err
+		}
+	}
+
+	if err := a.gui.SetKeybinding("connect-chooser", gocui.KeyEnter, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		idx := a.dialog.ConnectCursor
+		hosts := a.dialog.ConnectHosts
+		a.closeConnectChooser(g)
+
+		if idx >= len(hosts) {
+			// "Manual input" selected
+			if !a.showConnectDialog(g) {
+				a.showError(g, "Error: could not open connect dialog")
+			}
+		} else {
+			a.connectToHost(g, hosts[idx])
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err := a.gui.SetKeybinding("connect-chooser", gocui.KeyEsc, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.closeConnectChooser(g)
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// 12. Keybind help overlay bindings
 	// Esc: close help
 	for _, viewName := range []string{helpInputView, helpListView} {
 		if err := a.gui.SetKeybinding(viewName, gocui.KeyEsc, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {

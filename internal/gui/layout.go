@@ -313,7 +313,7 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 			if _, err := g.SetCurrentView(viewName); err != nil && !isUnknownView(err) {
 				return err
 			}
-			if a.dialog.Kind != DialogWorktreeChooser {
+			if a.dialog.Kind != DialogWorktreeChooser && a.dialog.Kind != DialogConnectChooser {
 				g.Cursor = true
 			}
 		}
@@ -876,6 +876,57 @@ func (a *App) showWorktreeResumePrompt(g *gocui.Gui, worktreeName string) bool {
 	g.Cursor = true
 	a.dialog.Kind = DialogWorktreeResume
 	return true
+}
+
+// showConnectChooser creates a list view for selecting an SSH host.
+// The last item is always "+ Manual input".
+func (a *App) showConnectChooser(g *gocui.Gui, hosts []string) bool {
+	a.dialog.ConnectHosts = hosts
+	a.dialog.ConnectCursor = 0
+
+	maxX, maxY := g.Size()
+	totalItems := len(hosts) + 1 // +1 for "Manual input"
+	w := 50
+	if w > maxX-4 {
+		w = maxX - 4
+	}
+	h := totalItems + 2 // +2 for frame
+	if h > maxY/2 {
+		h = maxY / 2
+	}
+	x0 := (maxX - w) / 2
+	y0 := (maxY - h) / 2
+	if y0 < 1 {
+		y0 = 1
+	}
+
+	v, err := g.SetView("connect-chooser", x0, y0, x0+w, y0+h, 0)
+	if err != nil && !isUnknownView(err) {
+		return false
+	}
+	v.Title = " Connect to Host "
+	v.Editable = false
+	v.Highlight = true
+	v.SelBgColor = gocui.Get256Color(24)
+	v.SelFgColor = gocui.ColorWhite
+	setRoundedFrame(v)
+	renderConnectChooser(v, hosts, a.dialog.ConnectCursor)
+
+	if _, err := g.SetCurrentView("connect-chooser"); err != nil && !isUnknownView(err) {
+		return false
+	}
+	a.dialog.Kind = DialogConnectChooser
+	return true
+}
+
+// closeConnectChooser removes the connect chooser view and restores focus.
+func (a *App) closeConnectChooser(g *gocui.Gui) {
+	a.dialog.Kind = DialogNone
+	a.dialog.ConnectHosts = nil
+	g.DeleteView("connect-chooser")
+	if _, err := g.SetCurrentView("sessions"); err != nil && !isUnknownView(err) {
+		_ = err
+	}
 }
 
 // closeWorktreeResumePrompt removes the resume prompt dialog and restores focus.

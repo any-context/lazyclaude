@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -757,17 +758,49 @@ func (a *App) SelectWorktree() {
 	}()
 }
 
+// connectToHost initiates a remote connection to the given host.
+// Must be called from the gocui event loop goroutine.
+func (a *App) connectToHost(g *gocui.Gui, host string) {
+	if a.connectFn == nil {
+		a.showError(g, "Remote connection not available")
+		return
+	}
+	debugLog("connectToHost: host=%q", host)
+	a.setStatus(g, "Connecting to "+host+"...")
+	go func() {
+		debugLog("connectToHost: calling connectFn host=%q", host)
+		err := a.connectFn(host)
+		debugLog("connectToHost: connectFn result: %v", err)
+		a.gui.Update(func(g *gocui.Gui) error {
+			if err != nil {
+				a.showError(g, fmt.Sprintf("Connection failed: %v", err))
+			} else {
+				a.setStatus(g, "Connected to "+host)
+			}
+			return nil
+		})
+	}()
+}
+
 func (a *App) ConnectRemote() {
 	debugLog("ConnectRemote: triggered hasDialog=%v", a.HasActiveDialog())
 	if a.HasActiveDialog() {
 		return
 	}
 	a.gui.Update(func(g *gocui.Gui) error {
-		if !a.showConnectDialog(g) {
-			debugLog("ConnectRemote: showConnectDialog failed")
-			a.showError(g, "Error: could not open connect dialog")
+		home, _ := os.UserHomeDir()
+		hosts, _ := ParseSSHHosts(filepath.Join(home, ".ssh", "config"))
+		if len(hosts) > 0 {
+			if !a.showConnectChooser(g, hosts) {
+				a.showError(g, "Error: could not open host chooser")
+			}
 		} else {
-			debugLog("ConnectRemote: dialog opened")
+			if !a.showConnectDialog(g) {
+				debugLog("ConnectRemote: showConnectDialog failed")
+				a.showError(g, "Error: could not open connect dialog")
+			} else {
+				debugLog("ConnectRemote: dialog opened")
+			}
 		}
 		return nil
 	})

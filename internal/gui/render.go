@@ -112,6 +112,18 @@ func renderWorktreeChooser(v *gocui.View, items []WorktreeInfo, cursor int) {
 	v.SetCursor(0, cursor)
 }
 
+// renderConnectChooser writes the SSH host selection list to a gocui view.
+func renderConnectChooser(v *gocui.View, hosts []string, cursor int) {
+	v.Clear()
+	for _, host := range hosts {
+		fmt.Fprintf(v, "  %s\n", host)
+	}
+	// "Manual input" entry
+	fmt.Fprintf(v, " %s+ Manual input%s\n", presentation.FgGreen, presentation.Reset)
+
+	v.SetCursor(0, cursor)
+}
+
 // logFileCache caches readLogLines results, only re-reading when the
 // file's modification time changes.  This prevents expensive os.ReadFile
 // calls on every layout cycle.

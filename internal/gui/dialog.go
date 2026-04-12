@@ -14,6 +14,7 @@ const (
 	DialogKeybindHelp                      // keybind-help overlay (Telescope style)
 	DialogSearch                           // inline "/" search on active panel
 	DialogConnect                          // connect-input for remote host
+	DialogConnectChooser                   // connect-chooser (SSH host selection)
 )
 
 // DialogState groups all input dialog state into a single struct,
@@ -32,6 +33,10 @@ type DialogState struct {
 	HelpCursor   int                // selected index in filtered list
 	HelpFilter   string             // current fzf query
 	HelpScrollY  int                // doc preview scroll offset
+
+	// Connect chooser state (SSH host selection)
+	ConnectHosts  []string // items in connect chooser
+	ConnectCursor int      // selected index in chooser (len(hosts) = "Manual input")
 
 	// Search state (inline "/" filter on active panel)
 	SearchQuery     string // current search query (live, updated on each keystroke)
@@ -75,6 +80,8 @@ func (a *App) dialogFocusView() string {
 		return "search-input"
 	case DialogConnect:
 		return "connect-input"
+	case DialogConnectChooser:
+		return "connect-chooser"
 	default:
 		return ""
 	}

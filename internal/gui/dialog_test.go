@@ -61,6 +61,7 @@ func TestDialogFocusView_Mapping(t *testing.T) {
 		{DialogWorktreeResume, "", "worktree-resume-prompt"},
 		{DialogWorktree, "", "worktree-branch"},              // default
 		{DialogWorktree, "worktree-prompt", "worktree-prompt"}, // after Tab
+		{DialogConnectChooser, "", "connect-chooser"},
 	}
 	for _, tc := range cases {
 		app.dialog.Kind = tc.dialog
