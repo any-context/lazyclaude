@@ -146,9 +146,68 @@ func TestAskpassServer_HandlerError(t *testing.T) {
 func TestAskpassServer_SockPath(t *testing.T) {
 	dir := askpassTempDir(t)
 	srv := NewAskpassServer(dir, nil)
-	want := filepath.Join(dir, "askpass.sock")
+	want := filepath.Join(dir, fmt.Sprintf("askpass-%d.sock", os.Getpid()))
 	if got := srv.SockPath(); got != want {
 		t.Errorf("SockPath() = %q, want %q", got, want)
+	}
+}
+
+func TestAskpassServer_ScriptPath(t *testing.T) {
+	dir := askpassTempDir(t)
+	srv := NewAskpassServer(dir, nil)
+	want := filepath.Join(dir, fmt.Sprintf("askpass-%d.sh", os.Getpid()))
+	if got := srv.ScriptPath(); got != want {
+		t.Errorf("ScriptPath() = %q, want %q", got, want)
+	}
+}
+
+func TestAskpassServer_WriteScript(t *testing.T) {
+	dir := askpassTempDir(t)
+	srv := NewAskpassServer(dir, nil)
+
+	if err := srv.WriteScript("/usr/local/bin/lazyclaude"); err != nil {
+		t.Fatalf("WriteScript() error: %v", err)
+	}
+
+	content, err := os.ReadFile(srv.ScriptPath())
+	if err != nil {
+		t.Fatalf("read script: %v", err)
+	}
+	wantContent := "#!/bin/sh\nexec /usr/local/bin/lazyclaude askpass \"$@\"\n"
+	if string(content) != wantContent {
+		t.Errorf("script content = %q, want %q", string(content), wantContent)
+	}
+
+	// Verify script is executable (0700).
+	info, err := os.Stat(srv.ScriptPath())
+	if err != nil {
+		t.Fatalf("stat script: %v", err)
+	}
+	perm := info.Mode().Perm()
+	if perm != 0o700 {
+		t.Errorf("script permissions = %o, want 0700", perm)
+	}
+}
+
+func TestAskpassServer_StopCleansUpScript(t *testing.T) {
+	dir := askpassTempDir(t)
+	srv := NewAskpassServer(dir, func(prompt string) (string, error) {
+		return "", nil
+	})
+	if err := srv.Start(); err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	if err := srv.WriteScript("/usr/local/bin/lazyclaude"); err != nil {
+		t.Fatalf("WriteScript() error: %v", err)
+	}
+
+	srv.Stop()
+
+	if _, err := os.Stat(srv.ScriptPath()); !os.IsNotExist(err) {
+		t.Error("script file should be removed after Stop()")
+	}
+	if _, err := os.Stat(srv.SockPath()); !os.IsNotExist(err) {
+		t.Error("socket file should be removed after Stop()")
 	}
 }
 

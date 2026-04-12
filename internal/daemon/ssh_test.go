@@ -58,16 +58,16 @@ func TestShellQuote(t *testing.T) {
 
 func TestSSHEnv_WithAskpass(t *testing.T) {
 	e := &ExecSSHExecutor{
-		AskpassBin:  "/usr/local/bin/lazyclaude",
-		AskpassSock: "/tmp/lazyclaude/askpass.sock",
+		AskpassScript: "/tmp/lazyclaude/askpass-123.sh",
+		AskpassSock:   "/tmp/lazyclaude/askpass-123.sock",
 	}
 	env := e.SSHEnv()
 
 	// Check required env vars (DISPLAY is conditional on os.Getenv).
 	wantPrefix := []string{
-		"SSH_ASKPASS=/usr/local/bin/lazyclaude",
+		"SSH_ASKPASS=/tmp/lazyclaude/askpass-123.sh",
 		"SSH_ASKPASS_REQUIRE=prefer",
-		"LAZYCLAUDE_ASKPASS_SOCK=/tmp/lazyclaude/askpass.sock",
+		"LAZYCLAUDE_ASKPASS_SOCK=/tmp/lazyclaude/askpass-123.sock",
 	}
 	if len(env) < len(wantPrefix) {
 		t.Fatalf("SSHEnv() len = %d, want >= %d", len(env), len(wantPrefix))

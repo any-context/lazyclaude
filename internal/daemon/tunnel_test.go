@@ -20,6 +20,7 @@ func TestNewTunnel(t *testing.T) {
 }
 
 func TestTunnel_SSHArgs_Basic(t *testing.T) {
+	// Without askpassEnv, BatchMode=yes is included.
 	tun := NewTunnelWithPort("user@host", 8080, 9090)
 	args := tun.SSHArgs()
 
@@ -32,6 +33,7 @@ func TestTunnel_SSHArgs_Basic(t *testing.T) {
 		"-o", "ExitOnForwardFailure=yes",
 		"-o", "ControlMaster=no",
 		"-o", "ControlPath=none",
+		"-o", "BatchMode=yes",
 		"user@host",
 	}
 
@@ -45,12 +47,14 @@ func TestTunnel_SSHArgs_Basic(t *testing.T) {
 	}
 }
 
-func TestTunnel_SSHArgs_NoBatchMode(t *testing.T) {
+func TestTunnel_SSHArgs_NoBatchModeWithAskpass(t *testing.T) {
+	// With askpassEnv, BatchMode=yes is omitted.
 	tun := NewTunnelWithPort("user@host", 8080, 9090)
+	tun.SetAskpassEnv([]string{"SSH_ASKPASS=/tmp/askpass.sh"})
 	args := tun.SSHArgs()
 	for _, a := range args {
 		if a == "BatchMode=yes" {
-			t.Error("SSHArgs() should not contain BatchMode=yes (removed for askpass)")
+			t.Error("SSHArgs() should not contain BatchMode=yes when askpassEnv is set")
 		}
 	}
 }
@@ -68,6 +72,7 @@ func TestTunnel_SSHArgs_WithPort(t *testing.T) {
 		"-o", "ExitOnForwardFailure=yes",
 		"-o", "ControlMaster=no",
 		"-o", "ControlPath=none",
+		"-o", "BatchMode=yes",
 		"-p", "2222",
 		"user@host",
 	}

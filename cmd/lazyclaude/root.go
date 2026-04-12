@@ -132,9 +132,10 @@ func newRootCmd() *cobra.Command {
 				}
 			})
 
-			// Only arm ExecSSHExecutor with askpass config when both the
-			// server starts successfully and the binary path is resolved.
-			var askpassBin, askpassSock string
+			// Only arm ExecSSHExecutor with askpass config when the server
+			// starts successfully, the binary path resolves, and the
+			// wrapper script is written.
+			var askpassScript, askpassSock string
 			if err := askpassSrv.Start(); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: start askpass server: %v\n", err)
 			} else {
@@ -143,8 +144,11 @@ func newRootCmd() *cobra.Command {
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "warning: resolve binary path for askpass: %v\n", err)
 					askpassSrv.Stop()
+				} else if err := askpassSrv.WriteScript(bin); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: write askpass script: %v\n", err)
+					askpassSrv.Stop()
 				} else {
-					askpassBin = bin
+					askpassScript = askpassSrv.ScriptPath()
 					askpassSock = askpassSrv.SockPath()
 				}
 			}
@@ -154,8 +158,8 @@ func newRootCmd() *cobra.Command {
 			composite := daemon.NewCompositeProvider(localProvider, nil)
 
 			ssh := &daemon.ExecSSHExecutor{
-				AskpassBin:  askpassBin,
-				AskpassSock: askpassSock,
+				AskpassScript: askpassScript,
+				AskpassSock:   askpassSock,
 			}
 			lifecycleMgr := daemon.NewLifecycleManager(ssh)
 			clientFactory := func(addr, token string) daemon.ClientAPI {
