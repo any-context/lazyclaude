@@ -268,6 +268,39 @@ func TestBrokerEventToNotification_ToolInfo_EmptySessionID_OnMiss(t *testing.T) 
 	}
 }
 
+// TestBrokerEventToNotification_ToolInfo_PreservesDiffFields verifies that
+// the SSE handler copies OldFilePath and NewContents from the broker event,
+// which is required for remote DiffPopup rendering of Write tool notifications.
+func TestBrokerEventToNotification_ToolInfo_PreservesDiffFields(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	evt := model.Event{Notification: &model.ToolNotification{
+		ToolName:    "Write",
+		Window:      "@1",
+		Input:       `{"file_path":"/home/user/main.go","content":"package main\n"}`,
+		Timestamp:   time.Now(),
+		OldFilePath: "/home/user/main.go",
+		NewContents: "package main\n",
+	}}
+
+	got := srv.brokerEventToNotification(evt)
+	if got == nil {
+		t.Fatal("brokerEventToNotification returned nil")
+	}
+	if got.ToolNotification == nil {
+		t.Fatal("ToolNotification is nil")
+	}
+	if got.ToolNotification.OldFilePath != "/home/user/main.go" {
+		t.Errorf("OldFilePath = %q, want /home/user/main.go", got.ToolNotification.OldFilePath)
+	}
+	if got.ToolNotification.NewContents != "package main\n" {
+		t.Errorf("NewContents = %q, want %q", got.ToolNotification.NewContents, "package main\n")
+	}
+	if !got.ToolNotification.IsDiff() {
+		t.Error("IsDiff() should be true for Write with OldFilePath")
+	}
+}
+
 func TestSessionIDForWindow(t *testing.T) {
 	// Helper builds a server with a minimal session store.
 	setup := func(t *testing.T) *DaemonServer {

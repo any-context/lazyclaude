@@ -87,12 +87,14 @@ func (s *DaemonServer) brokerEventToNotification(evt model.Event) *NotificationE
 			Time:      n.Timestamp,
 			SessionID: s.sessionIDForWindow(n.Window),
 			ToolNotification: &model.ToolNotification{
-				ToolName:  n.ToolName,
-				Input:     n.Input,
-				CWD:       n.CWD,
-				Window:    n.Window,
-				Timestamp: n.Timestamp,
-				MaxOption: n.MaxOption,
+				ToolName:    n.ToolName,
+				Input:       n.Input,
+				CWD:         n.CWD,
+				Window:      n.Window,
+				Timestamp:   n.Timestamp,
+				MaxOption:   n.MaxOption,
+				OldFilePath: n.OldFilePath,
+				NewContents: n.NewContents,
 			},
 		}
 	case evt.StopNotification != nil:

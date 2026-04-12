@@ -361,3 +361,99 @@ func TestServer_NotifyBroker_FileQueueWrittenWhenNoSubscriber(t *testing.T) {
 	require.Len(t, ns, 1, "file queue must be written when no subscriber")
 	assert.Equal(t, "Bash", ns[0].ToolName)
 }
+
+// TestServer_NotifyBroker_WritePopulatesDiffFields verifies that Write tool
+// notifications extract file_path and content from input JSON into
+// OldFilePath/NewContents, enabling DiffPopup routing.
+func TestServer_NotifyBroker_WritePopulatesDiffFields(t *testing.T) {
+	t.Parallel()
+	srv, port, _ := startTestServer(t)
+	srv.State().SetConn("c1", &server.ConnState{PID: 1001, Window: "@1"})
+
+	broker := srv.NotifyBroker()
+	sub := broker.Subscribe(4)
+	defer sub.Cancel()
+
+	body, _ := json.Marshal(map[string]any{
+		"pid":       1001,
+		"tool_name": "Write",
+		"input":     `{"file_path":"/home/user/main.go","content":"package main\nfunc main() {}\n"}`,
+		"cwd":       "/home/user",
+	})
+	resp := postNotify(t, port, body)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	select {
+	case ev := <-sub.Ch():
+		require.NotNil(t, ev.Notification)
+		assert.Equal(t, "Write", ev.Notification.ToolName)
+		assert.Equal(t, "/home/user/main.go", ev.Notification.OldFilePath)
+		assert.Equal(t, "package main\nfunc main() {}\n", ev.Notification.NewContents)
+		assert.True(t, ev.Notification.IsDiff(), "Write notification should be a diff")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for broker event")
+	}
+}
+
+// TestServer_NotifyBroker_WriteNonDiffWhenNoFilePath verifies that Write without
+// file_path in input does not populate diff fields (falls back to ToolPopup).
+func TestServer_NotifyBroker_WriteNonDiffWhenNoFilePath(t *testing.T) {
+	t.Parallel()
+	srv, port, _ := startTestServer(t)
+	srv.State().SetConn("c1", &server.ConnState{PID: 1002, Window: "@2"})
+
+	broker := srv.NotifyBroker()
+	sub := broker.Subscribe(4)
+	defer sub.Cancel()
+
+	body, _ := json.Marshal(map[string]any{
+		"pid":       1002,
+		"tool_name": "Write",
+		"input":     `{"some_other_field":"value"}`,
+	})
+	resp := postNotify(t, port, body)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	select {
+	case ev := <-sub.Ch():
+		require.NotNil(t, ev.Notification)
+		assert.Equal(t, "Write", ev.Notification.ToolName)
+		assert.Empty(t, ev.Notification.OldFilePath, "no file_path => OldFilePath should be empty")
+		assert.False(t, ev.Notification.IsDiff(), "Write without file_path should not be a diff")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for broker event")
+	}
+}
+
+// TestServer_NotifyBroker_NonWriteToolNoDiffFields verifies that non-Write tools
+// do not populate diff fields even if input contains file_path.
+func TestServer_NotifyBroker_NonWriteToolNoDiffFields(t *testing.T) {
+	t.Parallel()
+	srv, port, _ := startTestServer(t)
+	srv.State().SetConn("c1", &server.ConnState{PID: 1003, Window: "@3"})
+
+	broker := srv.NotifyBroker()
+	sub := broker.Subscribe(4)
+	defer sub.Cancel()
+
+	body, _ := json.Marshal(map[string]any{
+		"pid":       1003,
+		"tool_name": "Read",
+		"input":     `{"file_path":"/home/user/main.go"}`,
+	})
+	resp := postNotify(t, port, body)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	select {
+	case ev := <-sub.Ch():
+		require.NotNil(t, ev.Notification)
+		assert.Equal(t, "Read", ev.Notification.ToolName)
+		assert.Empty(t, ev.Notification.OldFilePath, "non-Write tool should not populate OldFilePath")
+		assert.False(t, ev.Notification.IsDiff())
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for broker event")
+	}
+}

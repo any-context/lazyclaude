@@ -105,6 +105,15 @@ func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
 		setRoundedFrame(v)
 		v.Clear()
 
+		// Store viewport height before rendering so scroll bounds stay consistent.
+		_, viewH := v.Size()
+		visibleLines := viewH - 1
+		e.popup.SetViewportHeight(visibleLines)
+		// Clamp scroll position to new max after viewport resize.
+		if max := e.popup.MaxScroll(visibleLines); e.popup.ScrollY() > max {
+			e.popup.SetScrollY(max)
+		}
+
 		if e.popup.IsDiff() {
 			renderDiffPopup(v, e.popup)
 		} else {
@@ -147,6 +156,11 @@ func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
 		p := focusedEntry.popup
 		maxOpt := p.MaxOption()
 
+		vh := p.ViewportHeight()
+		if vh <= 0 {
+			vh = 20
+		}
+
 		popupHints := a.keyRegistry.HintsForScope(keymap.ScopePopup)
 		var defs []presentation.HintDef
 		for _, h := range popupHints {
@@ -156,12 +170,16 @@ func (a *App) layoutToolPopup(g *gocui.Gui, maxX, maxY int) error {
 				if maxOpt < 3 {
 					continue
 				}
-			case keymap.ActionPopupScrollDown:
-				if !p.IsDiff() {
-					continue
-				}
 			case keymap.ActionPopupAcceptAll:
 				if visible <= 1 {
+					continue
+				}
+			case keymap.ActionPopupFocusNext:
+				if visible <= 1 {
+					continue
+				}
+			case keymap.ActionPopupScrollDown:
+				if p.MaxScroll(vh) == 0 {
 					continue
 				}
 			}

@@ -258,34 +258,26 @@ func scrollToCursor(v *gocui.View, cursorY int) {
 	v.SetCursor(0, cursorY-oy)
 }
 
-// renderToolPopup writes a tool popup to a view.
+// renderToolPopup writes all tool popup lines to the view and uses
+// SetOrigin to control the scroll position. Writing all lines allows
+// gocui to compute scrollbar position from ViewLinesHeight/OriginY.
 func renderToolPopup(v *gocui.View, p Popup) {
 	v.Title = p.Title()
 	for _, line := range p.ContentLines() {
 		fmt.Fprintln(v, line)
 	}
+	v.SetOrigin(0, p.ScrollY())
 }
 
-// renderDiffPopup writes a diff popup to a view.
+// renderDiffPopup writes all diff lines to the view with ANSI coloring
+// and uses SetOrigin to control the scroll position.
 func renderDiffPopup(v *gocui.View, p Popup) {
 	v.Title = p.Title()
 
 	diffLines := p.ContentLines()
 	diffKinds := p.ContentKinds()
-	_, viewH := v.Size()
-	visibleLines := viewH - 1
 
-	start := p.ScrollY()
-	end := start + visibleLines
-	if end > len(diffLines) {
-		end = len(diffLines)
-	}
-	if start < 0 {
-		start = 0
-	}
-
-	for i := start; i < end; i++ {
-		line := diffLines[i]
+	for i, line := range diffLines {
 		kind := diffKinds[i]
 		switch kind {
 		case presentation.DiffAdd:
@@ -294,12 +286,13 @@ func renderDiffPopup(v *gocui.View, p Popup) {
 			fmt.Fprintf(v, "\x1b[31m%s\x1b[0m\n", line)
 		case presentation.DiffHunk:
 			fmt.Fprintf(v, "\x1b[36m%s\x1b[0m\n", line)
-		case presentation.DiffHeader:
-			fmt.Fprintf(v, "\x1b[1m%s\x1b[0m\n", line)
+		case presentation.DiffFilePath:
+			fmt.Fprintf(v, "\x1b[2m%s\x1b[0m\n", line)
 		default:
 			fmt.Fprintln(v, line)
 		}
 	}
+	v.SetOrigin(0, p.ScrollY())
 }
 
 // truncateToWidth truncates s so that its display width does not exceed maxW.

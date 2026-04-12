@@ -202,6 +202,48 @@ func TestDiffPopup_ContentLines_ForNewFile(t *testing.T) {
 	assert.True(t, len(fullText) > 0)
 }
 
+func TestDiffPopup_ContentLines_StartsWithFilePath(t *testing.T) {
+	t.Parallel()
+	n := &model.ToolNotification{
+		ToolName:    "Write",
+		Window:      "@0",
+		OldFilePath: "/nonexistent/path/newfile.go",
+		NewContents: "package main\nfunc main() {}\n",
+	}
+	p := NewDiffPopup(n)
+	lines := p.ContentLines()
+	kinds := p.ContentKinds()
+	require.NotEmpty(t, lines)
+	// First line should be DiffFilePath with the file path from notification.
+	assert.Equal(t, presentation.DiffFilePath, kinds[0])
+	assert.Equal(t, "  File: /nonexistent/path/newfile.go", lines[0])
+	// Second line should be a blank separator.
+	assert.Equal(t, presentation.DiffContext, kinds[1])
+	assert.Equal(t, "", lines[1])
+	// No DiffHeader lines should be present.
+	for _, k := range kinds {
+		assert.NotEqual(t, presentation.DiffHeader, k, "DiffHeader should be filtered out")
+	}
+}
+
+func TestDiffPopup_ContentLines_InlineFormat(t *testing.T) {
+	t.Parallel()
+	n := &model.ToolNotification{
+		ToolName:    "Write",
+		Window:      "@0",
+		OldFilePath: "/nonexistent/inline-fmt.go",
+		NewContents: "package main\nfunc foo() {}\n",
+	}
+	p := NewDiffPopup(n)
+	lines := p.ContentLines()
+	// Add lines should contain the "│ + " separator with line numbers.
+	for i, k := range p.ContentKinds() {
+		if k == presentation.DiffAdd {
+			assert.Contains(t, lines[i], "\u2502 + ", "Add lines should contain '\u2502 + ' separator, got: %q", lines[i])
+		}
+	}
+}
+
 func TestDiffPopup_ContentLines_CachedOnRepeatCall(t *testing.T) {
 	t.Parallel()
 	n := &model.ToolNotification{
@@ -244,11 +286,11 @@ func TestDiffPopup_ContentKinds_ContainsDiffKinds(t *testing.T) {
 	}
 	p := NewDiffPopup(n)
 	kinds := p.ContentKinds()
-	// For a new file, lines should include DiffAdd or DiffHeader kinds
+	// For a new file, lines should include DiffFilePath, DiffAdd, or DiffHunk kinds
 	if len(kinds) > 0 {
 		found := false
 		for _, k := range kinds {
-			if k == presentation.DiffAdd || k == presentation.DiffHeader || k == presentation.DiffHunk {
+			if k == presentation.DiffAdd || k == presentation.DiffFilePath || k == presentation.DiffHunk {
 				found = true
 				break
 			}
@@ -386,6 +428,44 @@ func TestDiffPopup_EmptyNewContents(t *testing.T) {
 	lines := p.ContentLines()
 	kinds := p.ContentKinds()
 	assert.Equal(t, len(lines), len(kinds))
+}
+
+func TestToolPopup_ViewportHeight_InitiallyZero(t *testing.T) {
+	t.Parallel()
+	n := &model.ToolNotification{ToolName: "Bash", Window: "@0"}
+	p := NewToolPopup(n)
+	assert.Equal(t, 0, p.ViewportHeight())
+}
+
+func TestToolPopup_SetViewportHeight(t *testing.T) {
+	t.Parallel()
+	n := &model.ToolNotification{ToolName: "Bash", Window: "@0"}
+	p := NewToolPopup(n)
+	p.SetViewportHeight(25)
+	assert.Equal(t, 25, p.ViewportHeight())
+}
+
+func TestDiffPopup_ViewportHeight_InitiallyZero(t *testing.T) {
+	t.Parallel()
+	n := &model.ToolNotification{
+		ToolName:    "Write",
+		Window:      "@0",
+		OldFilePath: "/tmp/test.go",
+	}
+	p := NewDiffPopup(n)
+	assert.Equal(t, 0, p.ViewportHeight())
+}
+
+func TestDiffPopup_SetViewportHeight(t *testing.T) {
+	t.Parallel()
+	n := &model.ToolNotification{
+		ToolName:    "Write",
+		Window:      "@0",
+		OldFilePath: "/tmp/test.go",
+	}
+	p := NewDiffPopup(n)
+	p.SetViewportHeight(30)
+	assert.Equal(t, 30, p.ViewportHeight())
 }
 
 func TestToolPopup_SetScrollY_MultipleUpdates(t *testing.T) {
@@ -527,3 +607,5 @@ func (m *mockPopup) ScrollY() int                                    { return 0 
 func (m *mockPopup) SetScrollY(_ int)                                {}
 func (m *mockPopup) MaxScroll(_ int) int                             { return 0 }
 func (m *mockPopup) MaxOption() int                                  { return 3 }
+func (m *mockPopup) ViewportHeight() int                             { return 0 }
+func (m *mockPopup) SetViewportHeight(_ int)                         {}

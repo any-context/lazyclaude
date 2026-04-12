@@ -30,12 +30,17 @@ type Popup interface {
 	SetScrollY(y int)
 	// MaxScroll returns the maximum scroll offset given a viewport height.
 	MaxScroll(viewportHeight int) int
+	// ViewportHeight returns the visible line count set by layout.
+	ViewportHeight() int
+	// SetViewportHeight stores the visible line count determined during layout.
+	SetViewportHeight(h int)
 }
 
 // ToolPopup implements Popup for non-diff tool notifications.
 type ToolPopup struct {
-	notification *model.ToolNotification
-	scrollY      int
+	notification   *model.ToolNotification
+	scrollY        int
+	viewportHeight int
 }
 
 // NewToolPopup creates a ToolPopup from a ToolNotification.
@@ -101,6 +106,12 @@ func (p *ToolPopup) MaxScroll(viewportHeight int) int {
 	return maxScrollFor(len(p.ContentLines()), viewportHeight)
 }
 
+// ViewportHeight returns the visible line count set by layout.
+func (p *ToolPopup) ViewportHeight() int { return p.viewportHeight }
+
+// SetViewportHeight stores the visible line count determined during layout.
+func (p *ToolPopup) SetViewportHeight(h int) { p.viewportHeight = h }
+
 // Notification returns the underlying ToolNotification.
 // Used for backward compatibility with App-level code.
 func (p *ToolPopup) Notification() *model.ToolNotification {
@@ -109,10 +120,11 @@ func (p *ToolPopup) Notification() *model.ToolNotification {
 
 // DiffPopup implements Popup for diff (Write/Edit) notifications.
 type DiffPopup struct {
-	notification *model.ToolNotification
-	scrollY      int
-	lines        []string
-	kinds        []presentation.DiffLineKind
+	notification   *model.ToolNotification
+	scrollY        int
+	viewportHeight int
+	lines          []string
+	kinds          []presentation.DiffLineKind
 }
 
 // NewDiffPopup creates a DiffPopup from a ToolNotification.
@@ -179,6 +191,12 @@ func (p *DiffPopup) MaxScroll(viewportHeight int) int {
 	return maxScrollFor(len(p.ContentLines()), viewportHeight)
 }
 
+// ViewportHeight returns the visible line count set by layout.
+func (p *DiffPopup) ViewportHeight() int { return p.viewportHeight }
+
+// SetViewportHeight stores the visible line count determined during layout.
+func (p *DiffPopup) SetViewportHeight(h int) { p.viewportHeight = h }
+
 // Notification returns the underlying ToolNotification.
 func (p *DiffPopup) Notification() *model.ToolNotification {
 	return p.notification
@@ -194,11 +212,36 @@ func (p *DiffPopup) ensureCache() {
 	diffOutput := generateDiffFromContents(n.OldFilePath, n.NewContents)
 	parsed := presentation.ParseUnifiedDiff(diffOutput)
 
-	lines := make([]string, len(parsed))
-	kinds := make([]presentation.DiffLineKind, len(parsed))
-	for i, dl := range parsed {
-		lines[i] = presentation.FormatDiffLine(dl, 4)
-		kinds[i] = dl.Kind
+	// Compute line-number column width from the maximum line number.
+	numWidth := presentation.NumWidth(presentation.MaxLineNum(parsed))
+
+	// Prepend file path line from notification (not from diff headers).
+	var lines []string
+	var kinds []presentation.DiffLineKind
+	fpLine := presentation.DiffLine{Kind: presentation.DiffFilePath, Content: n.OldFilePath}
+	lines = append(lines, presentation.FormatInlineDiffLine(fpLine, numWidth))
+	kinds = append(kinds, presentation.DiffFilePath)
+
+	// Blank line after file path (also serves as separator before first hunk).
+	lines = append(lines, "")
+	kinds = append(kinds, presentation.DiffContext)
+
+	// Skip DiffHeader lines (diff --git, ---, +++); use inline format.
+	// Insert blank line before each subsequent hunk for visual separation.
+	firstHunk := true
+	for _, dl := range parsed {
+		if dl.Kind == presentation.DiffHeader {
+			continue
+		}
+		if dl.Kind == presentation.DiffHunk && !firstHunk {
+			lines = append(lines, "")
+			kinds = append(kinds, presentation.DiffContext)
+		}
+		if dl.Kind == presentation.DiffHunk {
+			firstHunk = false
+		}
+		lines = append(lines, presentation.FormatInlineDiffLine(dl, numWidth))
+		kinds = append(kinds, dl.Kind)
 	}
 	p.lines = lines
 	p.kinds = kinds
