@@ -9,11 +9,12 @@ import (
 type DiffLineKind int
 
 const (
-	DiffContext DiffLineKind = iota // unchanged line
-	DiffAdd                        // added line
-	DiffDel                        // deleted line
-	DiffHunk                       // hunk header (@@ ... @@)
-	DiffHeader                     // diff header (diff --git, ---, +++)
+	DiffContext  DiffLineKind = iota // unchanged line
+	DiffAdd                         // added line
+	DiffDel                         // deleted line
+	DiffHunk                        // hunk header (@@ ... @@)
+	DiffHeader                      // diff header (diff --git, ---, +++)
+	DiffFilePath                    // file path line (rendered dim)
 )
 
 // DiffLine represents a single line in a parsed diff.
@@ -30,10 +31,21 @@ func ParseUnifiedDiff(raw string) []DiffLine {
 		return nil
 	}
 
+	rawLines := strings.Split(raw, "\n")
+	// Trim trailing empty segments produced by strings.Split on trailing newline.
+	for len(rawLines) > 0 && rawLines[len(rawLines)-1] == "" {
+		rawLines = rawLines[:len(rawLines)-1]
+	}
+
 	var lines []DiffLine
 	var oldNum, newNum int
 
-	for _, line := range strings.Split(raw, "\n") {
+	for _, line := range rawLines {
+		// Skip "no newline at end of file" marker.
+		if strings.HasPrefix(line, `\ `) {
+			continue
+		}
+
 		switch {
 		case strings.HasPrefix(line, "diff --git"):
 			lines = append(lines, DiffLine{Kind: DiffHeader, Content: line})
@@ -134,6 +146,25 @@ func FormatDiffLine(dl DiffLine, numWidth int) string {
 			new_ = strings.Repeat(" ", numWidth)
 		}
 		return fmt.Sprintf("%s %s   %s", old, new_, dl.Content)
+	default:
+		return dl.Content
+	}
+}
+
+// FormatInlineDiffLine renders a diff line in clean inline format
+// without line numbers, using - / + / (space) prefix style.
+func FormatInlineDiffLine(dl DiffLine) string {
+	switch dl.Kind {
+	case DiffFilePath:
+		return "File: " + dl.Content
+	case DiffHunk:
+		return dl.Content
+	case DiffAdd:
+		return "+ " + dl.Content
+	case DiffDel:
+		return "- " + dl.Content
+	case DiffContext:
+		return "  " + dl.Content
 	default:
 		return dl.Content
 	}

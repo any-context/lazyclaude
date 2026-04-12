@@ -855,19 +855,25 @@ func (a *App) PopupFocusPrev() { a.popupFocusPrev() }
 
 func (a *App) PopupScrollDown() {
 	p := a.popups.ActivePopup()
-	if p != nil && p.IsDiff() {
-		if p.ScrollY() < maxScrollFor(len(p.ContentLines()), 20) {
-			p.SetScrollY(p.ScrollY() + 1)
-		}
+	if p == nil {
+		return
+	}
+	vh := p.ViewportHeight()
+	if vh <= 0 {
+		vh = 20 // fallback before first layout
+	}
+	if p.ScrollY() < p.MaxScroll(vh) {
+		p.SetScrollY(p.ScrollY() + 1)
 	}
 }
 
 func (a *App) PopupScrollUp() {
 	p := a.popups.ActivePopup()
-	if p != nil && p.IsDiff() {
-		if p.ScrollY() > 0 {
-			p.SetScrollY(p.ScrollY() - 1)
-		}
+	if p == nil {
+		return
+	}
+	if p.ScrollY() > 0 {
+		p.SetScrollY(p.ScrollY() - 1)
 	}
 }
 

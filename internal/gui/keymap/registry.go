@@ -687,6 +687,8 @@ func Default() *Registry {
 		Action:      ActionPopupFocusNext,
 		Bindings:    []KeyBinding{{Key: gocui.KeyArrowDown}},
 		Scope:       ScopePopup,
+		HintLabel:   "switch",
+		HintKey:     "\u2191/\u2193",
 		Description: "Focus next notification",
 		DocSection:  "popup_navigate",
 	})

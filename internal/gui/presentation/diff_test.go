@@ -184,3 +184,66 @@ func TestFormatDiffLine_Hunk(t *testing.T) {
 
 	assert.Equal(t, "@@ -10,7 +10,7 @@ func main() {", line)
 }
+
+// --- FormatInlineDiffLine tests ---
+
+func TestFormatInlineDiffLine_Add(t *testing.T) {
+	t.Parallel()
+	dl := presentation.DiffLine{Kind: presentation.DiffAdd, Content: "new line", NewNum: 42}
+	assert.Equal(t, "+ new line", presentation.FormatInlineDiffLine(dl))
+}
+
+func TestFormatInlineDiffLine_Del(t *testing.T) {
+	t.Parallel()
+	dl := presentation.DiffLine{Kind: presentation.DiffDel, Content: "old line", OldNum: 10}
+	assert.Equal(t, "- old line", presentation.FormatInlineDiffLine(dl))
+}
+
+func TestFormatInlineDiffLine_Context(t *testing.T) {
+	t.Parallel()
+	dl := presentation.DiffLine{Kind: presentation.DiffContext, Content: "unchanged", OldNum: 5, NewNum: 5}
+	assert.Equal(t, "  unchanged", presentation.FormatInlineDiffLine(dl))
+}
+
+func TestFormatInlineDiffLine_Hunk(t *testing.T) {
+	t.Parallel()
+	dl := presentation.DiffLine{Kind: presentation.DiffHunk, Content: "@@ -1,3 +1,3 @@"}
+	assert.Equal(t, "@@ -1,3 +1,3 @@", presentation.FormatInlineDiffLine(dl))
+}
+
+func TestFormatInlineDiffLine_FilePath(t *testing.T) {
+	t.Parallel()
+	dl := presentation.DiffLine{Kind: presentation.DiffFilePath, Content: "/tmp/myfile.go"}
+	assert.Equal(t, "File: /tmp/myfile.go", presentation.FormatInlineDiffLine(dl))
+}
+
+// --- ParseUnifiedDiff: trailing empty line trimming ---
+
+func TestParseUnifiedDiff_TrimsTrailingEmptyLines(t *testing.T) {
+	t.Parallel()
+	diff := "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+new\n"
+	lines := presentation.ParseUnifiedDiff(diff)
+	// Last line should be the add line, not an empty context
+	last := lines[len(lines)-1]
+	assert.Equal(t, presentation.DiffAdd, last.Kind)
+	assert.Equal(t, "new", last.Content)
+}
+
+// --- ParseUnifiedDiff: no-newline marker ---
+
+func TestParseUnifiedDiff_SkipsNoNewlineMarker(t *testing.T) {
+	t.Parallel()
+	diff := "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+new\n\\ No newline at end of file\n"
+	lines := presentation.ParseUnifiedDiff(diff)
+	for _, l := range lines {
+		assert.NotContains(t, l.Content, "No newline at end of file")
+	}
+}
+
+// --- DiffFilePath kind ---
+
+func TestDiffFilePath_KindValue(t *testing.T) {
+	t.Parallel()
+	// Ensure DiffFilePath is distinct from DiffHeader
+	assert.NotEqual(t, presentation.DiffHeader, presentation.DiffFilePath)
+}

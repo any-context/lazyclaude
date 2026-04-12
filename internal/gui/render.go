@@ -258,11 +258,25 @@ func scrollToCursor(v *gocui.View, cursorY int) {
 	v.SetCursor(0, cursorY-oy)
 }
 
-// renderToolPopup writes a tool popup to a view.
+// renderToolPopup writes a tool popup to a view with viewport slicing.
 func renderToolPopup(v *gocui.View, p Popup) {
 	v.Title = p.Title()
-	for _, line := range p.ContentLines() {
-		fmt.Fprintln(v, line)
+
+	lines := p.ContentLines()
+	_, viewH := v.Size()
+	visibleLines := viewH - 1
+
+	start := p.ScrollY()
+	end := start + visibleLines
+	if end > len(lines) {
+		end = len(lines)
+	}
+	if start < 0 {
+		start = 0
+	}
+
+	for i := start; i < end; i++ {
+		fmt.Fprintln(v, lines[i])
 	}
 }
 
@@ -296,6 +310,8 @@ func renderDiffPopup(v *gocui.View, p Popup) {
 			fmt.Fprintf(v, "\x1b[36m%s\x1b[0m\n", line)
 		case presentation.DiffHeader:
 			fmt.Fprintf(v, "\x1b[1m%s\x1b[0m\n", line)
+		case presentation.DiffFilePath:
+			fmt.Fprintf(v, "\x1b[2m%s\x1b[0m\n", line)
 		default:
 			fmt.Fprintln(v, line)
 		}
