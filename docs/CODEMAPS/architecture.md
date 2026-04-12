@@ -1,8 +1,8 @@
-<!-- Last Updated: 2026-04-08 | daemon-arch branch: mirror windows, PostCreateHook, Role propagation, lazy remote connection -->
+<!-- Last Updated: 2026-04-11 | Added daemon package to dependency graph, covering CompositeProvider and command routing -->
 
 # Architecture
 
-**Last Updated:** 2026-04-08 (daemon-arch)
+**Last Updated:** 2026-04-11 (daemon-arch)
 
 ## System Overview
 
@@ -48,6 +48,9 @@ cmd/lazyclaude (CLI entry, Cobra)
   |    +-- keyhandler  (per-view + panel handlers)
   |    +-- keymap      (configurable keybinding registry)
   |    +-- presentation (formatting, styling)
+  +-- daemon         (remote session API + provider routing)
+  |    +-- CompositeProvider (local/remote provider dispatch)
+  |    +-- RemoteProvider (SSH-backed remote daemon client)
   +-- session        (session CRUD, tmux sync, persistence)
   +-- server         (MCP WebSocket/HTTP server)
   |    +-- activity state + notifications
