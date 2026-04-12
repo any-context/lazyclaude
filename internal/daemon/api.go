@@ -17,7 +17,9 @@ import (
 //        so that remote fullscreen copy mode can read the remote tmux server's
 //        scrollback directly (the local mirror window's tmux buffer does not
 //        contain the remote tmux's historical scrollback).
-const APIVersion = 2
+//   - 3: adds POST /session/resume for resuming GC'd sessions by ID with
+//        worktree name fallback.
+const APIVersion = 3
 
 // --- Session CRUD ---
 

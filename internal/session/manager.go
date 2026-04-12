@@ -644,12 +644,24 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot string) (*Ses
 // it cleans up the old entry and re-launches at the same worktree path. If the
 // session has been GC'd, it uses the provided worktree name to reconstruct the
 // path and launches a new session with the original ID preserved.
+//
+// Only local worktree/worker sessions can be resumed. Remote sessions and PM
+// sessions are rejected because they require different launch semantics.
 func (m *Manager) ResumeSession(ctx context.Context, id, prompt, name string) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	old := m.store.FindByID(id)
 	if old != nil {
+		// Reject remote mirror sessions — these must be resumed on the remote host.
+		if old.Host != "" {
+			return nil, fmt.Errorf("cannot resume remote session %s locally (host=%s)", id, old.Host)
+		}
+		// Reject PM sessions — PM has different launch semantics.
+		if old.Role == RolePM {
+			return nil, fmt.Errorf("cannot resume PM session %s via sessions resume (use PM launch instead)", id)
+		}
+
 		// Session still in state.json — derive projectRoot and re-launch.
 		project := m.store.FindProjectForSession(id)
 		projectRoot := ""
@@ -665,12 +677,22 @@ func (m *Manager) ResumeSession(ctx context.Context, id, prompt, name string) (*
 		if old.Status != StatusOrphan {
 			_ = m.tmux.KillWindow(ctx, target)
 		}
-		m.store.Remove(id)
-		if err := m.store.Save(); err != nil {
-			m.log.Warn("resumeSession.intermediateSave", "err", err)
-		}
 
-		return m.launchWorktreeSession(ctx, old.Name, old.Path, prompt, projectRoot, old.Role, id)
+		// Remove old entry before launching the replacement. If the launch
+		// fails we restore the old record so state.json is not left corrupt.
+		savedOld := *old
+		m.store.Remove(id)
+
+		result, launchErr := m.launchWorktreeSession(ctx, old.Name, old.Path, prompt, projectRoot, old.Role, id)
+		if launchErr != nil {
+			// Restore old record since launch failed.
+			m.store.Add(savedOld, projectRoot)
+			if err := m.store.Save(); err != nil {
+				m.log.Warn("resumeSession.restoreSave", "err", err)
+			}
+			return nil, launchErr
+		}
+		return result, nil
 	}
 
 	// Fallback: session GC'd but worktree directory may still exist on disk.
@@ -719,9 +741,7 @@ func (m *Manager) findProjectRootForWorktree(name string) (string, error) {
 			return p.Path, nil
 		}
 	}
-	// No matching project found — fall back to first project for the error path
-	// (os.Stat in the caller will produce a clear "not found" message).
-	return projects[0].Path, nil
+	return "", fmt.Errorf("no project found containing worktree %q", name)
 }
 
 // CreateWorkerSession creates a git worktree and launches Claude Code with the
