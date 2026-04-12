@@ -16,16 +16,6 @@ func (a *App) enterFullScreen(sessionID string) {
 	}
 }
 
-// findSessionByID searches the cached tree nodes for a session with the given ID.
-func (a *App) findSessionByID(id string) *SessionItem {
-	for _, node := range a.treeNodes() {
-		if node.Kind == SessionNode && node.Session != nil && node.Session.ID == id {
-			return node.Session
-		}
-	}
-	return nil
-}
-
 // exitFullScreen exits fullscreen mode.
 func (a *App) exitFullScreen() {
 	a.fullscreen.Exit()

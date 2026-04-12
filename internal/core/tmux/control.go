@@ -185,7 +185,6 @@ func (c *ControlClient) SendKeysLiteral(target string, text string) error {
 	return err
 }
 
-// validateControlArg rejects strings that could inject tmux commands.
 // validateControlTarget rejects tmux command injection in target strings.
 // Spaces are blocked because they would split the command into multiple args.
 func validateControlTarget(s string) error {

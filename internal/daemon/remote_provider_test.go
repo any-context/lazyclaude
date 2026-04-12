@@ -652,11 +652,11 @@ func TestRemoteProvider_SSEActivity_PassesSessionID(t *testing.T) {
 	// mirror session's current tmux window ID.
 	//
 	// Production path: the daemon carries an 8-char session hint in
-	// NotificationEvent.SessionID (see windowToSessionHint), and
-	// handleSSEEvent matches it against the cached full UUID using the
-	// HasPrefix branch. We simulate that asymmetry here to ensure the
-	// callback receives the *expanded* full ID (which root.go needs to
-	// look up the local mirror via store.FindByID).
+	// NotificationEvent.SessionID, and handleSSEEvent matches it against
+	// the cached full UUID using the HasPrefix branch. We simulate that
+	// asymmetry here to ensure the callback receives the *expanded* full
+	// ID (which root.go needs to look up the local mirror via
+	// store.FindByID).
 	var gotSessionID string
 	var gotEvent model.Event
 	var cbCalls int

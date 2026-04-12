@@ -174,11 +174,6 @@ func (s *DaemonServer) ShutdownCh() <-chan struct{} {
 	return s.shutdownCh
 }
 
-// Port returns the listening port.
-func (s *DaemonServer) Port() int {
-	return s.config.Port
-}
-
 // --- Auth middleware ---
 
 // withAuth authenticates requests using the X-Daemon-Authorization header.
@@ -646,17 +641,3 @@ func GenerateDaemonToken() (string, error) {
 	}
 	return hex.EncodeToString(b), nil
 }
-
-// ReadDaemonInfo reads daemon connection info from the runtime directory.
-func ReadDaemonInfo(runtimeDir string) (*DaemonInfo, error) {
-	data, err := os.ReadFile(filepath.Join(runtimeDir, "daemon.json"))
-	if err != nil {
-		return nil, fmt.Errorf("read daemon.json: %w", err)
-	}
-	var info DaemonInfo
-	if err := json.Unmarshal(data, &info); err != nil {
-		return nil, fmt.Errorf("parse daemon.json: %w", err)
-	}
-	return &info, nil
-}
-
