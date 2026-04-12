@@ -16,6 +16,11 @@ func TestClassifyLogLine(t *testing.T) {
 			want: LogLevelError,
 		},
 		{
+			name: "ws accept error",
+			line: "2024/04/13 10:00:00 ws accept: connection refused",
+			want: LogLevelError,
+		},
+		{
 			name: "warning prefix",
 			line: "2024/04/13 10:00:00 warning: write port file: permission denied",
 			want: LogLevelWarn,

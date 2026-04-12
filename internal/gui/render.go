@@ -163,7 +163,13 @@ func (a *App) readLogLines() []string {
 	if err != nil {
 		return nil
 	}
-	raw := bytes.Split(bytes.TrimRight(data, "\n"), []byte("\n"))
+	trimmed := bytes.TrimRight(data, "\n")
+	if len(trimmed) == 0 {
+		a.logCache.modTime = mt
+		a.logCache.lines = nil
+		return nil
+	}
+	raw := bytes.Split(trimmed, []byte("\n"))
 	lines := make([]string, len(raw))
 	for i, b := range raw {
 		lines[len(raw)-1-i] = string(b)

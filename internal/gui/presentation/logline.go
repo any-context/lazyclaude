@@ -38,8 +38,9 @@ func ClassifyLogLine(line string) LogLevel {
 	}
 	lower := strings.ToLower(msg)
 
-	// Error: message starts with "server error:"
-	if strings.HasPrefix(lower, "server error:") {
+	// Error: known error-only prefixes
+	if strings.HasPrefix(lower, "server error:") ||
+		strings.HasPrefix(lower, "ws accept:") {
 		return LogLevelError
 	}
 
