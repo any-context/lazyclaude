@@ -46,6 +46,49 @@ func newSessionsCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "output raw JSON")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show window column")
 
+	cmd.AddCommand(newSessionsResumeCmd())
+
+	return cmd
+}
+
+func newSessionsResumeCmd() *cobra.Command {
+	var (
+		name   string
+		prompt string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "resume <session-id>",
+		Short: "Resume a session by ID (supports GC'd sessions via --name)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			sessionID := args[0]
+
+			paths := config.DefaultPaths()
+			disc, err := server.DiscoverServer(paths.IDEDir)
+			if err != nil {
+				return fmt.Errorf("discover server: %w", err)
+			}
+
+			client := server.NewClient(disc.Port, disc.Token)
+			result, err := client.ResumeSession(cmd.Context(), sessionID, prompt, name)
+			if err != nil {
+				return fmt.Errorf("resume session: %w", err)
+			}
+
+			if result.Session != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "Resumed session %s (id=%s, role=%s, path=%s)\n",
+					result.Session.Name, result.Session.ID, result.Session.Role, result.Session.Path)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "Session resumed (status=%s)\n", result.Status)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&name, "name", "", "worktree name (required for GC'd sessions)")
+	cmd.Flags().StringVar(&prompt, "prompt", "", "initial prompt for the resumed session")
+
 	return cmd
 }
 

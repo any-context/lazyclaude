@@ -109,6 +109,7 @@ func New(cfg Config, tmuxClient tmux.Client, logger *log.Logger, opts ...ServerO
 	mux.HandleFunc("/prompt-submit", s.handlePromptSubmit)
 	mux.HandleFunc("/msg/send", s.handleMsgSend)
 	mux.HandleFunc("/msg/create", s.handleMsgCreate)
+	mux.HandleFunc("/msg/resume", s.handleMsgResume)
 	mux.HandleFunc("/msg/sessions", s.handleMsgSessions)
 	mux.HandleFunc("/", s.handleWebSocket)
 

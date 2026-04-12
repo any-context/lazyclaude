@@ -33,6 +33,7 @@ type remoteSessionAPI interface {
 	CreateSession(path string) (*daemon.SessionCreateResponse, error)
 	Delete(id string) error
 	Rename(id, newName string) error
+	ResumeSession(id, prompt, name string) error
 }
 
 // SessionCommandService encapsulates all session create/delete/rename
@@ -220,6 +221,14 @@ func (s *SessionCommandService) ResumeWorktree(target OperationTarget, wtPath, p
 		return err
 	}
 	return s.cp.ResumeWorktree(wtPath, prompt, target.ProjectRoot, target.Host)
+}
+
+// ResumeSession resumes a session by ID with worktree name fallback.
+func (s *SessionCommandService) ResumeSession(target OperationTarget, id, prompt, name string) error {
+	if err := s.prepareRemote(&target); err != nil {
+		return err
+	}
+	return s.cp.ResumeSession(id, prompt, name, target.Host)
 }
 
 // ListWorktrees lists worktrees on the appropriate host.

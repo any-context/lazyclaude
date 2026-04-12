@@ -108,6 +108,9 @@ func NewDaemonServer(
 	mux.HandleFunc("POST /worktree/resume", s.withAuth(s.handleWorktreeResume))
 	mux.HandleFunc("GET /worktrees", s.withAuth(s.handleWorktreeList))
 
+	// Session resume (by ID with worktree name fallback)
+	mux.HandleFunc("POST /session/resume", s.withAuth(s.handleSessionResume))
+
 	// Messaging
 	mux.HandleFunc("POST /msg/send", s.withAuth(s.handleMsgSend))
 	mux.HandleFunc("POST /msg/create", s.withAuth(s.handleMsgCreate))
@@ -393,6 +396,29 @@ func (s *DaemonServer) handleWorktreeResume(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, WorktreeResumeResponse{
+		SessionID:  sess.ID,
+		Name:       sess.Name,
+		Path:       sess.Path,
+		TmuxWindow: sess.WindowName(),
+		Role:       string(sess.Role),
+	})
+}
+
+func (s *DaemonServer) handleSessionResume(w http.ResponseWriter, r *http.Request) {
+	var req SessionResumeRequest
+	if err := readJSON(w, r, &req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	sess, err := s.mgr.ResumeSession(r.Context(), req.ID, req.Prompt, req.Name)
+	if err != nil {
+		s.log.Printf("session/resume: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, SessionResumeResponse{
 		SessionID:  sess.ID,
 		Name:       sess.Name,
 		Path:       sess.Path,

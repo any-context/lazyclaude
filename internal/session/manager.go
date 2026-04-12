@@ -232,7 +232,7 @@ func (m *Manager) createWorktreeSession(ctx context.Context, opts worktreeOpts) 
 		}
 	}
 
-	return m.launchWorktreeSession(ctx, opts.Name, wtPath, opts.UserPrompt, opts.ProjectRoot, opts.Role)
+	return m.launchWorktreeSession(ctx, opts.Name, wtPath, opts.UserPrompt, opts.ProjectRoot, opts.Role, "")
 }
 
 // CreateWorktree creates a git worktree and launches Claude Code with an initial prompt.
@@ -310,9 +310,14 @@ func (m *Manager) launchSession(ctx context.Context, sess Session, claudeCmd, st
 
 // launchWorktreeSession is the shared logic for creating a tmux window
 // running Claude Code in a worktree directory. Called by CreateWorktree,
-// ResumeWorktree, and CreateWorkerSession. Caller must hold m.mu.
-func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userPrompt, projectRoot string, role Role) (*Session, error) {
-	id := uuid.New().String()
+// ResumeWorktree, ResumeSession, and CreateWorkerSession. Caller must hold m.mu.
+// When sessionID is non-empty it is reused (resume of a GC'd session);
+// otherwise a fresh UUID is generated.
+func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userPrompt, projectRoot string, role Role, sessionID string) (*Session, error) {
+	id := sessionID
+	if id == "" {
+		id = uuid.New().String()
+	}
 	systemPrompt := BuildWorkerPrompt(ctx, wtPath, projectRoot, id)
 
 	sess := Session{
@@ -633,6 +638,53 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot string) (*Ses
 		return result, launchErr
 	}
 	return m.launchSession(ctx, sess, claudeCmd, startDir, projectRoot, claudeEnv(id))
+}
+
+// ResumeSession resumes a session by ID. If the session is still in state.json,
+// it cleans up the old entry and re-launches at the same worktree path. If the
+// session has been GC'd, it uses the provided worktree name to reconstruct the
+// path and launches a new session with the original ID preserved.
+func (m *Manager) ResumeSession(ctx context.Context, id, prompt, name string) (*Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	old := m.store.FindByID(id)
+	if old != nil {
+		// Session still in state.json — derive projectRoot and re-launch.
+		project := m.store.FindProjectForSession(id)
+		projectRoot := ""
+		if project != nil {
+			projectRoot = project.Path
+		}
+
+		// Clean up old entry (kill tmux window if Dead, remove from store).
+		target := old.TmuxTarget()
+		if old.Status != StatusOrphan {
+			_ = m.tmux.KillWindow(ctx, target)
+		}
+		m.store.Remove(id)
+		_ = m.store.Save()
+
+		return m.launchWorktreeSession(ctx, old.Name, old.Path, prompt, projectRoot, old.Role, id)
+	}
+
+	// Fallback: session GC'd but worktree directory may still exist on disk.
+	if name == "" {
+		return nil, fmt.Errorf("session not found: %s (specify --name for GC'd sessions)", id)
+	}
+
+	projects := m.store.Projects()
+	if len(projects) == 0 {
+		return nil, fmt.Errorf("no projects registered")
+	}
+	projectRoot := projects[0].Path
+	wtPath := filepath.Join(projectRoot, ".lazyclaude", "worktrees", name)
+
+	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("worktree directory not found: %s", wtPath)
+	}
+
+	return m.launchWorktreeSession(ctx, name, wtPath, prompt, projectRoot, RoleWorker, id)
 }
 
 // CreateWorkerSession creates a git worktree and launches Claude Code with the

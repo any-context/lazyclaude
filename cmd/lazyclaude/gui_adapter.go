@@ -24,6 +24,7 @@ type sessionCommander interface {
 	LaunchLazygit(target OperationTarget) error
 	CreateWorktree(target OperationTarget, name, prompt string) error
 	ResumeWorktree(target OperationTarget, wtPath, prompt string) error
+	ResumeSession(target OperationTarget, id, prompt, name string) error
 	ListWorktrees(target OperationTarget) ([]gui.WorktreeInfo, error)
 	CreatePMSession(target OperationTarget) error
 	CreateWorkerSession(target OperationTarget, name, prompt string) error
@@ -311,6 +312,10 @@ func (a *guiCompositeAdapter) CreateWorktree(name, prompt, projectRoot string) e
 
 func (a *guiCompositeAdapter) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
 	return a.commands.ResumeWorktree(a.resolveTarget(projectRoot), worktreePath, prompt)
+}
+
+func (a *guiCompositeAdapter) ResumeSession(id, prompt, name, projectRoot string) error {
+	return a.commands.ResumeSession(a.resolveTarget(projectRoot), id, prompt, name)
 }
 
 func (a *guiCompositeAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeInfo, error) {

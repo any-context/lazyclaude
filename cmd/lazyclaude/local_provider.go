@@ -189,6 +189,11 @@ func (p *localDaemonProvider) ResumeWorktree(worktreePath, prompt, projectRoot s
 	return err
 }
 
+func (p *localDaemonProvider) ResumeSession(id, prompt, name string) error {
+	_, err := p.mgr.ResumeSession(context.Background(), id, prompt, name)
+	return err
+}
+
 func (p *localDaemonProvider) ListWorktrees(projectRoot string) ([]daemon.WorktreeInfo, error) {
 	items, err := session.ListWorktrees(context.Background(), projectRoot)
 	if err != nil {

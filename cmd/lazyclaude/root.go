@@ -500,6 +500,20 @@ func (a *sessionCreatorAdapter) CreateWorkerSession(ctx context.Context, name, p
 	}, nil
 }
 
+func (a *sessionCreatorAdapter) ResumeSession(ctx context.Context, id, prompt, name string) (*server.SessionCreateResult, error) {
+	sess, err := a.mgr.ResumeSession(ctx, id, prompt, name)
+	if err != nil {
+		return nil, fmt.Errorf("resume session: %w", err)
+	}
+	return &server.SessionCreateResult{
+		ID:     sess.ID,
+		Name:   sess.Name,
+		Role:   string(sess.Role),
+		Path:   sess.Path,
+		Window: sess.TmuxWindow,
+	}, nil
+}
+
 // CreateLocalSession creates a plain session at projectPath and renames it
 // to the caller-specified name.
 func (a *sessionCreatorAdapter) CreateLocalSession(ctx context.Context, name, projectPath string) (*server.SessionCreateResult, error) {

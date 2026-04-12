@@ -79,6 +79,10 @@ func (f *fakeRemoteSessionAPI) Rename(id, newName string) error {
 	return nil
 }
 
+func (f *fakeRemoteSessionAPI) ResumeSession(id, prompt, name string) error {
+	return nil
+}
+
 var _ remoteSessionAPI = (*fakeRemoteSessionAPI)(nil)
 
 // --- fakeSessionProvider: remote w/W/P/worker/g -------------------------------
@@ -157,6 +161,10 @@ func (f *fakeSessionProvider) ResumeWorktree(worktreePath, prompt, projectRoot s
 	})
 	resp := f.newResponse(filepath.Base(worktreePath), worktreePath, "worker")
 	return f.postCreate(f.host, projectRoot, resp)
+}
+
+func (f *fakeSessionProvider) ResumeSession(id, prompt, name string) error {
+	return nil
 }
 
 func (f *fakeSessionProvider) ListWorktrees(projectRoot string) ([]daemon.WorktreeInfo, error) {

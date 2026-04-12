@@ -586,6 +586,28 @@ func (rp *RemoteProvider) resumeWorktreeResp(worktreePath, prompt, projectRoot s
 	}, nil
 }
 
+func (rp *RemoteProvider) ResumeSession(id, prompt, name string) error {
+	client, err := rp.conn.Client()
+	if err != nil {
+		return fmt.Errorf("resume session: %w", err)
+	}
+	resp, err := client.ResumeSession(context.Background(), SessionResumeRequest{
+		ID:     id,
+		Prompt: prompt,
+		Name:   name,
+	})
+	if err != nil {
+		return fmt.Errorf("resume session: %w", err)
+	}
+	return rp.invokePostCreate("", &SessionCreateResponse{
+		ID:         resp.SessionID,
+		Name:       resp.Name,
+		Path:       resp.Path,
+		TmuxWindow: resp.TmuxWindow,
+		Role:       resp.Role,
+	})
+}
+
 func (rp *RemoteProvider) ListWorktrees(projectRoot string) ([]WorktreeInfo, error) {
 	client, err := rp.conn.Client()
 	if err != nil {

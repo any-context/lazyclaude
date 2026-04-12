@@ -72,6 +72,10 @@ func (m *mockCommands) ResumeWorktree(target OperationTarget, wtPath, prompt str
 	return nil
 }
 
+func (m *mockCommands) ResumeSession(target OperationTarget, id, prompt, name string) error {
+	return nil
+}
+
 func (m *mockCommands) ListWorktrees(target OperationTarget) ([]gui.WorktreeInfo, error) {
 	m.listWorktreesCalls = append(m.listWorktreesCalls, target)
 	return nil, nil
@@ -335,6 +339,10 @@ func (f *fakeRemoteAPI) Delete(id string) error {
 
 func (f *fakeRemoteAPI) Rename(id, newName string) error {
 	f.renameCalls = append(f.renameCalls, renameCall{ID: id, NewName: newName})
+	return nil
+}
+
+func (f *fakeRemoteAPI) ResumeSession(id, prompt, name string) error {
 	return nil
 }
 

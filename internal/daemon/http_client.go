@@ -94,6 +94,14 @@ func (c *HTTPClient) ResumeWorktree(ctx context.Context, req WorktreeResumeReque
 	return &resp, nil
 }
 
+func (c *HTTPClient) ResumeSession(ctx context.Context, req SessionResumeRequest) (*SessionResumeResponse, error) {
+	var resp SessionResumeResponse
+	if err := c.postJSON(ctx, "/session/resume", req, &resp); err != nil {
+		return nil, fmt.Errorf("resume session: %w", err)
+	}
+	return &resp, nil
+}
+
 func (c *HTTPClient) ListWorktrees(ctx context.Context, projectRoot string) ([]WorktreeInfo, error) {
 	q := url.Values{"project_root": {projectRoot}}
 	p := "/worktrees?" + q.Encode()

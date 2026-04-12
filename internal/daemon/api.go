@@ -164,6 +164,24 @@ type WorktreeResumeResponse struct {
 	Role       string `json:"role,omitempty"`
 }
 
+// SessionResumeRequest resumes a session by ID, with a worktree name fallback
+// for sessions that have been GC'd from state.json but whose worktree directory
+// still exists on disk.
+type SessionResumeRequest struct {
+	ID     string `json:"id"`
+	Prompt string `json:"prompt,omitempty"`
+	Name   string `json:"name,omitempty"` // worktree name (for GC'd sessions)
+}
+
+// SessionResumeResponse is returned after a session is resumed.
+type SessionResumeResponse struct {
+	SessionID  string `json:"session_id"`
+	Name       string `json:"name"`
+	Path       string `json:"path,omitempty"`
+	TmuxWindow string `json:"tmux_window"`
+	Role       string `json:"role,omitempty"`
+}
+
 // WorktreeInfo describes an existing worktree.
 // Compatible with gui.WorktreeInfo.
 type WorktreeInfo struct {

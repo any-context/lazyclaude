@@ -40,6 +40,10 @@ type ClientAPI interface {
 	// ResumeWorktree resumes an existing worktree session.
 	ResumeWorktree(ctx context.Context, req WorktreeResumeRequest) (*WorktreeResumeResponse, error)
 
+	// ResumeSession resumes a session by ID, with a worktree name fallback
+	// for sessions that have been GC'd from state.json.
+	ResumeSession(ctx context.Context, req SessionResumeRequest) (*SessionResumeResponse, error)
+
 	// ListWorktrees lists all worktrees for a project root.
 	ListWorktrees(ctx context.Context, projectRoot string) ([]WorktreeInfo, error)
 

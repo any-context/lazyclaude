@@ -93,6 +93,13 @@ func (f *fakeSessionCreator) CreateLocalSession(ctx context.Context, name, proje
 	return f.result, nil
 }
 
+func (f *fakeSessionCreator) ResumeSession(ctx context.Context, id, prompt, name string) (*server.SessionCreateResult, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.result, nil
+}
+
 // startTestServerWithCreator starts a test server with both SessionLister and SessionCreator.
 func startTestServerWithCreator(t *testing.T, sessions []server.SessionInfo, creator server.SessionCreator) (*server.Server, int, *tmux.MockClient) {
 	t.Helper()

@@ -68,6 +68,9 @@ func (s *stubProvider) CreateWorktree(string, string, string) error {
 func (s *stubProvider) ResumeWorktree(string, string, string) error {
 	panic("not implemented")
 }
+func (s *stubProvider) ResumeSession(string, string, string) error {
+	panic("not implemented")
+}
 func (s *stubProvider) ListWorktrees(string) ([]WorktreeInfo, error) { panic("not implemented") }
 func (s *stubProvider) CreatePMSession(string) error                 { panic("not implemented") }
 func (s *stubProvider) CreateWorkerSession(string, string, string) error {

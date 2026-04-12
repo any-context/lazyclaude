@@ -23,6 +23,9 @@ type SessionCreator interface {
 	CreateWorkerSession(ctx context.Context, name, prompt, projectRoot string) (*SessionCreateResult, error)
 	// CreateLocalSession creates a plain session at projectPath.
 	CreateLocalSession(ctx context.Context, name, projectPath string) (*SessionCreateResult, error)
+	// ResumeSession resumes a session by ID with a worktree name fallback
+	// for sessions that have been GC'd from state.json.
+	ResumeSession(ctx context.Context, id, prompt, name string) (*SessionCreateResult, error)
 }
 
 // SessionProjectInfo is the minimal project data needed by the handler.
@@ -290,6 +293,80 @@ func (s *Server) handleMsgSend(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{"status": "delivered"}); err != nil {
 		s.log.Printf("msg/send: encode: %v", err)
+	}
+}
+
+// MsgResumeResponse is the JSON response for POST /msg/resume.
+type MsgResumeResponse struct {
+	Status  string            `json:"status"`
+	Session *MsgCreateSession `json:"session,omitempty"`
+	Error   string            `json:"error,omitempty"`
+}
+
+type msgResumeRequest struct {
+	ID     string `json:"id"`
+	Prompt string `json:"prompt,omitempty"`
+	Name   string `json:"name,omitempty"` // worktree name (for GC'd sessions)
+}
+
+// handleMsgResume handles POST /msg/resume.
+// It resumes a session by ID, falling back to the worktree name when the
+// session has been GC'd from state.json.
+func (s *Server) handleMsgResume(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := extractAuthToken(r)
+	if subtle.ConstantTimeCompare([]byte(token), []byte(s.config.Token)) != 1 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	s.mu.RLock()
+	sc := s.sessionCreator
+	s.mu.RUnlock()
+
+	if sc == nil {
+		http.Error(w, "session creator not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req msgResumeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID == "" {
+		http.Error(w, "id is required", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	result, err := sc.ResumeSession(ctx, req.ID, req.Prompt, req.Name)
+	if err != nil {
+		s.log.Printf("msg/resume: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	resp := MsgResumeResponse{
+		Status: "resumed",
+		Session: &MsgCreateSession{
+			ID:     result.ID,
+			Name:   result.Name,
+			Role:   result.Role,
+			Path:   result.Path,
+			Window: result.Window,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		s.log.Printf("msg/resume: encode: %v", err)
 	}
 }
 

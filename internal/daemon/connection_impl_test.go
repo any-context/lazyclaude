@@ -32,6 +32,9 @@ func (m *mockClientAPI) CreateWorktree(context.Context, WorktreeCreateRequest) (
 func (m *mockClientAPI) ResumeWorktree(context.Context, WorktreeResumeRequest) (*WorktreeResumeResponse, error) {
 	return nil, nil
 }
+func (m *mockClientAPI) ResumeSession(context.Context, SessionResumeRequest) (*SessionResumeResponse, error) {
+	return nil, nil
+}
 func (m *mockClientAPI) ListWorktrees(context.Context, string) ([]WorktreeInfo, error) {
 	return nil, nil
 }
