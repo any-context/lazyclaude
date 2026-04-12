@@ -16,6 +16,7 @@ import (
 	"github.com/any-context/lazyclaude/internal/core/model"
 	"github.com/any-context/lazyclaude/internal/core/tmux"
 	"github.com/any-context/lazyclaude/internal/daemon"
+	"github.com/any-context/lazyclaude/internal/server"
 	"github.com/any-context/lazyclaude/internal/session"
 	"github.com/spf13/cobra"
 )
@@ -53,6 +54,35 @@ func newDaemonCmd() *cobra.Command {
 			broker := event.NewBroker[model.Event]()
 			defer broker.Close()
 
+			// Start MCP server in-process so Claude Code hooks are received
+			// by the existing server code and published to the shared broker.
+			mcpLogger := log.New(os.Stderr, "lazyclaude-mcp: ", log.LstdFlags)
+			mcpCfg := server.Config{
+				Port:       0,
+				Token:      token,
+				IDEDir:     paths.IDEDir,
+				PortFile:   paths.PortFile(),
+				RuntimeDir: paths.RuntimeDir,
+			}
+			mcpSrv := server.New(mcpCfg, tmuxClient, mcpLogger, server.WithBroker(broker))
+			mcpSrv.SetSessionLister(&sessionListerAdapter{mgr: mgr})
+			mcpSrv.SetSessionCreator(&sessionCreatorAdapter{mgr: mgr})
+			if _, err := mcpSrv.Start(context.Background()); err != nil {
+				return fmt.Errorf("start MCP server: %w", err)
+			}
+			defer func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := mcpSrv.Stop(ctx); err != nil {
+					logger.Printf("warning: MCP server stop: %v", err)
+				}
+			}()
+
+			// Start background GC to sync tmux window state and clean dead sessions.
+			gc := session.NewGC(mgr, 2*time.Second)
+			gc.Start()
+			defer gc.Stop()
+
 			runtimeDir := daemon.DaemonInfoDir()
 
 			cfg := daemon.DaemonConfig{
@@ -67,8 +97,8 @@ func newDaemonCmd() *cobra.Command {
 				return fmt.Errorf("start daemon: %w", err)
 			}
 
-			// Print JSON to stdout so parseDaemonOutput can parse it.
-			// daemon.json is also written to disk for file-based discovery.
+			// Print JSON to stdout. daemon.json is also written to
+			// disk for file-based discovery.
 			if err := json.NewEncoder(os.Stdout).Encode(daemon.DaemonInfo{Port: actualPort, Token: token}); err != nil {
 				return fmt.Errorf("write daemon info to stdout: %w", err)
 			}

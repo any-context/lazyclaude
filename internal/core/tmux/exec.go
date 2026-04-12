@@ -160,7 +160,8 @@ func (c *ExecClient) HasSession(ctx context.Context, name string) (bool, error) 
 		if strings.Contains(stderrStr, "can't find session") ||
 			strings.Contains(stderrStr, "no session") ||
 			strings.Contains(stderrStr, "no server running") ||
-			strings.Contains(stderrStr, "no current target") {
+			strings.Contains(stderrStr, "no current target") ||
+			strings.Contains(stderrStr, "error connecting") {
 			return false, nil
 		}
 		// Any other stderr (e.g., "error connecting")

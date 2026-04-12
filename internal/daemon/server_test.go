@@ -171,61 +171,6 @@ func TestSessionRename_NotFound(t *testing.T) {
 	}
 }
 
-func TestPreview_NotFound(t *testing.T) {
-	_, ts, _ := newTestServer(t)
-
-	req := authReq("GET", ts.URL+"/session/nonexistent/preview?width=80&height=24", "")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("want 404, got %d", resp.StatusCode)
-	}
-}
-
-func TestHistorySize_NotFound(t *testing.T) {
-	_, ts, _ := newTestServer(t)
-
-	req := authReq("GET", ts.URL+"/session/nonexistent/history-size", "")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("want 404, got %d", resp.StatusCode)
-	}
-}
-
-func TestSendKeys_NotFound(t *testing.T) {
-	_, ts, _ := newTestServer(t)
-
-	req := authReq("POST", ts.URL+"/session/nonexistent/send-keys", `{"keys":"hello"}`)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("want 404, got %d", resp.StatusCode)
-	}
-}
-
-func TestAttach_NotFound(t *testing.T) {
-	_, ts, _ := newTestServer(t)
-
-	req := authReq("GET", ts.URL+"/session/nonexistent/attach", "")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("want 404, got %d", resp.StatusCode)
-	}
-}
 
 func TestMsgSend_Validation(t *testing.T) {
 	_, ts, _ := newTestServer(t)

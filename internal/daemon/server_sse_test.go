@@ -4,12 +4,17 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/any-context/lazyclaude/internal/core/config"
 	"github.com/any-context/lazyclaude/internal/core/model"
+	"github.com/any-context/lazyclaude/internal/core/tmux"
+	"github.com/any-context/lazyclaude/internal/session"
 )
 
 func TestSSE_FullSyncOnConnect(t *testing.T) {
@@ -197,21 +202,127 @@ func TestBrokerEventToNotification(t *testing.T) {
 	}
 }
 
-func TestWindowToSessionHint(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"lc-abc12345", "abc12345"},
-		{"@42", "@42"},
-		{"lc-", "lc-"},
-		{"short", "short"},
+// TestBrokerEventToNotification_ToolInfo_SetsSessionID verifies that
+// the daemon's SSE handler tags outgoing EventToolInfo events with the
+// authoritative session UUID resolved from the tmux window, so that
+// local RemoteProvider callbacks can rewrite ToolNotification.Window
+// to the local mirror's tmux window ID (Bug 5 Phase B action routing
+// fix). Without this tag, the popup would appear on the local mirror
+// but Accept/Reject would target a non-existent pane.
+func TestBrokerEventToNotification_ToolInfo_SetsSessionID(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	const sessID = "abcd1234-5678-90ef-1122-334455667788"
+	srv.mgr.Store().Add(session.Session{
+		ID:         sessID,
+		Name:       "s1",
+		Path:       "/proj",
+		TmuxWindow: "@42",
+		Status:     session.StatusRunning,
+	}, "/proj")
+
+	evt := model.Event{Notification: &model.ToolNotification{
+		ToolName:  "Edit",
+		Window:    "@42",
+		Timestamp: time.Now(),
+	}}
+
+	got := srv.brokerEventToNotification(evt)
+	if got == nil {
+		t.Fatal("brokerEventToNotification returned nil")
+	}
+	if got.Type != EventToolInfo {
+		t.Errorf("Type = %q, want %q", got.Type, EventToolInfo)
+	}
+	if got.SessionID != sessID {
+		t.Errorf("SessionID = %q, want %q", got.SessionID, sessID)
+	}
+	if got.ToolNotification == nil {
+		t.Fatal("ToolNotification is nil")
+	}
+	if got.ToolNotification.Window != "@42" {
+		t.Errorf("ToolNotification.Window = %q, want @42 (unchanged)", got.ToolNotification.Window)
+	}
+}
+
+// TestBrokerEventToNotification_ToolInfo_EmptySessionID_OnMiss verifies
+// that when the tmux window does not match any local session (e.g. the
+// daemon has not yet observed the session), SessionID is emitted as an
+// empty string rather than a stray value. Clients must be able to
+// detect the absence and degrade gracefully.
+func TestBrokerEventToNotification_ToolInfo_EmptySessionID_OnMiss(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	evt := model.Event{Notification: &model.ToolNotification{
+		ToolName:  "Bash",
+		Window:    "@99", // no matching session
+		Timestamp: time.Now(),
+	}}
+
+	got := srv.brokerEventToNotification(evt)
+	if got == nil {
+		t.Fatal("brokerEventToNotification returned nil")
+	}
+	if got.SessionID != "" {
+		t.Errorf("SessionID = %q, want empty on miss", got.SessionID)
+	}
+}
+
+func TestSessionIDForWindow(t *testing.T) {
+	// Helper builds a server with a minimal session store.
+	setup := func(t *testing.T) *DaemonServer {
+		t.Helper()
+		tmp := t.TempDir()
+		paths := config.TestPaths(tmp)
+		store := session.NewStore(paths.StateFile())
+		mgr := session.NewManager(store, tmux.NewMockClient(), paths, nil)
+		srv := &DaemonServer{
+			mgr: mgr,
+			log: log.New(io.Discard, "", 0),
+		}
+		return srv
 	}
 
-	for _, tt := range tests {
-		got := windowToSessionHint(tt.input)
-		if got != tt.want {
-			t.Errorf("windowToSessionHint(%q) = %q, want %q", tt.input, got, tt.want)
+	t.Run("matches by tmux window ID", func(t *testing.T) {
+		srv := setup(t)
+		srv.mgr.Store().Add(session.Session{
+			ID:         "abcd1234-5678-90ef-1122-334455667788",
+			Name:       "s1",
+			Path:       "/proj",
+			TmuxWindow: "@42",
+			Status:     session.StatusRunning,
+		}, "/proj")
+		got := srv.sessionIDForWindow("@42")
+		if got != "abcd1234-5678-90ef-1122-334455667788" {
+			t.Errorf("want full UUID, got %q", got)
 		}
-	}
+	})
+
+	t.Run("matches by canonical window name", func(t *testing.T) {
+		srv := setup(t)
+		srv.mgr.Store().Add(session.Session{
+			ID:     "0123456789abcdef-1111-2222-3333-444455556666",
+			Name:   "s2",
+			Path:   "/proj",
+			Status: session.StatusRunning,
+		}, "/proj")
+		got := srv.sessionIDForWindow("lc-01234567")
+		if got != "0123456789abcdef-1111-2222-3333-444455556666" {
+			t.Errorf("want full UUID for canonical name, got %q", got)
+		}
+	})
+
+	t.Run("empty window returns empty", func(t *testing.T) {
+		srv := setup(t)
+		if got := srv.sessionIDForWindow(""); got != "" {
+			t.Errorf("want empty, got %q", got)
+		}
+	})
+
+	t.Run("miss returns empty", func(t *testing.T) {
+		srv := setup(t)
+		if got := srv.sessionIDForWindow("@99"); got != "" {
+			t.Errorf("want empty on miss, got %q", got)
+		}
+	})
 }

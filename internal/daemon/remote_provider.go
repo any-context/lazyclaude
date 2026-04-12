@@ -6,33 +6,85 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/any-context/lazyclaude/internal/adapter/tmuxadapter"
-	"github.com/any-context/lazyclaude/internal/core/choice"
 	"github.com/any-context/lazyclaude/internal/core/model"
-	"github.com/any-context/lazyclaude/internal/core/tmux"
-	"github.com/charmbracelet/x/ansi"
+	"github.com/any-context/lazyclaude/internal/core/shell"
 )
 
 // Compile-time check: RemoteProvider implements SessionProvider.
 var _ SessionProvider = (*RemoteProvider)(nil)
 
+// PostCreateHook is called after a remote session is created via daemon API.
+// The hook creates a mirror tmux window and adds the session to the local store.
+type PostCreateHook func(host, path string, resp *SessionCreateResponse) error
+
+// RemoteProviderOption configures a RemoteProvider.
+type RemoteProviderOption func(*RemoteProvider)
+
+// WithPostCreate sets the hook called after session creation on the remote daemon.
+func WithPostCreate(hook PostCreateHook) RemoteProviderOption {
+	return func(rp *RemoteProvider) { rp.postCreate = hook }
+}
+
+// SSEActivityCallback is called when an SSE activity event is received.
+//
+// The event carries a best-effort Window (the remapped mirror name
+// "rm-xxxx"), but the sessionID is the authoritative key: callers should
+// use it to look up the corresponding local mirror session and overwrite
+// Window with the mirror's current local tmux window ID ("@42"). This
+// keeps the broker's activity key space aligned with the sidebar lookup
+// (which keys by Session.TmuxWindow = local tmux window ID).
+type SSEActivityCallback func(ev model.Event, sessionID string)
+
+// WithSSEActivity sets the callback for SSE activity events.
+// Used to forward remote activity to the local broker for sidebar display.
+func WithSSEActivity(cb SSEActivityCallback) RemoteProviderOption {
+	return func(rp *RemoteProvider) { rp.onSSEActivity = cb }
+}
+
+// SSEToolInfoCallback is invoked when an SSE EventToolInfo arrives.
+//
+// The callback may mutate the notification in place (e.g. rewrite
+// ToolNotification.Window from the remote tmux window ID to the local
+// mirror's tmux window ID) before it is buffered for the next
+// PendingNotifications call. The sessionID comes from
+// NotificationEvent.SessionID emitted by the daemon SSE handler and is
+// the authoritative key for looking up the local mirror session.
+//
+// Concurrency contract: the callback is invoked while the
+// RemoteProvider's internal mutex is held. Callback implementations
+// MUST NOT re-enter any RemoteProvider method (e.g. PendingNotifications,
+// HasSession, Sessions) or deadlock will result. Look-ups against
+// external stores (session.Store, etc.) are fine because they have
+// their own independent locks.
+//
+// Mirrors SSEActivityCallback for the ToolInfo code path; see Bug 5
+// for the background (remote permission popup action routing fix).
+type SSEToolInfoCallback func(n *model.ToolNotification, sessionID string)
+
+// WithSSEToolInfo sets the callback invoked on SSE EventToolInfo events.
+// Used by root.go to rewrite ToolNotification.Window to the local mirror
+// window ID so the permission popup's Accept/Reject keystrokes reach the
+// correct pane.
+func WithSSEToolInfo(cb SSEToolInfoCallback) RemoteProviderOption {
+	return func(rp *RemoteProvider) { rp.onSSEToolInfo = cb }
+}
+
 // RemoteProvider adapts a daemon ClientAPI to the SessionProvider interface.
 // It maintains a local cache of sessions and buffers tool notifications
 // received via SSE.
 //
-// For latency-sensitive operations (preview capture, scrollback, key sending),
-// a forwarded tmux.Client is used directly instead of going through the
-// daemon API. Session CRUD, worktree management, and messaging still use
-// the daemon API.
+// All operations (including preview capture, scrollback, key sending) go
+// through the daemon API. Socket tunnel forwarding was removed because
+// remote sshd environments often block Unix domain socket forwarding.
 type RemoteProvider struct {
-	host       string
-	conn       ConnectionManager
-	tmuxClient tmux.Client // forwarded tmux socket client (nil = use daemon API)
+	host          string
+	conn          ConnectionManager
+	postCreate    PostCreateHook      // immutable after construction
+	onSSEActivity SSEActivityCallback // immutable after construction
+	onSSEToolInfo SSEToolInfoCallback // immutable after construction
 
 	mu            sync.Mutex
 	sessions      []SessionInfo
@@ -45,11 +97,15 @@ type RemoteProvider struct {
 // NewRemoteProvider creates a RemoteProvider for the given host.
 // The ConnectionManager must already be connected or will be connected
 // separately; this constructor does not initiate the connection.
-func NewRemoteProvider(host string, conn ConnectionManager) *RemoteProvider {
-	return &RemoteProvider{
+func NewRemoteProvider(host string, conn ConnectionManager, opts ...RemoteProviderOption) *RemoteProvider {
+	rp := &RemoteProvider{
 		host: host,
 		conn: conn,
 	}
+	for _, o := range opts {
+		o(rp)
+	}
+	return rp
 }
 
 // Conn returns the underlying ConnectionManager for direct API access.
@@ -65,23 +121,6 @@ func (rp *RemoteProvider) QueryCWD(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("query cwd: %w", err)
 	}
 	return client.CWD(ctx)
-}
-
-// SetTmuxClient sets the forwarded tmux.Client for direct pane operations.
-// When set, CapturePreview, CaptureScrollback, HistorySize, and SendChoice
-// use the forwarded socket directly instead of the daemon API.
-// Must be called before the GUI event loop starts.
-func (rp *RemoteProvider) SetTmuxClient(tc tmux.Client) {
-	rp.mu.Lock()
-	defer rp.mu.Unlock()
-	rp.tmuxClient = tc
-}
-
-// getTmuxClient returns the forwarded tmux.Client, or nil if not set.
-func (rp *RemoteProvider) getTmuxClient() tmux.Client {
-	rp.mu.Lock()
-	defer rp.mu.Unlock()
-	return rp.tmuxClient
 }
 
 // StartSSE begins consuming the SSE notification stream in a background
@@ -158,14 +197,33 @@ func (rp *RemoteProvider) handleSSEEvent(ev NotificationEvent) {
 	switch ev.Type {
 	case EventActivity:
 		for i := range rp.sessions {
-			if rp.sessions[i].ID == ev.SessionID {
+			if rp.sessions[i].ID == ev.SessionID || strings.HasPrefix(rp.sessions[i].ID, ev.SessionID) {
 				rp.sessions[i].Activity = ev.Activity
 				rp.sessions[i].ToolName = ev.ToolName
+				// Forward to local broker for sidebar display.
+				if rp.onSSEActivity != nil {
+					// Window is a best-effort mirror name; the callback
+					// in root.go resolves the authoritative local tmux
+					// window ID using sessionID as a lookup hop.
+					mirrorWindow := remapRemoteWindow(rp.sessions[i].TmuxWindow)
+					rp.onSSEActivity(model.Event{ActivityNotification: &model.ActivityNotification{
+						Window:   mirrorWindow,
+						State:    ev.Activity,
+						ToolName: ev.ToolName,
+					}}, rp.sessions[i].ID)
+				}
 				break
 			}
 		}
 	case EventToolInfo:
 		if ev.ToolNotification != nil {
+			// Apply optional rewrite hook (e.g. rewrite Window to the
+			// local mirror's tmux window ID using ev.SessionID). The
+			// callback mutates the notification in place before it is
+			// buffered, mirroring the SSEActivity callback pattern.
+			if rp.onSSEToolInfo != nil {
+				rp.onSSEToolInfo(ev.ToolNotification, ev.SessionID)
+			}
 			rp.notifications = append(rp.notifications, ev.ToolNotification)
 		}
 	case EventFullSync:
@@ -220,18 +278,32 @@ func (rp *RemoteProvider) Sessions() ([]SessionInfo, error) {
 // --- SessionMutator ---
 
 func (rp *RemoteProvider) Create(path string) error {
+	_, err := rp.CreateSession(path)
+	return err
+}
+
+// CreateSession creates a session on the remote daemon and returns the
+// response containing the ID and tmux window name. Used by the mirror
+// window creation flow which needs the session ID to construct the
+// mirror window's SSH attach command.
+//
+// Callers are responsible for mirror setup. postCreate is NOT called
+// from this method because the optimistic UI flow (Create → placeholder
+// → completeRemoteCreate) handles mirrors separately.
+func (rp *RemoteProvider) CreateSession(path string) (*SessionCreateResponse, error) {
 	client, err := rp.conn.Client()
 	if err != nil {
-		return fmt.Errorf("create: %w", err)
+		return nil, fmt.Errorf("create: %w", err)
 	}
-	_, err = client.CreateSession(context.Background(), SessionCreateRequest{
+	resp, err := client.CreateSession(context.Background(), SessionCreateRequest{
 		Path:        path,
 		SessionType: "plain",
 	})
 	if err != nil {
-		return fmt.Errorf("create session: %w", err)
+		return nil, fmt.Errorf("create session: %w", err)
 	}
-	return nil
+	rp.addToCache(resp)
+	return resp, nil
 }
 
 func (rp *RemoteProvider) Delete(id string) error {
@@ -239,7 +311,11 @@ func (rp *RemoteProvider) Delete(id string) error {
 	if err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}
-	return client.DeleteSession(context.Background(), id)
+	if err := client.DeleteSession(context.Background(), id); err != nil {
+		return err
+	}
+	rp.removeFromCache(id)
+	return nil
 }
 
 func (rp *RemoteProvider) Rename(id, newName string) error {
@@ -258,136 +334,7 @@ func (rp *RemoteProvider) PurgeOrphans() (int, error) {
 	return client.PurgeOrphans(context.Background())
 }
 
-// --- PreviewProvider ---
-
-// resolveTmuxTarget returns the tmux target string for a session.
-// Looks up the session's TmuxWindow in the local cache; falls back to
-// constructing from session ID.
-func (rp *RemoteProvider) resolveTmuxTarget(id string) string {
-	rp.mu.Lock()
-	defer rp.mu.Unlock()
-	for _, s := range rp.sessions {
-		if s.ID == id && s.TmuxWindow != "" {
-			return s.TmuxWindow
-		}
-	}
-	// Fallback: construct window name from ID prefix.
-	name := "lc-" + id
-	if len(id) > 8 {
-		name = "lc-" + id[:8]
-	}
-	return tmuxSessionName + ":" + name
-}
-
-func (rp *RemoteProvider) CapturePreview(id string, width, height int) (*PreviewResponse, error) {
-	if tc := rp.getTmuxClient(); tc != nil {
-		return rp.capturePreviewDirect(tc, id, width, height)
-	}
-	client, err := rp.conn.Client()
-	if err != nil {
-		return nil, fmt.Errorf("capture preview: %w", err)
-	}
-	return client.CapturePreview(context.Background(), id, width, height)
-}
-
-// capturePreviewDirect captures pane content via the forwarded tmux socket.
-func (rp *RemoteProvider) capturePreviewDirect(tc tmux.Client, id string, width, height int) (*PreviewResponse, error) {
-	target := rp.resolveTmuxTarget(id)
-	ctx := context.Background()
-
-	if width > 0 && height > 0 {
-		_ = tc.ResizeWindow(ctx, target, width, height)
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	content, err := tc.CapturePaneANSI(ctx, target)
-	if err != nil || width <= 0 {
-		return &PreviewResponse{Content: content}, err
-	}
-
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		if ansi.StringWidth(line) > width {
-			lines[i] = ansi.Truncate(line, width, "")
-		}
-	}
-	if height > 0 && len(lines) > height {
-		lines = lines[:height]
-	}
-
-	var cursorX, cursorY int
-	if pos, posErr := tc.ShowMessage(ctx, target, "#{cursor_x},#{cursor_y}"); posErr == nil {
-		parts := strings.SplitN(strings.TrimSpace(pos), ",", 2)
-		if len(parts) == 2 {
-			cursorX, _ = strconv.Atoi(parts[0])
-			cursorY, _ = strconv.Atoi(parts[1])
-		}
-	}
-
-	return &PreviewResponse{
-		Content: strings.Join(lines, "\n"),
-		CursorX: cursorX,
-		CursorY: cursorY,
-	}, nil
-}
-
-func (rp *RemoteProvider) CaptureScrollback(id string, width, startLine, endLine int) (*ScrollbackResponse, error) {
-	if tc := rp.getTmuxClient(); tc != nil {
-		return rp.captureScrollbackDirect(tc, id, startLine, endLine)
-	}
-	client, err := rp.conn.Client()
-	if err != nil {
-		return nil, fmt.Errorf("capture scrollback: %w", err)
-	}
-	return client.CaptureScrollback(context.Background(), id, width, startLine, endLine)
-}
-
-func (rp *RemoteProvider) captureScrollbackDirect(tc tmux.Client, id string, startLine, endLine int) (*ScrollbackResponse, error) {
-	target := rp.resolveTmuxTarget(id)
-	content, err := tc.CapturePaneANSIRange(context.Background(), target, startLine, endLine)
-	return &ScrollbackResponse{Content: content}, err
-}
-
-func (rp *RemoteProvider) HistorySize(id string) (int, error) {
-	if tc := rp.getTmuxClient(); tc != nil {
-		return rp.historySizeDirect(tc, id)
-	}
-	client, err := rp.conn.Client()
-	if err != nil {
-		return 0, fmt.Errorf("history size: %w", err)
-	}
-	resp, err := client.HistorySize(context.Background(), id)
-	if err != nil {
-		return 0, err
-	}
-	return resp.Lines, nil
-}
-
-func (rp *RemoteProvider) historySizeDirect(tc tmux.Client, id string) (int, error) {
-	target := rp.resolveTmuxTarget(id)
-	out, err := tc.ShowMessage(context.Background(), target, "#{history_size}")
-	if err != nil {
-		return 0, err
-	}
-	n, _ := strconv.Atoi(strings.TrimSpace(out))
-	return n, nil
-}
-
 // --- SessionActioner ---
-
-// SendChoice sends a permission choice to the remote session's tmux pane.
-// When tmuxClient is set, sends directly via the forwarded socket.
-// Otherwise falls back to the daemon API.
-func (rp *RemoteProvider) SendChoice(window string, choiceVal int) error {
-	if tc := rp.getTmuxClient(); tc != nil {
-		return tmuxadapter.SendToPane(context.Background(), tc, window, choice.Choice(choiceVal))
-	}
-	client, err := rp.conn.Client()
-	if err != nil {
-		return fmt.Errorf("send choice: %w", err)
-	}
-	return client.SendChoice(context.Background(), "", window, choiceVal)
-}
 
 // AttachSession attaches to a remote session via SSH -t tmux attach.
 // Attach always uses SSH because the user's terminal must be connected
@@ -397,17 +344,89 @@ func (rp *RemoteProvider) AttachSession(id string) error {
 	return rp.runSSHInteractive(buildTmuxAttachCommand(target))
 }
 
+// resolveTmuxTarget returns the tmux target string for a session on the
+// remote host. Used by AttachSession to construct the SSH attach command.
+func (rp *RemoteProvider) resolveTmuxTarget(id string) string {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	for _, s := range rp.sessions {
+		if s.ID == id && s.TmuxWindow != "" {
+			return s.TmuxWindow
+		}
+	}
+	name := "lc-" + id
+	if len(id) > 8 {
+		name = "lc-" + id[:8]
+	}
+	return tmuxSessionName + ":" + name
+}
+
+// SendChoice is a no-op for remote sessions. With mirror windows, permission
+// choices are sent via the local tmux provider to the mirror window.
+func (rp *RemoteProvider) SendChoice(_ string, _ int) error {
+	return fmt.Errorf("SendChoice not supported on remote provider (use mirror window)")
+}
+
+// CapturePreview is a no-op for remote sessions. With mirror windows, preview
+// capture is handled by the local tmux provider via the mirror window.
+func (rp *RemoteProvider) CapturePreview(_ string, _, _ int) (*PreviewResponse, error) {
+	return nil, fmt.Errorf("CapturePreview not supported on remote provider (use mirror window)")
+}
+
+// CaptureScrollback retrieves scrollback via the remote daemon API. This is
+// the fullscreen copy-mode path for remote sessions: the local mirror
+// window's tmux buffer does not contain the remote tmux's historical
+// scrollback, so we ask the remote daemon to run capture-pane against its
+// own tmux server.
+func (rp *RemoteProvider) CaptureScrollback(id string, width, startLine, endLine int) (*ScrollbackResponse, error) {
+	client, err := rp.conn.Client()
+	if err != nil {
+		return nil, fmt.Errorf("capture scrollback: %w", err)
+	}
+	return client.CaptureScrollback(context.Background(), ScrollbackRequest{
+		ID:        id,
+		Width:     width,
+		StartLine: startLine,
+		EndLine:   endLine,
+	})
+}
+
+// HistorySize returns the remote tmux pane's scrollback history size via
+// the daemon API. Same rationale as CaptureScrollback.
+func (rp *RemoteProvider) HistorySize(id string) (int, error) {
+	client, err := rp.conn.Client()
+	if err != nil {
+		return 0, fmt.Errorf("history size: %w", err)
+	}
+	return client.HistorySize(context.Background(), id)
+}
+
+// LocalSessionHost returns the host for a session if it is known to this
+// remote provider's cache. Used by CompositeProvider.providerForCapture to
+// dispatch capture ops to the correct backend without leaking the
+// session.Session type into the daemon package's interface surface.
+func (rp *RemoteProvider) LocalSessionHost(id string) (string, bool) {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	for _, s := range rp.sessions {
+		if s.ID == id {
+			return rp.host, true
+		}
+	}
+	return "", false
+}
+
 // LaunchLazygit launches lazygit on the remote host via SSH -t.
 // This bypasses the daemon API entirely.
 func (rp *RemoteProvider) LaunchLazygit(path string) error {
-	remoteCmd := fmt.Sprintf("cd %s && lazygit", posixQuote(path))
+	remoteCmd := fmt.Sprintf("cd %s && lazygit", shell.Quote(path))
 	return rp.runSSHInteractive(remoteCmd)
 }
 
 // runSSHInteractive runs an interactive SSH command with stdin/stdout/stderr
 // connected to the current terminal.
 func (rp *RemoteProvider) runSSHInteractive(remoteCmd string) error {
-	sshHost, port := splitHostPort(rp.host)
+	sshHost, port := SplitHostPort(rp.host)
 	args := []string{"-t"}
 	if port != "" {
 		args = append(args, "-p", port)
@@ -423,41 +442,148 @@ func (rp *RemoteProvider) runSSHInteractive(remoteCmd string) error {
 }
 
 // buildTmuxAttachCommand returns the shell command to attach to a tmux
-// target on the remote lazyclaude server.
+// target on the remote lazyclaude server. It creates a grouped session
+// (new-session -t) so that each client has independent window selection,
+// preventing multiple mirrors from overriding each other's active window.
+// The grouped session uses destroy-unattached so it is cleaned up when
+// the SSH connection drops.
 func buildTmuxAttachCommand(tmuxTarget string) string {
+	// Extract the window name from "session:window" format.
+	window := tmuxTarget
+	if _, after, ok := strings.Cut(tmuxTarget, ":"); ok {
+		window = after
+	}
 	return fmt.Sprintf(
 		"tmux -L lazyclaude set-option -t lazyclaude window-size largest 2>/dev/null; "+
-			"tmux -L lazyclaude attach-session -t %s",
-		posixQuote(tmuxTarget),
+			"tmux -L lazyclaude new-session -t lazyclaude -s attach-$$ "+
+			"\\; set-option destroy-unattached on "+
+			"\\; select-window -t %s",
+		shell.Quote(window),
 	)
 }
 
 // --- WorktreeProvider ---
 
+// addToCache appends (or replaces) a session in rp.sessions based on resp.
+// This keeps the in-memory session cache coherent with the remote daemon
+// after a successful create call, without waiting for the next SSE
+// full_sync. Without this, SSE activity events keyed by the new session's
+// UUID would MISS the cache and the sidebar would never transition from
+// Unknown → Running/Idle until the user reconnects.
+//
+// Safe to call with rp.mu unlocked; this method takes the lock itself.
+func (rp *RemoteProvider) addToCache(resp *SessionCreateResponse) {
+	if resp == nil || resp.ID == "" {
+		return
+	}
+	info := SessionInfo{
+		ID:         resp.ID,
+		Name:       resp.Name,
+		Path:       resp.Path,
+		Host:       rp.host,
+		TmuxWindow: resp.TmuxWindow,
+		Role:       resp.Role,
+		Status:     "running",
+	}
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	for i := range rp.sessions {
+		if rp.sessions[i].ID == resp.ID {
+			rp.sessions[i] = info
+			return
+		}
+	}
+	rp.sessions = append(rp.sessions, info)
+}
+
+// removeFromCache drops a session from rp.sessions by ID.
+// Keeps the cache coherent with remote daemon state after a delete.
+func (rp *RemoteProvider) removeFromCache(id string) {
+	if id == "" {
+		return
+	}
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	for i := range rp.sessions {
+		if rp.sessions[i].ID == id {
+			rp.sessions = append(rp.sessions[:i], rp.sessions[i+1:]...)
+			return
+		}
+	}
+}
+
+// invokePostCreate calls the postCreate hook if one is registered.
+// projectRoot is the local grouping path; resp contains the newly created session details.
+func (rp *RemoteProvider) invokePostCreate(projectRoot string, resp *SessionCreateResponse) error {
+	rp.addToCache(resp)
+	if rp.postCreate != nil {
+		return rp.postCreate(rp.host, projectRoot, resp)
+	}
+	return nil
+}
+
 func (rp *RemoteProvider) CreateWorktree(name, prompt, projectRoot string) error {
+	resp, err := rp.createWorktreeResp(name, prompt, projectRoot)
+	if err != nil {
+		return err
+	}
+	return rp.invokePostCreate(projectRoot, resp)
+}
+
+// createWorktreeResp creates a worktree on the remote daemon and returns the
+// response containing the session ID and tmux window name.
+func (rp *RemoteProvider) createWorktreeResp(name, prompt, projectRoot string) (*SessionCreateResponse, error) {
 	client, err := rp.conn.Client()
 	if err != nil {
-		return fmt.Errorf("create worktree: %w", err)
+		return nil, fmt.Errorf("create worktree: %w", err)
 	}
-	_, err = client.CreateWorktree(context.Background(), WorktreeCreateRequest{
+	resp, err := client.CreateWorktree(context.Background(), WorktreeCreateRequest{
 		Name:        name,
 		Prompt:      prompt,
 		ProjectRoot: projectRoot,
 	})
-	return err
+	if err != nil {
+		return nil, fmt.Errorf("create worktree: %w", err)
+	}
+	return &SessionCreateResponse{
+		ID:         resp.SessionID,
+		Name:       name,
+		Path:       resp.Path,
+		TmuxWindow: resp.TmuxWindow,
+		Role:       resp.Role,
+	}, nil
 }
 
 func (rp *RemoteProvider) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
+	resp, err := rp.resumeWorktreeResp(worktreePath, prompt, projectRoot)
+	if err != nil {
+		return err
+	}
+	return rp.invokePostCreate(projectRoot, resp)
+}
+
+// resumeWorktreeResp resumes a worktree on the remote daemon and returns the
+// response containing the session ID and tmux window name.
+func (rp *RemoteProvider) resumeWorktreeResp(worktreePath, prompt, projectRoot string) (*SessionCreateResponse, error) {
 	client, err := rp.conn.Client()
 	if err != nil {
-		return fmt.Errorf("resume worktree: %w", err)
+		return nil, fmt.Errorf("resume worktree: %w", err)
 	}
-	_, err = client.ResumeWorktree(context.Background(), WorktreeResumeRequest{
+	resp, err := client.ResumeWorktree(context.Background(), WorktreeResumeRequest{
 		WorktreePath: worktreePath,
 		Prompt:       prompt,
 		ProjectRoot:  projectRoot,
 	})
-	return err
+	if err != nil {
+		return nil, fmt.Errorf("resume worktree: %w", err)
+	}
+	return &SessionCreateResponse{
+		ID:         resp.SessionID,
+		Name:       resp.Name,
+		Path:       resp.Path,
+		TmuxWindow: resp.TmuxWindow,
+		Role:       resp.Role,
+	}, nil
 }
 
 func (rp *RemoteProvider) ListWorktrees(projectRoot string) ([]WorktreeInfo, error) {
@@ -471,29 +597,49 @@ func (rp *RemoteProvider) ListWorktrees(projectRoot string) ([]WorktreeInfo, err
 // --- RoleSessionProvider ---
 
 func (rp *RemoteProvider) CreatePMSession(projectRoot string) error {
+	resp, err := rp.createPMSessionResp(projectRoot)
+	if err != nil {
+		return err
+	}
+	return rp.invokePostCreate(projectRoot, resp)
+}
+
+// createPMSessionResp creates a PM session on the remote daemon and returns
+// the response containing the session ID and tmux window name.
+func (rp *RemoteProvider) createPMSessionResp(projectRoot string) (*SessionCreateResponse, error) {
 	client, err := rp.conn.Client()
 	if err != nil {
-		return fmt.Errorf("create PM session: %w", err)
+		return nil, fmt.Errorf("create PM session: %w", err)
 	}
-	_, err = client.CreateSession(context.Background(), SessionCreateRequest{
+	return client.CreateSession(context.Background(), SessionCreateRequest{
 		Path:        projectRoot,
 		SessionType: "pm",
+		ProjectRoot: projectRoot,
 	})
-	return err
 }
 
 func (rp *RemoteProvider) CreateWorkerSession(name, prompt, projectRoot string) error {
+	resp, err := rp.createWorkerSessionResp(name, prompt, projectRoot)
+	if err != nil {
+		return err
+	}
+	return rp.invokePostCreate(projectRoot, resp)
+}
+
+// createWorkerSessionResp creates a worker session on the remote daemon and
+// returns the response containing the session ID and tmux window name.
+func (rp *RemoteProvider) createWorkerSessionResp(name, prompt, projectRoot string) (*SessionCreateResponse, error) {
 	client, err := rp.conn.Client()
 	if err != nil {
-		return fmt.Errorf("create worker session: %w", err)
+		return nil, fmt.Errorf("create worker session: %w", err)
 	}
-	_, err = client.CreateSession(context.Background(), SessionCreateRequest{
+	return client.CreateSession(context.Background(), SessionCreateRequest{
 		Path:        projectRoot,
 		SessionType: "worker",
 		Name:        name,
 		Prompt:      prompt,
+		ProjectRoot: projectRoot,
 	})
-	return err
 }
 
 // --- ConnectionAware ---

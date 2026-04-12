@@ -75,16 +75,17 @@ func (s *DaemonServer) brokerEventToNotification(evt model.Event) *NotificationE
 			ID:        s.nextEventID(),
 			Type:      EventActivity,
 			Time:      an.Timestamp,
-			SessionID: windowToSessionHint(an.Window),
+			SessionID: s.sessionIDForWindow(an.Window),
 			Activity:  an.State,
 			ToolName:  an.ToolName,
 		}
 	case evt.Notification != nil:
 		n := evt.Notification
 		return &NotificationEvent{
-			ID:   s.nextEventID(),
-			Type: EventToolInfo,
-			Time: n.Timestamp,
+			ID:        s.nextEventID(),
+			Type:      EventToolInfo,
+			Time:      n.Timestamp,
+			SessionID: s.sessionIDForWindow(n.Window),
 			ToolNotification: &model.ToolNotification{
 				ToolName:  n.ToolName,
 				Input:     n.Input,
@@ -104,7 +105,7 @@ func (s *DaemonServer) brokerEventToNotification(evt model.Event) *NotificationE
 			ID:        s.nextEventID(),
 			Type:      EventActivity,
 			Time:      sn.Timestamp,
-			SessionID: windowToSessionHint(sn.Window),
+			SessionID: s.sessionIDForWindow(sn.Window),
 			Activity:  state,
 		}
 	case evt.SessionStartNotification != nil:
@@ -113,7 +114,7 @@ func (s *DaemonServer) brokerEventToNotification(evt model.Event) *NotificationE
 			ID:        s.nextEventID(),
 			Type:      EventActivity,
 			Time:      ssn.Timestamp,
-			SessionID: windowToSessionHint(ssn.Window),
+			SessionID: s.sessionIDForWindow(ssn.Window),
 			Activity:  model.ActivityRunning,
 		}
 	case evt.PromptSubmitNotification != nil:
@@ -122,7 +123,7 @@ func (s *DaemonServer) brokerEventToNotification(evt model.Event) *NotificationE
 			ID:        s.nextEventID(),
 			Type:      EventActivity,
 			Time:      psn.Timestamp,
-			SessionID: windowToSessionHint(psn.Window),
+			SessionID: s.sessionIDForWindow(psn.Window),
 			Activity:  model.ActivityRunning,
 		}
 	default:
@@ -130,14 +131,45 @@ func (s *DaemonServer) brokerEventToNotification(evt model.Event) *NotificationE
 	}
 }
 
-// windowToSessionHint extracts a session ID hint from a tmux window name.
-// Window names follow the pattern "lc-<first8chars>", so we return just
-// the 8-char prefix as a hint for client-side matching.
-func windowToSessionHint(window string) string {
-	if after, ok := strings.CutPrefix(window, "lc-"); ok && after != "" {
-		return after
+// sessionIDForWindow resolves a tmux window identifier to the
+// canonical session UUID from the daemon's session store. The input
+// may be a tmux window ID (e.g. "@22"), a canonical window name
+// (e.g. "lc-abcd1234"), or empty.
+//
+// Background: ActivityNotification.Window is populated by the MCP
+// server from resolveNotifyWindow, which returns whatever tmux reports
+// for the PID — on this code path that is the raw window ID "@22".
+// Local GUI subscribers to the SSE stream key by the session UUID
+// (they look up the local mirror session to find its TmuxWindow for
+// the sidebar activity map), so we must translate the window back to
+// the UUID here rather than passing the raw window ID through. See
+// Bug 4 for the full trace.
+//
+// On miss (no matching session) the function returns an empty string
+// so downstream matching fails cleanly rather than accidentally
+// matching a different session by the stray window ID.
+func (s *DaemonServer) sessionIDForWindow(window string) string {
+	if window == "" {
+		return ""
 	}
-	return window
+	sessions := s.mgr.Sessions()
+	for _, sess := range sessions {
+		if sess.TmuxWindow == window || sess.WindowName() == window {
+			return sess.ID
+		}
+	}
+	// Fallback: accept a short "lc-<8>" hint by matching against the
+	// prefix of the session UUID. Historically some callers emit the
+	// window as "lc-xxxx" where xxxx is already the first 8 chars of
+	// the UUID.
+	if after, ok := strings.CutPrefix(window, "lc-"); ok && after != "" {
+		for _, sess := range sessions {
+			if strings.HasPrefix(sess.ID, after) {
+				return sess.ID
+			}
+		}
+	}
+	return ""
 }
 
 func (s *DaemonServer) nextEventID() string {

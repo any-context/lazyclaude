@@ -14,8 +14,15 @@ type MCPItem struct {
 }
 
 // MCPProvider abstracts MCP operations for the GUI layer.
+//
+// SetRemote atomically installs the (host, projectDir) target. Using
+// a single combined setter eliminates the mixed-pair window that
+// separate SetHost + SetProjectDir calls would expose to a racing
+// async Refresh / ToggleDenied: an in-flight goroutine spawned from a
+// previous selection could otherwise observe (host=new, projectDir=old)
+// and mutate the wrong remote file.
 type MCPProvider interface {
-	SetProjectDir(dir string)
+	SetRemote(host, projectDir string)
 	Refresh(ctx context.Context) error
 	Servers() []MCPItem
 	ToggleDenied(ctx context.Context, name string) error
@@ -23,8 +30,10 @@ type MCPProvider interface {
 
 // MCPState holds the UI state for the MCP tab.
 type MCPState struct {
-	cursor  int
-	loading bool
+	cursor         int
+	loading        bool
+	remoteDisabled bool   // true when MCP editing is not supported for the selection
+	remoteKey      string // cached "host|projectDir" for the last remote sync (dedupe)
 }
 
 // NewMCPState creates a new MCPState.

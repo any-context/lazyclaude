@@ -1,8 +1,8 @@
-<!-- Generated: 2026-04-01 | Files scanned: 41 gui files | Token estimate: ~750 -->
+<!-- Last Updated: 2026-04-08 | daemon-arch: added Session.Role display, mirror window support, remote path resolution -->
 
 # Frontend (TUI)
 
-**Last Updated:** 2026-04-01
+**Last Updated:** 2026-04-08 (daemon-arch)
 
 ## GUI Package (internal/gui/)
 
@@ -25,7 +25,7 @@ Main Layout (layout.go, 672 lines)
     +-- helpView        (keybinding help overlay - Telescope-style)
 ```
 
-## Activity State Visualization
+## Activity State Visualization and Role Display
 
 Sidebar icons reflect ActivityState:
 - `[Running]` spinner icon + tool name (e.g., "[Running] code_execution")
@@ -34,7 +34,14 @@ Sidebar icons reflect ActivityState:
 - `[Error]` cross icon (last operation failed)
 - `[Dead]` dash icon (window terminated)
 
+Session roles displayed with prefix:
+- `[PM]` -- Project Manager session (pm role)
+- `[W]` -- Worker session (worker role)
+- No prefix for plain sessions
+
 Badge cleared on fullscreen entry and session selection to prevent stale indicators.
+
+**daemon-arch addition:** Role field propagated from SessionCreateResponse to session.Role, persisted in state.json, displayed in sidebar formatting
 
 ## Key Input Pipeline
 

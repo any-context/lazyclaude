@@ -9,7 +9,10 @@ import (
 
 func TestStartRemoteDaemon_Success(t *testing.T) {
 	ssh := newMockSSH()
-	cmd := "LC_BIN=$(command -v lazyclaude || echo $HOME/.local/bin/lazyclaude); nohup \"$LC_BIN\" daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & for i in $(seq 1 20); do sleep 0.5 && [ -f /tmp/lazyclaude-$(whoami)/daemon.json ] && cat /tmp/lazyclaude-$(whoami)/daemon.json && exit 0; done; exit 1"
+	cmd := "LC_BIN=$(command -v lazyclaude || echo $HOME/.local/bin/lazyclaude); " +
+		"nohup \"$LC_BIN\" daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & " +
+		"for i in $(seq 1 20); do sleep 0.5 && [ -f /tmp/lazyclaude-$(whoami)/daemon.json ] && " +
+		"cat /tmp/lazyclaude-$(whoami)/daemon.json && exit 0; done; exit 1"
 	ssh.onRun(cmd, `{"port":12345,"token":"abc123"}`, nil)
 
 	lm := NewLifecycleManager(ssh)
@@ -30,7 +33,10 @@ func TestStartRemoteDaemon_Success(t *testing.T) {
 
 func TestStartRemoteDaemon_SSHError(t *testing.T) {
 	ssh := newMockSSH()
-	cmd := "LC_BIN=$(command -v lazyclaude || echo $HOME/.local/bin/lazyclaude); nohup \"$LC_BIN\" daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & for i in $(seq 1 20); do sleep 0.5 && [ -f /tmp/lazyclaude-$(whoami)/daemon.json ] && cat /tmp/lazyclaude-$(whoami)/daemon.json && exit 0; done; exit 1"
+	cmd := "LC_BIN=$(command -v lazyclaude || echo $HOME/.local/bin/lazyclaude); " +
+		"nohup \"$LC_BIN\" daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & " +
+		"for i in $(seq 1 20); do sleep 0.5 && [ -f /tmp/lazyclaude-$(whoami)/daemon.json ] && " +
+		"cat /tmp/lazyclaude-$(whoami)/daemon.json && exit 0; done; exit 1"
 	ssh.onRun(cmd, "", fmt.Errorf("connection refused"))
 
 	lm := NewLifecycleManager(ssh)
@@ -45,7 +51,10 @@ func TestStartRemoteDaemon_SSHError(t *testing.T) {
 
 func TestStartRemoteDaemon_InvalidOutput(t *testing.T) {
 	ssh := newMockSSH()
-	cmd := "LC_BIN=$(command -v lazyclaude || echo $HOME/.local/bin/lazyclaude); nohup \"$LC_BIN\" daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & for i in $(seq 1 20); do sleep 0.5 && [ -f /tmp/lazyclaude-$(whoami)/daemon.json ] && cat /tmp/lazyclaude-$(whoami)/daemon.json && exit 0; done; exit 1"
+	cmd := "LC_BIN=$(command -v lazyclaude || echo $HOME/.local/bin/lazyclaude); " +
+		"nohup \"$LC_BIN\" daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & " +
+		"for i in $(seq 1 20); do sleep 0.5 && [ -f /tmp/lazyclaude-$(whoami)/daemon.json ] && " +
+		"cat /tmp/lazyclaude-$(whoami)/daemon.json && exit 0; done; exit 1"
 	ssh.onRun(cmd, "not json at all", nil)
 
 	lm := NewLifecycleManager(ssh)
@@ -162,64 +171,3 @@ func TestDiscoverRemoteDaemon_EmptyToken(t *testing.T) {
 	}
 }
 
-func TestParseDaemonOutput(t *testing.T) {
-	tests := []struct {
-		name    string
-		output  string
-		want    *DaemonInfo
-		wantErr bool
-	}{
-		{
-			name:   "clean JSON",
-			output: `{"port":1234,"token":"tok"}`,
-			want:   &DaemonInfo{Port: 1234, Token: "tok"},
-		},
-		{
-			name:   "JSON with noise before",
-			output: "starting daemon...\n{\"port\":5678,\"token\":\"t\"}\n",
-			want:   &DaemonInfo{Port: 5678, Token: "t"},
-		},
-		{
-			name:    "empty",
-			output:  "",
-			wantErr: true,
-		},
-		{
-			name:    "no JSON",
-			output:  "some log output\nanother line\n",
-			wantErr: true,
-		},
-		{
-			name:    "port 0",
-			output:  `{"port":0,"token":"abc"}`,
-			wantErr: true,
-		},
-		{
-			name:    "empty token",
-			output:  `{"port":1234,"token":""}`,
-			wantErr: true,
-		},
-		{
-			name:    "malformed JSON with brace prefix",
-			output:  "{bad json}\n",
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseDaemonOutput(tt.output)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("parseDaemonOutput() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if tt.want != nil {
-				if got.Port != tt.want.Port {
-					t.Errorf("Port = %d, want %d", got.Port, tt.want.Port)
-				}
-				if got.Token != tt.want.Token {
-					t.Errorf("Token = %q, want %q", got.Token, tt.want.Token)
-				}
-			}
-		})
-	}
-}

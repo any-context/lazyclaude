@@ -44,7 +44,8 @@ func (m *mockSessionProvider) Projects() []gui.ProjectItem {
 	}}
 }
 func (m *mockSessionProvider) ToggleProjectExpanded(_ string) {}
-func (m *mockSessionProvider) Create(_ string) error { return nil }
+func (m *mockSessionProvider) Create(_ string) error    { return nil }
+func (m *mockSessionProvider) CreateAtPaneCWD() error   { return nil }
 func (m *mockSessionProvider) Delete(_ string) error    { return nil }
 func (m *mockSessionProvider) Rename(_, _ string) error { return nil }
 func (m *mockSessionProvider) PurgeOrphans() (int, error) { return 0, nil }

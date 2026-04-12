@@ -147,7 +147,8 @@ func (a *App) setupGlobalKeybindings() error {
 			if a.sessions == nil {
 				return
 			}
-			if err := a.sessions.CreateWorktree(branchName, userPrompt, projectRoot); err != nil {
+			err := a.sessions.CreateWorktree(branchName, userPrompt, projectRoot)
+			if err != nil {
 				a.gui.Update(func(g *gocui.Gui) error {
 					a.showError(g, fmt.Sprintf("Error: %v", err))
 					return nil
@@ -284,7 +285,8 @@ func (a *App) setupGlobalKeybindings() error {
 			if a.sessions == nil {
 				return
 			}
-			if err := a.sessions.ResumeWorktree(wtPath, userPrompt, projectRoot); err != nil {
+			err := a.sessions.ResumeWorktree(wtPath, userPrompt, projectRoot)
+			if err != nil {
 				a.gui.Update(func(g *gocui.Gui) error {
 					a.showError(g, fmt.Sprintf("Error: %v", err))
 					return nil
@@ -342,9 +344,12 @@ func (a *App) setupGlobalKeybindings() error {
 			a.showError(g, "Remote connection not available")
 			return nil
 		}
+		debugLog("ConnectDialog: host=%q connectFn=%v", host, a.connectFn != nil)
 		a.setStatus(g, "Connecting to "+host+"...")
 		go func() {
+			debugLog("ConnectDialog: calling connectFn host=%q", host)
 			err := a.connectFn(host)
+			debugLog("ConnectDialog: connectFn result: %v", err)
 			a.gui.Update(func(g *gocui.Gui) error {
 				if err != nil {
 					a.showError(g, fmt.Sprintf("Connection failed: %v", err))

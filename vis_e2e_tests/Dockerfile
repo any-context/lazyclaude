@@ -21,15 +21,30 @@ RUN curl --retry 3 -Lo lazygit.tar.gz "https://github.com/jesseduffield/lazygit/
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV TERM=xterm-256color PATH="/root/.local/bin:${PATH}"
 
+# --- Stage: build lazyclaude binary (shared by remote and vhs) ---
+FROM base AS builder
+WORKDIR /build
+COPY go.mod go.sum ./
+COPY third_party/gocui/go.mod third_party/gocui/go.sum third_party/gocui/
+COPY third_party/tcell/go.mod third_party/tcell/go.sum third_party/tcell/
+RUN go mod download
+COPY . .
+RUN go build -o bin/lazyclaude ./cmd/lazyclaude
+
 # --- Target: remote (sshd for SSH E2E) ---
 FROM base AS remote
+COPY --from=builder /build/bin/lazyclaude /usr/local/bin/lazyclaude
+COPY --from=builder /build/lazyclaude.tmux /opt/lazyclaude/lazyclaude.tmux
+COPY --from=builder /build/scripts/ /opt/lazyclaude/scripts/
 RUN ssh-keygen -A && mkdir -p /run/sshd
 RUN sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && \
     sed -i 's/#PermitEmptyPasswords.*/PermitEmptyPasswords yes/' /etc/ssh/sshd_config && \
     sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
     echo 'GatewayPorts yes' >> /etc/ssh/sshd_config && \
     passwd -d root
-RUN echo 'export PATH="/root/.local/bin:$PATH"' >> /root/.bashrc
+RUN echo 'export PATH="/root/.local/bin:$PATH"' >> /root/.bashrc && \
+    git config --global user.email "test@test.com" && \
+    git config --global user.name "test"
 RUN echo '{"hasCompletedOnboarding":true,"numStartups":10,"projects":{"/":{"hasTrustDialogAccepted":true,"allowedTools":[]}}}' > /root/.claude.json
 EXPOSE 22
 CMD ["/usr/sbin/sshd", "-D"]
@@ -47,15 +62,15 @@ ENV TERM=xterm-256color LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 RUN mkdir -p /root/.ssh && printf 'Host *\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n' > /root/.ssh/config
 WORKDIR /app
 COPY go.mod go.sum ./
-COPY third_party_gocui/go.mod third_party_gocui/go.sum third_party_gocui/
-COPY third_party_tcell/go.mod third_party_tcell/go.sum third_party_tcell/
+COPY third_party/gocui/go.mod third_party/gocui/go.sum third_party/gocui/
+COPY third_party/tcell/go.mod third_party/tcell/go.sum third_party/tcell/
 RUN go mod download
 COPY . .
+COPY --from=builder /build/bin/lazyclaude /app/bin/lazyclaude
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/root/.local/bin:${PATH}"
 RUN echo '{"hasCompletedOnboarding":true,"numStartups":10,"projects":{"/":{"hasTrustDialogAccepted":true,"allowedTools":[]}}}' > /root/.claude.json
-RUN go build -o bin/lazyclaude ./cmd/lazyclaude && \
-    ln -sf /app/bin/lazyclaude /usr/local/bin/lazyclaude && \
+RUN ln -sf /app/bin/lazyclaude /usr/local/bin/lazyclaude && \
     mkdir -p /app/outputs /tmp/lazyclaude && \
     echo 'export PATH="/root/.local/bin:$PATH"' >> /root/.zshrc && \
     echo 'export PATH="/root/.local/bin:$PATH"' >> /root/.bashrc && \

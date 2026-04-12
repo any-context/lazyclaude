@@ -10,7 +10,14 @@ import (
 
 // APIVersion is the current daemon API version. Checked at connection time
 // via /health. A mismatch indicates the remote binary needs updating.
-const APIVersion = 1
+//
+// Version history:
+//   - 1: initial daemon API (session CRUD, worktree, messaging, SSE)
+//   - 2: adds POST /session/{id}/scrollback and GET /session/{id}/history-size
+//        so that remote fullscreen copy mode can read the remote tmux server's
+//        scrollback directly (the local mirror window's tmux buffer does not
+//        contain the remote tmux's historical scrollback).
+const APIVersion = 2
 
 // --- Session CRUD ---
 
@@ -28,7 +35,9 @@ type SessionCreateRequest struct {
 type SessionCreateResponse struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
+	Path       string `json:"path,omitempty"`
 	TmuxWindow string `json:"tmux_window"`
+	Role       string `json:"role,omitempty"`
 }
 
 // SessionDeleteRequest deletes a session by ID.
@@ -132,9 +141,11 @@ type WorktreeCreateRequest struct {
 
 // WorktreeCreateResponse is returned after a worktree is created.
 type WorktreeCreateResponse struct {
-	SessionID string `json:"session_id"`
-	Path      string `json:"path"`
-	Branch    string `json:"branch"`
+	SessionID  string `json:"session_id"`
+	Path       string `json:"path"`
+	Branch     string `json:"branch"`
+	TmuxWindow string `json:"tmux_window"`
+	Role       string `json:"role,omitempty"`
 }
 
 // WorktreeResumeRequest resumes an existing worktree session.
@@ -146,7 +157,11 @@ type WorktreeResumeRequest struct {
 
 // WorktreeResumeResponse is returned after a worktree session is resumed.
 type WorktreeResumeResponse struct {
-	SessionID string `json:"session_id"`
+	SessionID  string `json:"session_id"`
+	Name       string `json:"name"`
+	Path       string `json:"path,omitempty"`
+	TmuxWindow string `json:"tmux_window"`
+	Role       string `json:"role,omitempty"`
 }
 
 // WorktreeInfo describes an existing worktree.

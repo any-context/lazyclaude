@@ -8,12 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/any-context/lazyclaude/internal/adapter/tmuxadapter"
 	"github.com/any-context/lazyclaude/internal/core/config"
 	"github.com/any-context/lazyclaude/internal/core/event"
 	"github.com/any-context/lazyclaude/internal/core/lifecycle"
@@ -22,11 +20,9 @@ import (
 	"github.com/any-context/lazyclaude/internal/daemon"
 	"github.com/any-context/lazyclaude/internal/gui"
 	"github.com/any-context/lazyclaude/internal/mcp"
-	"github.com/any-context/lazyclaude/internal/notify"
 	"github.com/any-context/lazyclaude/internal/plugin"
 	"github.com/any-context/lazyclaude/internal/server"
 	"github.com/any-context/lazyclaude/internal/session"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/jesseduffield/gocui"
 	"github.com/spf13/cobra"
 )
@@ -122,7 +118,7 @@ func newRootCmd() *cobra.Command {
 			}
 
 			// Always use CompositeProvider so manual 'c' connect can add remotes.
-			localProvider := &localDaemonProvider{mgr: mgr, tmux: tmuxClient, paths: paths}
+			localProvider := &localDaemonProvider{mgr: mgr, tmux: tmuxClient}
 			composite := daemon.NewCompositeProvider(localProvider, nil)
 
 			ssh := &daemon.ExecSSHExecutor{}
@@ -134,38 +130,52 @@ func newRootCmd() *cobra.Command {
 			// remoteConns tracks active RemoteConnections for status display.
 			var remoteConnsMu sync.Mutex
 			remoteConns := make(map[string]*daemon.RemoteConnection)
-			sockChecker := &socketHealthChecker{}
 
-			// connectRemoteHost establishes a full remote connection pipeline:
-			// daemon connection + socket tunnel + provider registration.
+			// Declare compositeAdapter early so connectRemoteHost can reference it.
+			compositeAdapter := &guiCompositeAdapter{
+				cp:       composite,
+				localMgr: mgr,
+				paths:    paths,
+			}
+
+			// MirrorManager: creates/deletes local tmux mirror windows for
+			// remote sessions. Shared by connectRemoteHost and SessionCommandService.
+			mirrorMgr := &MirrorManager{
+				tmux:    tmuxClient,
+				store:   store,
+				onError: app.ScheduleError,
+			}
+
+			// connectRemoteHost establishes a remote connection pipeline:
+			// daemon connection + provider registration + mirror windows for
+			// existing sessions + SSE subscription.
 			connectRemoteHost := func(host string) error {
+				debugLog("connectRemoteHost: host=%q", host)
 				remoteConn := daemon.NewRemoteConnection(host, lifecycleMgr, clientFactory)
 				if connErr := remoteConn.Connect(context.Background()); connErr != nil {
+					debugLog("connectRemoteHost: Connect failed: %v", connErr)
 					return fmt.Errorf("lazyclaude is not installed on %s: %w", host, connErr)
 				}
+				debugLog("connectRemoteHost: Connect succeeded")
 
-				remoteProvider := daemon.NewRemoteProvider(host, remoteConn)
-				lc.Register("remote-conn-"+host, func() { remoteConn.Disconnect() })
-
-				// Socket forwarding for direct tmux pane operations.
-				sockPath := daemon.SocketTunnelLocalPath(host)
-				sockTunnel := daemon.NewSocketTunnel(host, sockPath, "")
-				if sockErr := sockTunnel.Start(context.Background()); sockErr != nil {
-					fmt.Fprintf(os.Stderr, "warning: tmux socket tunnel to %s: %v\n", host, sockErr)
-				} else {
-					remoteProvider.SetTmuxClient(sockTunnel.TmuxClient())
-					lc.Register("sock-tunnel-"+host, func() { sockTunnel.Stop() })
-					sockChecker.set(host, sockTunnel, remoteProvider)
-
-					// Re-establish socket tunnel on reconnection.
-					remoteConn.OnReconnect(func() {
-						newSock := daemon.NewSocketTunnel(host, sockPath, "")
-						if err := newSock.Start(context.Background()); err == nil {
-							remoteProvider.SetTmuxClient(newSock.TmuxClient())
-							sockChecker.set(host, newSock, remoteProvider)
-						}
-					})
+				hook := func(host, path string, resp *daemon.SessionCreateResponse) error {
+					return mirrorMgr.CreateMirror(host, path, resp)
 				}
+				activityFwd := func(ev model.Event, sessionID string) {
+					notifyBroker.Publish(resolveActivityWindow(mgr.Store(), ev, sessionID))
+				}
+				toolInfoFwd := func(n *model.ToolNotification, sessionID string) {
+					rewriteToolNotificationWindow(mgr.Store(), n, sessionID)
+				}
+				remoteProvider := daemon.NewRemoteProvider(host, remoteConn,
+					daemon.WithPostCreate(hook),
+					daemon.WithSSEActivity(activityFwd),
+					daemon.WithSSEToolInfo(toolInfoFwd),
+				)
+				lc.Register("remote-conn-"+host, func() {
+					remoteProvider.StopSSE()
+					remoteConn.Disconnect()
+				})
 
 				composite.AddRemote(host, remoteProvider)
 
@@ -173,6 +183,28 @@ func newRootCmd() *cobra.Command {
 				remoteConns[host] = remoteConn
 				remoteConnsMu.Unlock()
 
+				// Create mirror windows for existing remote sessions so they
+				// appear in the sidebar immediately with working preview.
+				// Only mirror Running sessions — dead/orphan sessions from
+				// stale state.json are skipped (GC will clean them).
+				if sessions, err := remoteProvider.Sessions(); err == nil {
+					var running []daemon.SessionInfo
+					for _, s := range sessions {
+						if s.Status == "Running" {
+							running = append(running, s)
+						}
+					}
+					if len(running) > 0 {
+						mirrorMgr.RestoreExisting(host, running)
+					}
+				}
+
+				// Start SSE for activity state + tool notifications.
+				if err := remoteProvider.StartSSE(); err != nil {
+					debugLog("connectRemoteHost: StartSSE failed (non-fatal): %v", err)
+				}
+
+				debugLog("connectRemoteHost: SUCCESS host=%q", host)
 				return nil
 			}
 
@@ -180,6 +212,7 @@ func newRootCmd() *cobra.Command {
 			// Connection is deferred until the user performs a remote operation.
 			// Remote CWD is obtained via daemon API after connection is established.
 			pendingSSHHost := gui.DetectSSHHost()
+			debugLog("startup: pendingSSHHost=%q", pendingSSHHost)
 
 			// Snapshot local project root so the adapter can distinguish
 			// local-fallback paths from genuine remote paths.
@@ -188,21 +221,37 @@ func newRootCmd() *cobra.Command {
 				localCWD = "."
 			}
 			localProjectRoot := session.InferProjectRoot(localCWD)
+			debugLog("startup: localProjectRoot=%q", localProjectRoot)
+			debugLog("startup: connectFn set=%v", connectRemoteHost != nil)
 
-			compositeAdapter := &guiCompositeAdapter{
-				cp:               composite,
-				localMgr:         mgr,
-				tmuxClient:       tmuxClient,
-				paths:            paths,
-				pendingHost:      pendingSSHHost,
-				localProjectRoot: localProjectRoot,
-				connectFn:        connectRemoteHost,
-			}
-			compositeAdapter.windowActivityFn = app.WindowActivityMap
-			compositeAdapter.onError = app.ScheduleError
-			compositeAdapter.guiUpdateFn = func() {
+			guiUpdateFn := func() {
 				app.Gui().Update(func(_ *gocui.Gui) error { return nil })
 			}
+			mirrorMgr.guiUpdateFn = guiUpdateFn
+
+			// RemoteHostManager: manages lazy connections to SSH hosts.
+			remoteHostMgr := NewRemoteHostManager(connectRemoteHost)
+
+			// SessionCommandService: centralises session commands
+			// so guiCompositeAdapter is a thin pass-through.
+			cmdSvc := &SessionCommandService{
+				localMgr:            mgr,
+				cp:                  composite,
+				mirrors:             mirrorMgr,
+				tmux:                tmuxClient,
+				onError:             app.ScheduleError,
+				guiUpdateFn:         guiUpdateFn,
+				ensureConnectedFn:   remoteHostMgr.EnsureConnected,
+				resolveRemotePathFn: compositeAdapter.resolveRemotePath,
+			}
+
+			// Wire remaining fields now that dependencies are available.
+			compositeAdapter.pendingHost = pendingSSHHost
+			compositeAdapter.localProjectRoot = localProjectRoot
+			compositeAdapter.windowActivityFn = app.WindowActivityMap
+			compositeAdapter.currentHostFn = app.CurrentSessionHost
+			compositeAdapter.onError = app.ScheduleError
+			compositeAdapter.commands = cmdSvc
 			app.SetSessions(compositeAdapter)
 
 			// Wire connection status for the options bar.
@@ -224,8 +273,19 @@ func newRootCmd() *cobra.Command {
 				return statuses
 			})
 
-			// Wire connect dialog handler.
-			app.SetConnectFn(connectRemoteHost)
+			// Wire connect dialog handler. After a successful connection,
+			// update the adapter's pending host so subsequent operations
+			// (n, w, W, P, N) route to the newly connected host by default.
+			app.SetConnectFn(func(host string) error {
+				if err := connectRemoteHost(host); err != nil {
+					return err
+				}
+				compositeAdapter.SetPendingHost(host)
+				// Sync the lazyConn cache so EnsureConnected
+				// skips the redundant connectFn call for this host.
+				remoteHostMgr.MarkConnected(host)
+				return nil
+			})
 
 			// Plugin manager: wraps `claude plugins` CLI (project scope only)
 			var pluginOpts []plugin.Option
@@ -239,13 +299,14 @@ func newRootCmd() *cobra.Command {
 			// MCP manager: reads ~/.claude.json + project deny lists
 			home, _ := os.UserHomeDir()
 			userClaudeJSON := filepath.Join(home, ".claude.json")
-			mcpMgr := mcp.NewManager(userClaudeJSON)
+			mcpMgr := mcp.NewManager(userClaudeJSON, ssh)
 			app.SetMCP(&mcpAdapter{mgr: mcpMgr})
 
 			// Wire the notify broker (nil-safe: falls back to file polling only).
 			app.SetNotifyBroker(notifyBroker)
 
-			// Key forwarding via subprocess
+			// Key forwarding: all sessions (including remote mirror windows) are
+			// local tmux windows, so the local forwarder handles everything.
 			app.SetInputForwarder(gui.NewTmuxInputForwarder(tmuxClient))
 
 			// Control mode for event-driven refresh.
@@ -259,7 +320,6 @@ func newRootCmd() *cobra.Command {
 			ctrlMgr.tryConnect()
 			app.SetOnTick(func() {
 				ctrlMgr.ensureConnected()
-				sockChecker.check()
 			})
 			lc.Register("control-client", ctrlMgr.close)
 
@@ -422,54 +482,6 @@ func (a *sessionCreatorAdapter) CreateLocalSession(ctx context.Context, name, pr
 	}, nil
 }
 
-// sessionAdapter bridges session.Manager to gui.SessionProvider.
-type sessionAdapter struct {
-	mgr          *session.Manager
-	tmux         tmux.Client
-	paths        config.Paths
-	lastResizeID string // session ID of last resize
-	lastResizeW  int
-	lastResizeH  int
-
-	// cachedPending is refreshed once per layout cycle via RefreshPending,
-	// then reused by Sessions() and Projects() to avoid redundant ReadAll
-	// calls (each of which does an os.ReadDir + file I/O).
-	cachedPending map[string]bool
-
-	// windowActivity provides window->activity mapping from the App layer.
-	// Set via SetWindowActivitySource after the App is wired.
-	windowActivityFn func() map[string]gui.WindowActivityEntry
-}
-
-// RefreshPendingFrom caches the given notifications for badge rendering.
-// Called from the ticker goroutine after ReadAll, before the files are
-// consumed, so that Sessions() and Projects() can display badges without
-// a redundant (and destructive) ReadAll call.
-func (a *sessionAdapter) RefreshPendingFrom(notifications []*model.ToolNotification) {
-	a.cachedPending = pendingWindowSet(notifications)
-}
-
-func (a *sessionAdapter) Sessions() []gui.SessionItem {
-	sessions := a.mgr.Sessions()
-	return buildSessionItems(sessions, a.cachedPending, a.getWindowActivity())
-}
-
-func (a *sessionAdapter) Projects() []gui.ProjectItem {
-	projects := a.mgr.Projects()
-	return buildProjectItems(projects, a.cachedPending, a.getWindowActivity())
-}
-
-func (a *sessionAdapter) getWindowActivity() map[string]gui.WindowActivityEntry {
-	if a.windowActivityFn != nil {
-		return a.windowActivityFn()
-	}
-	return nil
-}
-
-func (a *sessionAdapter) ToggleProjectExpanded(projectID string) {
-	a.mgr.ToggleProjectExpanded(projectID)
-}
-
 // pendingWindowSet builds a set of tmux window IDs that have pending notifications.
 func pendingWindowSet(notifications []*model.ToolNotification) map[string]bool {
 	set := make(map[string]bool, len(notifications))
@@ -560,262 +572,6 @@ func buildSessionItems(sessions []session.Session, pending map[string]bool, wind
 	return items
 }
 
-func (a *sessionAdapter) CapturePreview(id string, width, height int) (gui.PreviewResult, error) {
-	sess := a.mgr.Store().FindByID(id)
-	if sess == nil {
-		return gui.PreviewResult{}, nil
-	}
-	target := sess.TmuxWindow
-	if target == "" {
-		target = "lazyclaude:" + sess.WindowName()
-	}
-	ctx := context.Background()
-
-	// Resize pane only when target or dimensions changed
-	if width > 0 && height > 0 && (id != a.lastResizeID || width != a.lastResizeW || height != a.lastResizeH) {
-		if err := a.tmux.ResizeWindow(ctx, target, width, height); err != nil {
-			return gui.PreviewResult{}, err
-		}
-		a.lastResizeID = id
-		a.lastResizeW = width
-		a.lastResizeH = height
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	// Capture with ANSI colors
-	content, err := a.tmux.CapturePaneANSI(ctx, target)
-	if err != nil || width <= 0 {
-		return gui.PreviewResult{Content: content}, err
-	}
-
-	// Safety truncate
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		if ansi.StringWidth(line) > width {
-			lines[i] = ansi.Truncate(line, width, "")
-		}
-	}
-	if height > 0 && len(lines) > height {
-		lines = lines[:height]
-	}
-
-	// Fetch cursor position from tmux pane
-	var cursorX, cursorY int
-	if pos, err := a.tmux.ShowMessage(ctx, target, "#{cursor_x},#{cursor_y}"); err == nil {
-		parts := strings.SplitN(strings.TrimSpace(pos), ",", 2)
-		if len(parts) == 2 {
-			cursorX, _ = strconv.Atoi(parts[0])
-			cursorY, _ = strconv.Atoi(parts[1])
-		}
-	}
-
-	return gui.PreviewResult{
-		Content: strings.Join(lines, "\n"),
-		CursorX: cursorX,
-		CursorY: cursorY,
-	}, nil
-}
-
-func (a *sessionAdapter) CaptureScrollback(id string, _, startLine, endLine int) (gui.PreviewResult, error) {
-	sess := a.mgr.Store().FindByID(id)
-	if sess == nil {
-		return gui.PreviewResult{}, nil
-	}
-	target := sess.TmuxWindow
-	if target == "" {
-		target = "lazyclaude:" + sess.WindowName()
-	}
-	ctx := context.Background()
-
-	// Truncation is handled by renderScrollContent (ANSI-aware).
-	content, err := a.tmux.CapturePaneANSIRange(ctx, target, startLine, endLine)
-	return gui.PreviewResult{Content: content}, err
-}
-
-func (a *sessionAdapter) HistorySize(id string) (int, error) {
-	sess := a.mgr.Store().FindByID(id)
-	if sess == nil {
-		return 0, nil
-	}
-	target := sess.TmuxWindow
-	if target == "" {
-		target = "lazyclaude:" + sess.WindowName()
-	}
-	ctx := context.Background()
-	out, err := a.tmux.ShowMessage(ctx, target, "#{history_size}")
-	if err != nil {
-		return 0, err
-	}
-	n, _ := strconv.Atoi(strings.TrimSpace(out))
-	return n, nil
-}
-
-func (a *sessionAdapter) Create(path string) error {
-	if path == "." {
-		abs, err := filepath.Abs(".")
-		if err != nil {
-			return err
-		}
-		path = abs
-	}
-	_, err := a.mgr.Create(context.Background(), path)
-	return err
-}
-
-func (a *sessionAdapter) Delete(id string) error {
-	return a.mgr.Delete(context.Background(), id)
-}
-
-func (a *sessionAdapter) Rename(id, newName string) error {
-	return a.mgr.Rename(id, newName)
-}
-
-func (a *sessionAdapter) PurgeOrphans() (int, error) {
-	return a.mgr.PurgeOrphans()
-}
-
-func (a *sessionAdapter) PendingNotifications() []*model.ToolNotification {
-	notifications, err := notify.ReadAll(a.paths.RuntimeDir)
-	if err != nil || len(notifications) == 0 {
-		return nil
-	}
-	return notifications
-}
-
-func (a *sessionAdapter) SendChoice(window string, c gui.Choice) error {
-	return tmuxadapter.SendToPane(context.Background(), a.tmux, window, c)
-}
-
-func (a *sessionAdapter) CreateWorktree(name, prompt, projectRoot string) error {
-	_, err := a.mgr.CreateWorktree(context.Background(), name, prompt, projectRoot)
-	return err
-}
-
-func (a *sessionAdapter) ResumeWorktree(worktreePath, prompt, projectRoot string) error {
-	_, err := a.mgr.ResumeWorktree(context.Background(), worktreePath, prompt, projectRoot)
-	return err
-}
-
-func (a *sessionAdapter) CreatePMSession(projectRoot string) error {
-	_, err := a.mgr.CreatePMSession(context.Background(), projectRoot)
-	return err
-}
-
-func (a *sessionAdapter) CreateWorkerSession(name, prompt, projectRoot string) error {
-	_, err := a.mgr.CreateWorkerSession(context.Background(), name, prompt, projectRoot)
-	return err
-}
-
-func (a *sessionAdapter) ListWorktrees(projectRoot string) ([]gui.WorktreeInfo, error) {
-	items, err := session.ListWorktrees(context.Background(), projectRoot)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]gui.WorktreeInfo, len(items))
-	for i, item := range items {
-		result[i] = gui.WorktreeInfo{Name: item.Name, Path: item.Path, Branch: item.Branch}
-	}
-	return result, nil
-}
-
-func (a *sessionAdapter) LaunchLazygit(path string) error {
-	if _, err := exec.LookPath("lazygit"); err != nil {
-		return fmt.Errorf("lazygit is not installed")
-	}
-	cmd := exec.Command("lazygit")
-	cmd.Dir = path
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-func (a *sessionAdapter) AttachSession(id string) error {
-	sess := a.mgr.Store().FindByID(id)
-	if sess == nil {
-		return fmt.Errorf("session not found: %s", id)
-	}
-	target := "lazyclaude:" + sess.WindowName()
-
-	// Ensure window-size=largest so attach is not constrained by control mode.
-	_ = exec.Command("tmux", "-L", "lazyclaude", "set-option", "-t", "lazyclaude", "window-size", "largest").Run()
-
-	// Directly attach to the lazyclaude tmux session.
-	cmd := exec.Command("tmux", "-L", "lazyclaude", "attach-session", "-t", target)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-// controlManager handles control mode connection lifecycle.
-// socketHealthEntry tracks a socket tunnel and its associated remote provider
-// for periodic health checking and reconnection.
-type socketHealthEntry struct {
-	tunnel   *daemon.SocketTunnel
-	provider *daemon.RemoteProvider
-}
-
-// socketHealthChecker periodically checks socket tunnel health and reconnects.
-// Designed to be called from the GUI ticker (every 100ms); internally throttles
-// to ~5s intervals using a counter. Uses host-keyed map to prevent stale entries
-// from accumulating across reconnections.
-type socketHealthChecker struct {
-	mu      sync.Mutex
-	entries map[string]socketHealthEntry // host -> entry
-	counter int                          // ticker call counter for throttling
-}
-
-// set registers or replaces the socket tunnel for a host.
-// Replaces any previous entry for the same host.
-func (s *socketHealthChecker) set(host string, tunnel *daemon.SocketTunnel, provider *daemon.RemoteProvider) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.entries == nil {
-		s.entries = make(map[string]socketHealthEntry)
-	}
-	s.entries[host] = socketHealthEntry{tunnel: tunnel, provider: provider}
-}
-
-// check is called from the ticker. Throttles to roughly every 5 seconds
-// (50 ticks at 100ms interval).
-func (s *socketHealthChecker) check() {
-	s.mu.Lock()
-	s.counter++
-	if s.counter < 50 {
-		s.mu.Unlock()
-		return
-	}
-	s.counter = 0
-
-	// Snapshot entries under lock.
-	type snapshot struct {
-		host  string
-		entry socketHealthEntry
-	}
-	snaps := make([]snapshot, 0, len(s.entries))
-	for host, e := range s.entries {
-		snaps = append(snaps, snapshot{host: host, entry: e})
-	}
-	s.mu.Unlock()
-
-	for _, snap := range snaps {
-		if snap.entry.tunnel != nil && !snap.entry.tunnel.IsAlive() {
-			sockPath := daemon.SocketTunnelLocalPath(snap.host)
-			newTunnel := daemon.NewSocketTunnel(snap.host, sockPath, "")
-			if err := newTunnel.Start(context.Background()); err == nil {
-				snap.entry.provider.SetTmuxClient(newTunnel.TmuxClient())
-				s.mu.Lock()
-				s.entries[snap.host] = socketHealthEntry{
-					tunnel:   newTunnel,
-					provider: snap.entry.provider,
-				}
-				s.mu.Unlock()
-			}
-		}
-	}
-}
-
 type controlManager struct {
 	client   *tmux.ControlClient
 	onOutput func(string)
@@ -845,16 +601,6 @@ func (m *controlManager) ensureConnected() {
 	if needReconnect {
 		m.tryConnect()
 	}
-}
-
-// Client returns the active control client, or nil if not connected.
-func (m *controlManager) Client() *tmux.ControlClient {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.client != nil && !m.client.Closed() {
-		return m.client
-	}
-	return nil
 }
 
 func (m *controlManager) close() {
@@ -929,8 +675,8 @@ type mcpAdapter struct {
 	mgr *mcp.Manager
 }
 
-func (a *mcpAdapter) SetProjectDir(dir string) {
-	a.mgr.SetProjectDir(dir)
+func (a *mcpAdapter) SetRemote(host, projectDir string) {
+	a.mgr.SetRemote(host, projectDir)
 }
 
 func (a *mcpAdapter) Refresh(ctx context.Context) error {
@@ -982,4 +728,71 @@ func findClaudeBinary() string {
 		}
 	}
 	return ""
+}
+
+// resolveActivityWindow rewrites a remote activity event so its Window
+// field points at the local mirror session's current tmux window ID
+// ("@42"). The sidebar keys windowActivity by Session.TmuxWindow (which
+// SyncWithTmux sets to the local tmux window ID for both local and remote
+// sessions), so emission and lookup must share the same key space to avoid
+// the "Unknown" state bug for remote sessions.
+//
+// Uses sessionID as a lookup hop into the local store instead of trusting
+// Window (which the RemoteProvider can only fill in as a best-effort
+// mirror name). Returns the event unchanged when:
+//   - ActivityNotification is nil (no remap target)
+//   - sessionID is empty (local MCP path — Window is already correct)
+//   - the session cannot be resolved, or its TmuxWindow is unknown
+//     (fall through with the best-effort Window rather than blanking it)
+//
+// A defensive copy of ActivityNotification is taken so callers' events
+// are not mutated in place.
+func resolveActivityWindow(store *session.Store, ev model.Event, sessionID string) model.Event {
+	if ev.ActivityNotification == nil || sessionID == "" {
+		return ev
+	}
+	localSess := store.FindByID(sessionID)
+	if localSess == nil || localSess.TmuxWindow == "" {
+		return ev
+	}
+	notif := *ev.ActivityNotification
+	notif.Window = localSess.TmuxWindow
+	out := ev
+	out.ActivityNotification = &notif
+	return out
+}
+
+// rewriteToolNotificationWindow rewrites a remote tool notification's
+// Window field from the remote tmux window ID (e.g. "@22") to the local
+// mirror session's tmux window ID (e.g. "@42"), using sessionID as a
+// lookup hop into the local store. This is the ToolNotification twin of
+// resolveActivityWindow and completes the SessionID hop pattern for the
+// permission popup action routing path (Bug 5 Phase B).
+//
+// Without this rewrite, the gui layer keys pending permission popups by
+// ToolNotification.Window — which for remote sessions arrives as the
+// remote tmux window ID — so SendChoice is dispatched to a pane that
+// does not exist on the local tmux server and Accept/Reject never reach
+// the remote claude process.
+//
+// The notification is mutated in place (SSE pushes a fresh instance per
+// event, so there is no shared-state risk). Returns without mutating
+// when:
+//   - n is nil (other Event variants through the same callback path),
+//   - sessionID is empty (old daemon without Phase B wire format),
+//   - the session is not in the local store, or
+//   - the local session has no TmuxWindow yet (mirror not synced).
+//
+// In those cases the original Window is preserved so behavior degrades
+// to the pre-fix (popup appears but action is not routed), matching the
+// defensive pattern used by resolveActivityWindow.
+func rewriteToolNotificationWindow(store *session.Store, n *model.ToolNotification, sessionID string) {
+	if n == nil || sessionID == "" {
+		return
+	}
+	localSess := store.FindByID(sessionID)
+	if localSess == nil || localSess.TmuxWindow == "" {
+		return
+	}
+	n.Window = localSess.TmuxWindow
 }

@@ -33,7 +33,7 @@ func testWriteJSON(w http.ResponseWriter, v interface{}) {
 
 func TestHTTPClient_CreateSession(t *testing.T) {
 	srv := newClientTestServer(t, map[string]http.HandlerFunc{
-		"POST /sessions": func(w http.ResponseWriter, r *http.Request) {
+		"POST /session/create": func(w http.ResponseWriter, r *http.Request) {
 			var req SessionCreateRequest
 			json.NewDecoder(r.Body).Decode(&req)
 			if req.Path != "/home/user/project" {
@@ -62,7 +62,7 @@ func TestHTTPClient_CreateSession(t *testing.T) {
 
 func TestHTTPClient_DeleteSession(t *testing.T) {
 	srv := newClientTestServer(t, map[string]http.HandlerFunc{
-		"DELETE /sessions/abc123": func(w http.ResponseWriter, _ *http.Request) {
+		"DELETE /session/abc123": func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		},
 	})
@@ -76,7 +76,7 @@ func TestHTTPClient_DeleteSession(t *testing.T) {
 
 func TestHTTPClient_RenameSession(t *testing.T) {
 	srv := newClientTestServer(t, map[string]http.HandlerFunc{
-		"POST /sessions/abc123/rename": func(w http.ResponseWriter, r *http.Request) {
+		"POST /session/abc123/rename": func(w http.ResponseWriter, r *http.Request) {
 			var req SessionRenameRequest
 			json.NewDecoder(r.Body).Decode(&req)
 			if req.NewName != "new-name" {
@@ -137,104 +137,6 @@ func TestHTTPClient_PurgeOrphans(t *testing.T) {
 	}
 }
 
-func TestHTTPClient_CapturePreview(t *testing.T) {
-	srv := newClientTestServer(t, map[string]http.HandlerFunc{
-		"GET /sessions/s1/preview": func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Query().Get("width") != "80" {
-				t.Errorf("unexpected width: %s", r.URL.Query().Get("width"))
-			}
-			testWriteJSON(w, PreviewResponse{Content: "hello", CursorX: 5, CursorY: 0})
-		},
-	})
-	defer srv.Close()
-
-	c := NewHTTPClient(srv.URL, "")
-	resp, err := c.CapturePreview(context.Background(), "s1", 80, 24)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Content != "hello" {
-		t.Errorf("got content=%q", resp.Content)
-	}
-}
-
-func TestHTTPClient_HistorySize(t *testing.T) {
-	srv := newClientTestServer(t, map[string]http.HandlerFunc{
-		"GET /sessions/s1/history-size": func(w http.ResponseWriter, _ *http.Request) {
-			testWriteJSON(w, HistorySizeResponse{Lines: 500})
-		},
-	})
-	defer srv.Close()
-
-	c := NewHTTPClient(srv.URL, "")
-	resp, err := c.HistorySize(context.Background(), "s1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Lines != 500 {
-		t.Errorf("got %d, want 500", resp.Lines)
-	}
-}
-
-func TestHTTPClient_SendChoice_WithSessionID(t *testing.T) {
-	srv := newClientTestServer(t, map[string]http.HandlerFunc{
-		"POST /sessions/s1/choice": func(w http.ResponseWriter, r *http.Request) {
-			var req SendChoiceRequest
-			json.NewDecoder(r.Body).Decode(&req)
-			if req.Choice != 1 {
-				t.Errorf("got choice=%d, want 1", req.Choice)
-			}
-			w.WriteHeader(http.StatusOK)
-		},
-	})
-	defer srv.Close()
-
-	c := NewHTTPClient(srv.URL, "")
-	if err := c.SendChoice(context.Background(), "s1", "@1", 1); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestHTTPClient_SendChoice_WithoutSessionID(t *testing.T) {
-	srv := newClientTestServer(t, map[string]http.HandlerFunc{
-		"POST /sessions/choice": func(w http.ResponseWriter, r *http.Request) {
-			var req SendChoiceRequest
-			json.NewDecoder(r.Body).Decode(&req)
-			if req.Window != "@2" {
-				t.Errorf("got window=%q, want @2", req.Window)
-			}
-			w.WriteHeader(http.StatusOK)
-		},
-	})
-	defer srv.Close()
-
-	c := NewHTTPClient(srv.URL, "")
-	if err := c.SendChoice(context.Background(), "", "@2", 1); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestHTTPClient_CaptureScrollback(t *testing.T) {
-	srv := newClientTestServer(t, map[string]http.HandlerFunc{
-		"GET /sessions/s1/scrollback": func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Query().Get("start") != "10" {
-				t.Errorf("unexpected start: %s", r.URL.Query().Get("start"))
-			}
-			testWriteJSON(w, ScrollbackResponse{Content: "scrollback", CursorX: 0, CursorY: 5})
-		},
-	})
-	defer srv.Close()
-
-	c := NewHTTPClient(srv.URL, "")
-	resp, err := c.CaptureScrollback(context.Background(), "s1", 80, 10, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Content != "scrollback" {
-		t.Errorf("got content=%q", resp.Content)
-	}
-}
-
 func TestHTTPClient_Shutdown(t *testing.T) {
 	srv := newClientTestServer(t, map[string]http.HandlerFunc{
 		"POST /shutdown": func(w http.ResponseWriter, _ *http.Request) {
@@ -269,7 +171,7 @@ func TestHTTPClient_MsgSend(t *testing.T) {
 
 func TestHTTPClient_ResumeWorktree(t *testing.T) {
 	srv := newClientTestServer(t, map[string]http.HandlerFunc{
-		"POST /worktrees/resume": func(w http.ResponseWriter, _ *http.Request) {
+		"POST /worktree/resume": func(w http.ResponseWriter, _ *http.Request) {
 			testWriteJSON(w, WorktreeResumeResponse{SessionID: "wt-resume"})
 		},
 	})
@@ -288,27 +190,9 @@ func TestHTTPClient_ResumeWorktree(t *testing.T) {
 	}
 }
 
-func TestHTTPClient_AttachSession(t *testing.T) {
-	srv := newClientTestServer(t, map[string]http.HandlerFunc{
-		"GET /sessions/s1/attach": func(w http.ResponseWriter, _ *http.Request) {
-			testWriteJSON(w, AttachResponse{TmuxTarget: "lazyclaude:lc-abcd1234"})
-		},
-	})
-	defer srv.Close()
-
-	c := NewHTTPClient(srv.URL, "")
-	resp, err := c.AttachSession(context.Background(), "s1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.TmuxTarget != "lazyclaude:lc-abcd1234" {
-		t.Errorf("got target=%q", resp.TmuxTarget)
-	}
-}
-
 func TestHTTPClient_CreateWorktree(t *testing.T) {
 	srv := newClientTestServer(t, map[string]http.HandlerFunc{
-		"POST /worktrees": func(w http.ResponseWriter, r *http.Request) {
+		"POST /worktree/create": func(w http.ResponseWriter, r *http.Request) {
 			var req WorktreeCreateRequest
 			json.NewDecoder(r.Body).Decode(&req)
 			if req.Name != "feature-x" {
@@ -335,8 +219,8 @@ func TestHTTPClient_CreateWorktree(t *testing.T) {
 func TestHTTPClient_ListWorktrees(t *testing.T) {
 	srv := newClientTestServer(t, map[string]http.HandlerFunc{
 		"GET /worktrees": func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Query().Get("root") != "/project" {
-				t.Errorf("unexpected root: %s", r.URL.Query().Get("root"))
+			if r.URL.Query().Get("project_root") != "/project" {
+				t.Errorf("unexpected project_root: %s", r.URL.Query().Get("project_root"))
 			}
 			testWriteJSON(w, WorktreeListResponse{
 				Worktrees: []WorktreeInfo{{Name: "wt1", Path: "/tmp/wt1", Branch: "main"}},
@@ -415,7 +299,7 @@ func TestHTTPClient_ErrorResponse(t *testing.T) {
 
 func TestHTTPClient_SubscribeNotifications(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/notifications/stream" {
+		if r.URL.Path != "/notifications" {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}

@@ -23,6 +23,48 @@ func newTestSession(id, name, path string) session.Session {
 	}
 }
 
+func TestSession_TmuxTarget(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		sess session.Session
+		want string
+	}{
+		{
+			name: "local with TmuxWindow ID",
+			sess: session.Session{ID: "0123456789abcdef", TmuxWindow: "@42"},
+			want: "lazyclaude:@42",
+		},
+		{
+			name: "local with TmuxWindow already prefixed",
+			sess: session.Session{ID: "0123456789abcdef", TmuxWindow: "lazyclaude:@42"},
+			want: "lazyclaude:@42",
+		},
+		{
+			name: "local fallback (empty TmuxWindow)",
+			sess: session.Session{ID: "0123456789abcdef"},
+			want: "lazyclaude:lc-01234567",
+		},
+		{
+			name: "remote mirror with TmuxWindow name",
+			sess: session.Session{ID: "0123456789abcdef", Host: "AERO", TmuxWindow: "rm-01234567"},
+			want: "lazyclaude:rm-01234567",
+		},
+		{
+			name: "remote fallback (empty TmuxWindow, desync)",
+			sess: session.Session{ID: "0123456789abcdef", Host: "AERO"},
+			want: "lazyclaude:rm-01234567",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, tc.sess.TmuxTarget())
+		})
+	}
+}
+
 func TestStore_SaveAndLoad(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

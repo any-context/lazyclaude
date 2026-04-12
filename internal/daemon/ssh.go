@@ -18,8 +18,8 @@ type SSHExecutor interface {
 type ExecSSHExecutor struct{}
 
 func (e *ExecSSHExecutor) Run(ctx context.Context, host, command string) ([]byte, error) {
-	sshHost, port := splitHostPort(host)
-	args := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10"}
+	sshHost, port := SplitHostPort(host)
+	args := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ControlMaster=no", "-o", "ControlPath=none"}
 	if port != "" {
 		args = append(args, "-p", port)
 	}
@@ -28,8 +28,8 @@ func (e *ExecSSHExecutor) Run(ctx context.Context, host, command string) ([]byte
 }
 
 func (e *ExecSSHExecutor) Copy(ctx context.Context, host, localPath, remotePath string) error {
-	sshHost, port := splitHostPort(host)
-	args := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10"}
+	sshHost, port := SplitHostPort(host)
+	args := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ControlMaster=no", "-o", "ControlPath=none"}
 	if port != "" {
 		args = append(args, "-P", port)
 	}
@@ -38,17 +38,11 @@ func (e *ExecSSHExecutor) Copy(ctx context.Context, host, localPath, remotePath 
 	return cmd.Run()
 }
 
-// posixQuote wraps a string in single quotes, escaping embedded single quotes.
-// This prevents shell interpretation of metacharacters in remote commands.
-func posixQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
-
-// splitHostPort separates "user@host:port" into ("user@host", "port").
+// SplitHostPort separates "user@host:port" into ("user@host", "port").
 // If no port is specified, returns (host, "").
 // Handles: "host", "host:22", "user@host", "user@host:22",
 // "[::1]", "[::1]:22".
-func splitHostPort(hostSpec string) (string, string) {
+func SplitHostPort(hostSpec string) (string, string) {
 	// IPv6 bracket notation: [::1] or [::1]:port
 	if strings.HasPrefix(hostSpec, "[") {
 		closeBracket := strings.Index(hostSpec, "]")

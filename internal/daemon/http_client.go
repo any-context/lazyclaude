@@ -36,14 +36,14 @@ func NewHTTPClient(baseURL, token string) *HTTPClient {
 
 // sessionPath returns an escaped path for a session endpoint.
 func sessionPath(id, suffix string) string {
-	return "/sessions/" + url.PathEscape(id) + suffix
+	return "/session/" + url.PathEscape(id) + suffix
 }
 
 // --- Session CRUD ---
 
 func (c *HTTPClient) CreateSession(ctx context.Context, req SessionCreateRequest) (*SessionCreateResponse, error) {
 	var resp SessionCreateResponse
-	if err := c.postJSON(ctx, "/sessions", req, &resp); err != nil {
+	if err := c.postJSON(ctx, "/session/create", req, &resp); err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 	return &resp, nil
@@ -76,74 +76,11 @@ func (c *HTTPClient) PurgeOrphans(ctx context.Context) (int, error) {
 	return resp.Purged, nil
 }
 
-// --- Preview / Scrollback ---
-
-func (c *HTTPClient) CapturePreview(ctx context.Context, id string, width, height int) (*PreviewResponse, error) {
-	q := url.Values{"width": {fmt.Sprint(width)}, "height": {fmt.Sprint(height)}}
-	p := sessionPath(id, "/preview") + "?" + q.Encode()
-	var resp PreviewResponse
-	if err := c.getJSON(ctx, p, &resp); err != nil {
-		return nil, fmt.Errorf("capture preview: %w", err)
-	}
-	return &resp, nil
-}
-
-func (c *HTTPClient) CaptureScrollback(ctx context.Context, id string, width, startLine, endLine int) (*ScrollbackResponse, error) {
-	q := url.Values{
-		"width": {fmt.Sprint(width)},
-		"start": {fmt.Sprint(startLine)},
-		"end":   {fmt.Sprint(endLine)},
-	}
-	p := sessionPath(id, "/scrollback") + "?" + q.Encode()
-	var resp ScrollbackResponse
-	if err := c.getJSON(ctx, p, &resp); err != nil {
-		return nil, fmt.Errorf("capture scrollback: %w", err)
-	}
-	return &resp, nil
-}
-
-func (c *HTTPClient) HistorySize(ctx context.Context, id string) (*HistorySizeResponse, error) {
-	var resp HistorySizeResponse
-	if err := c.getJSON(ctx, sessionPath(id, "/history-size"), &resp); err != nil {
-		return nil, fmt.Errorf("history size: %w", err)
-	}
-	return &resp, nil
-}
-
-// --- Input ---
-
-func (c *HTTPClient) SendKeys(ctx context.Context, id, keys string) error {
-	req := SendKeysRequest{ID: id, Keys: keys}
-	return c.postJSON(ctx, sessionPath(id, "/keys"), req, nil)
-}
-
-func (c *HTTPClient) SendChoice(ctx context.Context, id, window string, choice int) error {
-	req := SendChoiceRequest{ID: id, Window: window, Choice: choice}
-	// SendChoice posts to a dedicated endpoint. The request body carries
-	// window and choice; the session ID in the path may be empty when
-	// the caller routes by window name instead of session ID.
-	path := "/sessions/choice"
-	if id != "" {
-		path = sessionPath(id, "/choice")
-	}
-	return c.postJSON(ctx, path, req, nil)
-}
-
-// --- Attach ---
-
-func (c *HTTPClient) AttachSession(ctx context.Context, id string) (*AttachResponse, error) {
-	var resp AttachResponse
-	if err := c.getJSON(ctx, sessionPath(id, "/attach"), &resp); err != nil {
-		return nil, fmt.Errorf("attach session: %w", err)
-	}
-	return &resp, nil
-}
-
 // --- Worktree ---
 
 func (c *HTTPClient) CreateWorktree(ctx context.Context, req WorktreeCreateRequest) (*WorktreeCreateResponse, error) {
 	var resp WorktreeCreateResponse
-	if err := c.postJSON(ctx, "/worktrees", req, &resp); err != nil {
+	if err := c.postJSON(ctx, "/worktree/create", req, &resp); err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 	return &resp, nil
@@ -151,14 +88,14 @@ func (c *HTTPClient) CreateWorktree(ctx context.Context, req WorktreeCreateReque
 
 func (c *HTTPClient) ResumeWorktree(ctx context.Context, req WorktreeResumeRequest) (*WorktreeResumeResponse, error) {
 	var resp WorktreeResumeResponse
-	if err := c.postJSON(ctx, "/worktrees/resume", req, &resp); err != nil {
+	if err := c.postJSON(ctx, "/worktree/resume", req, &resp); err != nil {
 		return nil, fmt.Errorf("resume worktree: %w", err)
 	}
 	return &resp, nil
 }
 
 func (c *HTTPClient) ListWorktrees(ctx context.Context, projectRoot string) ([]WorktreeInfo, error) {
-	q := url.Values{"root": {projectRoot}}
+	q := url.Values{"project_root": {projectRoot}}
 	p := "/worktrees?" + q.Encode()
 	var resp WorktreeListResponse
 	if err := c.getJSON(ctx, p, &resp); err != nil {
@@ -191,6 +128,30 @@ func (c *HTTPClient) MsgSessions(ctx context.Context) (*MsgSessionsResponse, err
 		return nil, fmt.Errorf("msg sessions: %w", err)
 	}
 	return &resp, nil
+}
+
+// --- Capture ---
+
+// CaptureScrollback retrieves a range of scrollback lines for a session via
+// POST /session/{id}/scrollback. Used by the fullscreen copy-mode path for
+// remote sessions.
+func (c *HTTPClient) CaptureScrollback(ctx context.Context, req ScrollbackRequest) (*ScrollbackResponse, error) {
+	var resp ScrollbackResponse
+	if err := c.postJSON(ctx, sessionPath(req.ID, "/scrollback"), req, &resp); err != nil {
+		return nil, fmt.Errorf("capture scrollback: %w", err)
+	}
+	return &resp, nil
+}
+
+// HistorySize fetches the pane scrollback history size via
+// GET /session/{id}/history-size. Used together with CaptureScrollback by
+// the fullscreen copy mode.
+func (c *HTTPClient) HistorySize(ctx context.Context, id string) (int, error) {
+	var resp HistorySizeResponse
+	if err := c.getJSON(ctx, sessionPath(id, "/history-size"), &resp); err != nil {
+		return 0, fmt.Errorf("history size: %w", err)
+	}
+	return resp.Lines, nil
 }
 
 // --- System Info ---
@@ -233,7 +194,7 @@ func (c *HTTPClient) PendingNotifications(ctx context.Context) ([]*ToolNotificat
 // The returned channel emits events until the context is canceled or
 // the connection drops. The caller must drain the channel.
 func (c *HTTPClient) SubscribeNotifications(ctx context.Context) (<-chan NotificationEvent, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/notifications/stream", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/notifications", nil)
 	if err != nil {
 		return nil, fmt.Errorf("create SSE request: %w", err)
 	}

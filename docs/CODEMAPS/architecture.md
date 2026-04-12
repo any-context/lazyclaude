@@ -1,8 +1,8 @@
-<!-- Generated: 2026-04-01 | Files scanned: 154 src + test | Lines: ~14,602 src | Token estimate: ~950 -->
+<!-- Last Updated: 2026-04-11 | Added daemon package to dependency graph, covering CompositeProvider and command routing -->
 
 # Architecture
 
-**Last Updated:** 2026-04-01
+**Last Updated:** 2026-04-11 (daemon-arch)
 
 ## System Overview
 
@@ -48,6 +48,9 @@ cmd/lazyclaude (CLI entry, Cobra)
   |    +-- keyhandler  (per-view + panel handlers)
   |    +-- keymap      (configurable keybinding registry)
   |    +-- presentation (formatting, styling)
+  +-- daemon         (remote session API + provider routing)
+  |    +-- CompositeProvider (local/remote provider dispatch)
+  |    +-- RemoteProvider (SSH-backed remote daemon client)
   +-- session        (session CRUD, tmux sync, persistence)
   +-- server         (MCP WebSocket/HTTP server)
   |    +-- activity state + notifications
@@ -81,8 +84,18 @@ cmd/lazyclaude (CLI entry, Cobra)
 - `lazyclaude setup` -- install hooks + keybindings (--settings flag injection)
 - `lazyclaude server` -- start MCP daemon (manual)
 
-## Recent Enhancements (Apr 2026)
+## Recent Enhancements
 
+**daemon-arch branch (Apr 2026):**
+- **Mirror Windows** -- SSH-attached tmux windows for transparent remote session interaction
+- **Grouped Tmux Sessions** -- Each mirror gets own grouped session (new-session -t lazyclaude -s {name})
+- **PostCreateHook Pattern** -- Side-effect hook called after remote session creation
+- **Session Role Propagation** -- PM/Worker roles displayed with [PM]/[W] prefixes in sidebar
+- **Lazy Remote Connection** -- First remote operation triggers connection (sync.Once per host)
+- **Optimistic UI** -- Create shows placeholder immediately, finishes in background
+- **Path Resolution** -- resolveRemotePath() bridges local and remote CWDs via daemon API
+
+**stg branch (earlier Apr 2026):**
 - **Rich Sidebar Status** -- 5-stage ActivityState with icons + tool name display
 - **Scrollback Browser** -- vim-like navigation (j/k, g/G, v for select, y to copy) in fullscreen
 - **Search Filtering** -- fzf-style "/" key for session/plugin/MCP filtering with visual indicator

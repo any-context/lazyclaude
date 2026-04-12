@@ -32,30 +32,6 @@ type ClientAPI interface {
 	// PurgeOrphans removes sessions whose tmux windows no longer exist.
 	PurgeOrphans(ctx context.Context) (int, error)
 
-	// --- Preview / Scrollback ---
-
-	// CapturePreview captures the visible pane content for a session.
-	CapturePreview(ctx context.Context, id string, width, height int) (*PreviewResponse, error)
-
-	// CaptureScrollback captures a range of scrollback lines.
-	CaptureScrollback(ctx context.Context, id string, width, startLine, endLine int) (*ScrollbackResponse, error)
-
-	// HistorySize returns the total scrollback line count for a session.
-	HistorySize(ctx context.Context, id string) (*HistorySizeResponse, error)
-
-	// --- Input ---
-
-	// SendKeys sends raw keys to a session's tmux pane.
-	SendKeys(ctx context.Context, id, keys string) error
-
-	// SendChoice sends a permission choice to a session.
-	SendChoice(ctx context.Context, id, window string, choice int) error
-
-	// --- Attach ---
-
-	// AttachSession returns the tmux target string for interactive attach.
-	AttachSession(ctx context.Context, id string) (*AttachResponse, error)
-
 	// --- Worktree ---
 
 	// CreateWorktree creates a new git worktree and associated session.
@@ -77,6 +53,18 @@ type ClientAPI interface {
 
 	// MsgSessions lists sessions available for messaging.
 	MsgSessions(ctx context.Context) (*MsgSessionsResponse, error)
+
+	// --- Capture ---
+
+	// CaptureScrollback retrieves a range of scrollback lines for a session.
+	// Used by the fullscreen copy mode for remote sessions where the local
+	// mirror window's tmux buffer does not contain the remote tmux's
+	// historical scrollback.
+	CaptureScrollback(ctx context.Context, req ScrollbackRequest) (*ScrollbackResponse, error)
+
+	// HistorySize returns the pane's scrollback history size for a session.
+	// Used together with CaptureScrollback by the fullscreen copy mode.
+	HistorySize(ctx context.Context, id string) (int, error)
 
 	// --- System Info ---
 

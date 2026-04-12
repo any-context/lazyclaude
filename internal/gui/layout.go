@@ -115,6 +115,16 @@ func (a *App) layout(g *gocui.Gui) error {
 	// Sync plugin panel with current project (lazy init on first layout).
 	a.syncPluginProjectOnce()
 
+	// Re-sync every layout after the first so that an out-of-band
+	// tree rebuild (session GC, project removed without going through
+	// DeleteSession, remote mirror window added/removed) cannot leave
+	// pluginState.projectDir / remoteDisabled pointing at a project
+	// that has just slid out from under the cursor. syncPluginProject
+	// is idempotent on the same node because it short-circuits when
+	// projectPath equals the cached projectDir, so the cost is one
+	// cursor lookup per frame when nothing has changed.
+	a.syncPluginProject()
+
 	// Detect terminal resize -> clear preview cache
 	if maxX != a.lastWidth || maxY != a.lastHeight {
 		a.preview.Invalidate()
@@ -162,11 +172,22 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 		nodes = a.filteredTreeNodes()
 	}
 	if len(nodes) > 0 {
+		clamped := false
 		if a.cursor >= len(nodes) {
 			a.cursor = len(nodes) - 1
+			clamped = true
 		}
 		if a.cursor < 0 {
 			a.cursor = 0
+			clamped = true
+		}
+		if clamped {
+			// The layout-level syncPluginProject call (a.layout) ran
+			// BEFORE this clamp, so re-sync again now that the cursor
+			// actually points at a new node. Without this, the cached
+			// projectDir would still reference the pre-clamp row and
+			// the next write key press would hit stale context.
+			a.syncPluginProject()
 		}
 	}
 	renderTree(v, nodes, a.cursor)

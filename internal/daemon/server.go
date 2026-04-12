@@ -20,8 +20,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/any-context/lazyclaude/internal/adapter/tmuxadapter"
-	"github.com/any-context/lazyclaude/internal/core/choice"
 	"github.com/any-context/lazyclaude/internal/core/event"
 	"github.com/any-context/lazyclaude/internal/core/model"
 	"github.com/any-context/lazyclaude/internal/core/tmux"
@@ -99,17 +97,11 @@ func NewDaemonServer(
 	mux.HandleFunc("POST /session/{id}/rename", s.withAuth(s.handleSessionRename))
 	mux.HandleFunc("GET /sessions", s.withAuth(s.handleSessionList))
 
-	// Preview / Scrollback
-	mux.HandleFunc("GET /session/{id}/preview", s.withAuth(s.handlePreview))
-	mux.HandleFunc("GET /session/{id}/scrollback", s.withAuth(s.handleScrollback))
+	// Capture (scrollback / history size). Added in API v2 so that remote
+	// fullscreen copy mode can read the remote tmux server's scrollback
+	// directly (the local mirror window's tmux buffer is empty).
+	mux.HandleFunc("POST /session/{id}/scrollback", s.withAuth(s.handleScrollback))
 	mux.HandleFunc("GET /session/{id}/history-size", s.withAuth(s.handleHistorySize))
-
-	// Input
-	mux.HandleFunc("POST /session/{id}/send-keys", s.withAuth(s.handleSendKeys))
-	mux.HandleFunc("POST /session/{id}/send-choice", s.withAuth(s.handleSendChoice))
-
-	// Attach
-	mux.HandleFunc("GET /session/{id}/attach", s.withAuth(s.handleAttach))
 
 	// Worktree
 	mux.HandleFunc("POST /worktree/create", s.withAuth(s.handleWorktreeCreate))
@@ -182,13 +174,9 @@ func (s *DaemonServer) ShutdownCh() <-chan struct{} {
 	return s.shutdownCh
 }
 
-// Port returns the listening port.
-func (s *DaemonServer) Port() int {
-	return s.config.Port
-}
-
 // --- Auth middleware ---
 
+// withAuth authenticates requests using the X-Daemon-Authorization header.
 func (s *DaemonServer) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := r.Header.Get(AuthHeader)
@@ -251,7 +239,9 @@ func (s *DaemonServer) handleSessionCreate(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusCreated, SessionCreateResponse{
 		ID:         sess.ID,
 		Name:       sess.Name,
-		TmuxWindow: sess.TmuxWindow,
+		Path:       sess.Path,
+		TmuxWindow: sess.WindowName(),
+		Role:       string(sess.Role),
 	})
 }
 
@@ -296,163 +286,70 @@ func (s *DaemonServer) handleSessionList(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, SessionListResponse{Sessions: items})
 }
 
-// --- Preview / Scrollback handlers ---
+// --- Capture handlers ---
 
-func (s *DaemonServer) handlePreview(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	width, _ := strconv.Atoi(r.URL.Query().Get("width"))
-	height, _ := strconv.Atoi(r.URL.Query().Get("height"))
-
-	sess := s.mgr.Store().FindByID(id)
-	if sess == nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-
-	target := resolveTarget(sess)
-	ctx := r.Context()
-
-	if width > 0 && height > 0 {
-		if err := s.tmux.ResizeWindow(ctx, target, width, height); err != nil {
-			s.log.Printf("preview: resize %s: %v", target, err)
-		} else {
-			select {
-			case <-time.After(20 * time.Millisecond):
-			case <-ctx.Done():
-				return
-			}
-		}
-	}
-
-	content, err := s.tmux.CapturePaneANSI(ctx, target)
-	if err != nil {
-		http.Error(w, "capture failed", http.StatusInternalServerError)
-		return
-	}
-
-	var cursorX, cursorY int
-	if pos, posErr := s.tmux.ShowMessage(ctx, target, "#{cursor_x},#{cursor_y}"); posErr == nil {
-		parts := strings.SplitN(strings.TrimSpace(pos), ",", 2)
-		if len(parts) == 2 {
-			cursorX, _ = strconv.Atoi(parts[0])
-			cursorY, _ = strconv.Atoi(parts[1])
-		}
-	}
-
-	writeJSON(w, http.StatusOK, PreviewResponse{
-		Content: content,
-		CursorX: cursorX,
-		CursorY: cursorY,
-	})
-}
-
+// handleScrollback captures a range of scrollback lines for a session by
+// running tmux capture-pane on the daemon's own tmux server. This is the
+// fullscreen copy-mode path for remote sessions: the local mirror window's
+// tmux buffer does not contain the remote tmux's historical scrollback, so
+// the TUI asks the remote daemon to capture from its own server.
 func (s *DaemonServer) handleScrollback(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	width, _ := strconv.Atoi(r.URL.Query().Get("width"))
-	startLine, _ := strconv.Atoi(r.URL.Query().Get("start_line"))
-	endLine, _ := strconv.Atoi(r.URL.Query().Get("end_line"))
-
+	if id == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+	var req ScrollbackRequest
+	if err := readJSON(w, r, &req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
 	sess := s.mgr.Store().FindByID(id)
 	if sess == nil {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-
-	target := resolveTarget(sess)
-	_ = width // width is used by caller for truncation, not by capture
-
-	content, err := s.tmux.CapturePaneANSIRange(r.Context(), target, startLine, endLine)
+	target := sess.TmuxTarget()
+	content, err := s.tmux.CapturePaneANSIRange(r.Context(), target, req.StartLine, req.EndLine)
 	if err != nil {
-		http.Error(w, "capture failed", http.StatusInternalServerError)
+		s.log.Printf("session/%s/scrollback: %v", id, err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-
 	writeJSON(w, http.StatusOK, ScrollbackResponse{Content: content})
 }
 
+// handleHistorySize returns the pane's scrollback history size (number of
+// lines currently held in the tmux pane's history buffer). Used together
+// with handleScrollback by the fullscreen copy-mode.
 func (s *DaemonServer) handleHistorySize(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
 	sess := s.mgr.Store().FindByID(id)
 	if sess == nil {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-
-	target := resolveTarget(sess)
+	target := sess.TmuxTarget()
 	out, err := s.tmux.ShowMessage(r.Context(), target, "#{history_size}")
 	if err != nil {
-		http.Error(w, "tmux error", http.StatusInternalServerError)
+		s.log.Printf("session/%s/history-size: %v", id, err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	lines, _ := strconv.Atoi(strings.TrimSpace(out))
-	writeJSON(w, http.StatusOK, HistorySizeResponse{Lines: lines})
-}
-
-// --- Input handlers ---
-
-func (s *DaemonServer) handleSendKeys(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var req SendKeysRequest
-	if err := readJSON(w, r, &req); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+	// tmux #{history_size} is always a plain integer. If we get anything
+	// else the pane is in an unexpected state; surface it as 502 so the
+	// client can distinguish from a legitimate "0 history lines".
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		s.log.Printf("session/%s/history-size: parse %q: %v", id, out, err)
+		http.Error(w, "invalid history size from tmux", http.StatusBadGateway)
 		return
 	}
-
-	sess := s.mgr.Store().FindByID(id)
-	if sess == nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-
-	target := "lazyclaude:" + sess.WindowName()
-	if err := s.tmux.SendKeysLiteral(r.Context(), target, req.Keys); err != nil {
-		http.Error(w, "send-keys failed", http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *DaemonServer) handleSendChoice(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var req SendChoiceRequest
-	if err := readJSON(w, r, &req); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-
-	sess := s.mgr.Store().FindByID(id)
-	if sess == nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-
-	window := req.Window
-	if window == "" {
-		window = sess.TmuxWindow
-	}
-	if window == "" {
-		window = sess.WindowName()
-	}
-
-	c := choice.Choice(req.Choice)
-	if err := tmuxadapter.SendToPane(r.Context(), s.tmux, window, c); err != nil {
-		http.Error(w, "send-choice failed", http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// --- Attach handler ---
-
-func (s *DaemonServer) handleAttach(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sess := s.mgr.Store().FindByID(id)
-	if sess == nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-	target := "lazyclaude:" + sess.WindowName()
-	writeJSON(w, http.StatusOK, AttachResponse{TmuxTarget: target})
+	writeJSON(w, http.StatusOK, HistorySizeResponse{Lines: n})
 }
 
 // --- Worktree handlers ---
@@ -473,9 +370,11 @@ func (s *DaemonServer) handleWorktreeCreate(w http.ResponseWriter, r *http.Reque
 
 	wtPath := session.WorktreePath(req.ProjectRoot, req.Name)
 	writeJSON(w, http.StatusCreated, WorktreeCreateResponse{
-		SessionID: sess.ID,
-		Path:      wtPath,
-		Branch:    req.Name,
+		SessionID:  sess.ID,
+		Path:       wtPath,
+		Branch:     req.Name,
+		TmuxWindow: sess.WindowName(),
+		Role:       string(sess.Role),
 	})
 }
 
@@ -493,7 +392,13 @@ func (s *DaemonServer) handleWorktreeResume(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, WorktreeResumeResponse{SessionID: sess.ID})
+	writeJSON(w, http.StatusOK, WorktreeResumeResponse{
+		SessionID:  sess.ID,
+		Name:       sess.Name,
+		Path:       sess.Path,
+		TmuxWindow: sess.WindowName(),
+		Role:       string(sess.Role),
+	})
 }
 
 func (s *DaemonServer) handleWorktreeList(w http.ResponseWriter, r *http.Request) {
@@ -638,10 +543,14 @@ type CWDResponse struct {
 }
 
 func (s *DaemonServer) handleCWD(w http.ResponseWriter, _ *http.Request) {
-	cwd, err := os.Getwd()
+	cwd, err := detectUserShellCWD()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		// Fallback: daemon's own CWD
+		cwd, err = os.Getwd()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, CWDResponse{CWD: cwd})
 }
@@ -675,13 +584,6 @@ func (s *DaemonServer) handleShutdown(w http.ResponseWriter, _ *http.Request) {
 
 // --- Helpers ---
 
-func resolveTarget(sess *session.Session) string {
-	if sess.TmuxWindow != "" {
-		return sess.TmuxWindow
-	}
-	return "lazyclaude:" + sess.WindowName()
-}
-
 func sessionToInfo(sess session.Session) SessionInfo {
 	return SessionInfo{
 		ID:         sess.ID,
@@ -689,7 +591,7 @@ func sessionToInfo(sess session.Session) SessionInfo {
 		Path:       sess.Path,
 		Host:       sess.Host,
 		Status:     sess.Status.String(),
-		TmuxWindow: sess.TmuxWindow,
+		TmuxWindow: sess.WindowName(),
 		Role:       string(sess.Role),
 	}
 }
@@ -739,17 +641,3 @@ func GenerateDaemonToken() (string, error) {
 	}
 	return hex.EncodeToString(b), nil
 }
-
-// ReadDaemonInfo reads daemon connection info from the runtime directory.
-func ReadDaemonInfo(runtimeDir string) (*DaemonInfo, error) {
-	data, err := os.ReadFile(filepath.Join(runtimeDir, "daemon.json"))
-	if err != nil {
-		return nil, fmt.Errorf("read daemon.json: %w", err)
-	}
-	var info DaemonInfo
-	if err := json.Unmarshal(data, &info); err != nil {
-		return nil, fmt.Errorf("parse daemon.json: %w", err)
-	}
-	return &info, nil
-}
-

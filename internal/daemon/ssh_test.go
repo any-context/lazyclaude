@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"testing"
+
+	"github.com/any-context/lazyclaude/internal/core/shell"
 )
 
 func TestSplitHostPort(t *testing.T) {
@@ -24,31 +26,31 @@ func TestSplitHostPort(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			gotHost, gotPort := splitHostPort(tt.input)
+			gotHost, gotPort := SplitHostPort(tt.input)
 			if gotHost != tt.wantHost || gotPort != tt.wantPort {
-				t.Errorf("splitHostPort(%q) = (%q, %q), want (%q, %q)",
+				t.Errorf("SplitHostPort(%q) = (%q, %q), want (%q, %q)",
 					tt.input, gotHost, gotPort, tt.wantHost, tt.wantPort)
 			}
 		})
 	}
 }
 
-func TestPosixQuote(t *testing.T) {
+func TestShellQuote(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
 	}{
 		{"simple", "'simple'"},
 		{"/home/user/.local/bin", "'/home/user/.local/bin'"},
-		{"it's", "'it'\"'\"'s'"},
+		{"it's", "'it'\\''s'"},
 		{"a b", "'a b'"},
 		{"$(cmd)", "'$(cmd)'"},
 		{"; rm -rf /", "'; rm -rf /'"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			if got := posixQuote(tt.input); got != tt.want {
-				t.Errorf("posixQuote(%q) = %q, want %q", tt.input, got, tt.want)
+			if got := shell.Quote(tt.input); got != tt.want {
+				t.Errorf("shell.Quote(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}

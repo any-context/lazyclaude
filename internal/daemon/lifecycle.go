@@ -1,11 +1,9 @@
 package daemon
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 // DaemonInfo holds the connection details for a running remote daemon.
@@ -35,7 +33,9 @@ func (lm *LifecycleManager) StartRemoteDaemon(ctx context.Context, host string) 
 		"nohup \"$LC_BIN\" daemon --port 0 > /tmp/lazyclaude-daemon.log 2>&1 & " +
 		"for i in $(seq 1 20); do sleep 0.5 && [ -f /tmp/lazyclaude-$(whoami)/daemon.json ] && " +
 		"cat /tmp/lazyclaude-$(whoami)/daemon.json && exit 0; done; exit 1"
+	debugLog("StartRemoteDaemon: host=%q cmd=%q", host, cmd)
 	output, err := lm.ssh.Run(ctx, host, cmd)
+	debugLog("StartRemoteDaemon: output=%q err=%v", string(output), err)
 	if err != nil {
 		return nil, fmt.Errorf("lazyclaude is not installed on %s: %w", host, err)
 	}
@@ -61,7 +61,9 @@ func (lm *LifecycleManager) StopRemoteDaemon(ctx context.Context, host string) e
 // The daemon writes its connection details to /tmp/lazyclaude-$USER/daemon.json.
 // Uses $(whoami) on the remote side so the path matches the daemon's DaemonInfoDir().
 func (lm *LifecycleManager) DiscoverRemoteDaemon(ctx context.Context, host string) (*DaemonInfo, error) {
+	debugLog("DiscoverRemoteDaemon: host=%q", host)
 	output, err := lm.ssh.Run(ctx, host, "cat /tmp/lazyclaude-$(whoami)/daemon.json")
+	debugLog("DiscoverRemoteDaemon: output=%q err=%v", string(output), err)
 	if err != nil {
 		return nil, fmt.Errorf("no daemon found on %s: %w", host, err)
 	}
@@ -80,27 +82,3 @@ func (lm *LifecycleManager) DiscoverRemoteDaemon(ctx context.Context, host strin
 	return &info, nil
 }
 
-// parseDaemonOutput extracts DaemonInfo from the daemon's stdout.
-// The daemon prints a JSON line like: {"port":12345,"token":"abc..."}
-func parseDaemonOutput(output string) (*DaemonInfo, error) {
-	var lastParseErr error
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || !strings.HasPrefix(line, "{") {
-			continue
-		}
-		var info DaemonInfo
-		if err := json.Unmarshal([]byte(line), &info); err != nil {
-			lastParseErr = err
-			continue
-		}
-		if info.Port > 0 && info.Token != "" {
-			return &info, nil
-		}
-	}
-	if lastParseErr != nil {
-		return nil, fmt.Errorf("no valid daemon info in output (last parse error: %w)", lastParseErr)
-	}
-	return nil, fmt.Errorf("no valid daemon info in output: %s", output)
-}
