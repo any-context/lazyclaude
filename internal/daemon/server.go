@@ -641,5 +641,3 @@ func GenerateDaemonToken() (string, error) {
 	}
 	return hex.EncodeToString(b), nil
 }
-
-
