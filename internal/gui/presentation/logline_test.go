@@ -16,16 +16,6 @@ func TestClassifyLogLine(t *testing.T) {
 			want: LogLevelError,
 		},
 		{
-			name: "error in message",
-			line: "2024/04/13 10:00:00 notify: encode error: EOF",
-			want: LogLevelError,
-		},
-		{
-			name: "fail keyword",
-			line: "2024/04/13 10:00:00 health check failed",
-			want: LogLevelError,
-		},
-		{
 			name: "warning prefix",
 			line: "2024/04/13 10:00:00 warning: write port file: permission denied",
 			want: LogLevelWarn,
@@ -73,6 +63,27 @@ func TestClassifyLogLine(t *testing.T) {
 		{
 			name: "empty line",
 			line: "",
+			want: LogLevelInfo,
+		},
+		// Regression: false positive guards
+		{
+			name: "no false positive on error in payload",
+			line: "2024/04/13 10:00:00 msg/create: nil result with no error",
+			want: LogLevelInfo,
+		},
+		{
+			name: "no false positive on warn in file path",
+			line: "2024/04/13 10:00:00 openDiff: window=@0 file=/home/user/warnings.go",
+			want: LogLevelInfo,
+		},
+		{
+			name: "no false positive on fail in function name",
+			line: "2024/04/13 10:00:00 notify: resolved failover handler",
+			want: LogLevelInfo,
+		},
+		{
+			name: "no false positive on error in notify",
+			line: "2024/04/13 10:00:00 notify: encode error: EOF",
 			want: LogLevelInfo,
 		},
 	}

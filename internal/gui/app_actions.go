@@ -917,8 +917,14 @@ func (a *App) LogsCopySelection() {
 }
 
 func (a *App) LogsClear() {
-	_ = os.Truncate(serverLogPath, 0)
-	a.logCache = logFileCache{}
+	// Best-effort truncate: the server logger may be writing concurrently
+	// via its own *os.File handle, so the file position may be stale after
+	// truncation.  This is acceptable for a single-user TUI tool — the next
+	// log write will simply start at whatever offset the logger's fd is at.
+	if err := os.Truncate(serverLogPath, 0); err != nil && !os.IsNotExist(err) {
+		return
+	}
+	a.logCache = logFileCache{modTime: -1}
 	a.logRender = logRenderCache{}
 	a.logs.ClearSelection()
 	a.logs.SetLineCount(0)

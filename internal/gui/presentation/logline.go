@@ -21,12 +21,14 @@ const (
 )
 
 // ClassifyLogLine determines the log level from the message portion of a
-// standard-library log line.  The expected format after removing the prefix
-// is "2006/01/02 15:04:05 <message>".  Classification is keyword-based:
+// standard-library log line.  The expected format is
+// "2006/01/02 15:04:05 <message>".  Classification uses the message prefix
+// (text before the first ':' or space) to avoid false positives from
+// substrings in file paths or other payload data:
 //
-//   - error, fail → Error
-//   - warning, warn → Warn
-//   - ws read, ws parse, ws marshal, ws write → Debug (noisy per-frame logs)
+//   - "server error:" → Error
+//   - "warning:" → Warn
+//   - "ws read/parse/marshal/write " → Debug (noisy per-frame logs)
 //   - everything else → Info
 func ClassifyLogLine(line string) LogLevel {
 	// Skip the timestamp portion (first 20 chars: "2006/01/02 15:04:05 ").
@@ -36,19 +38,17 @@ func ClassifyLogLine(line string) LogLevel {
 	}
 	lower := strings.ToLower(msg)
 
-	// Error patterns
-	if strings.Contains(lower, "error") ||
-		strings.Contains(lower, "fail") {
+	// Error: message starts with "server error:"
+	if strings.HasPrefix(lower, "server error:") {
 		return LogLevelError
 	}
 
-	// Warning patterns
-	if strings.Contains(lower, "warning") ||
-		strings.Contains(lower, "warn") {
+	// Warning: message starts with "warning:"
+	if strings.HasPrefix(lower, "warning:") {
 		return LogLevelWarn
 	}
 
-	// Debug patterns (noisy websocket frame logs)
+	// Debug: noisy per-connection websocket logs
 	if strings.HasPrefix(lower, "ws read ") ||
 		strings.HasPrefix(lower, "ws parse ") ||
 		strings.HasPrefix(lower, "ws marshal ") ||
