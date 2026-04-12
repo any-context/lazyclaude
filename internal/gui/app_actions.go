@@ -789,7 +789,11 @@ func (a *App) ConnectRemote() {
 	}
 	a.gui.Update(func(g *gocui.Gui) error {
 		var hosts []string
-		if home, err := os.UserHomeDir(); err == nil {
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			debugLog("ConnectRemote: UserHomeDir error: %v", homeErr)
+			a.setStatus(g, fmt.Sprintf("SSH config: %v", homeErr))
+		} else {
 			parsed, parseErr := ParseSSHHosts(filepath.Join(home, ".ssh", "config"))
 			if parseErr != nil {
 				debugLog("ConnectRemote: ParseSSHHosts error: %v", parseErr)
