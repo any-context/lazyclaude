@@ -48,11 +48,6 @@ lazyclaude solves this with a single TUI that shows all sessions at a glance, ro
 - Scrollback browser with vim-like navigation (`Ctrl+V` or mouse wheel)
 - Visual line selection and clipboard copy (`v` select, `y` copy)
 
-**Log Panel**
-- Category-based coloring (error/warn/notify/lifecycle/connection/debug)
-- Dim timestamps for reduced noise
-- `c` to clear log contents
-
 **MCP Server & Plugin Management**
 - View and toggle MCP servers registered in Claude Code
 - Install, uninstall, and enable/disable Claude Code plugins from the TUI
@@ -180,17 +175,6 @@ make install PREFIX=~/.local
 | `j` / `k` | Scroll content |
 | `Up` / `Down` | Switch between stacked popups |
 | `Esc` | Hide popup |
-
-### Logs panel
-
-| Key | Action |
-|-----|--------|
-| `j` / `k` | Navigate log lines |
-| `g` / `G` | Jump to top / bottom |
-| `v` | Toggle line selection |
-| `y` | Copy selection to clipboard |
-| `c` | Clear log contents |
-| `/` | Search filter |
 
 ### Global
 
