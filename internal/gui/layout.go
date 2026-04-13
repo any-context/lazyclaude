@@ -125,9 +125,10 @@ func (a *App) layout(g *gocui.Gui) error {
 	// cursor lookup per frame when nothing has changed.
 	a.syncPluginProject()
 
-	// Detect terminal resize -> clear preview cache
+	// Detect terminal resize -> clear preview and scroll render caches
 	if maxX != a.lastWidth || maxY != a.lastHeight {
 		a.preview.Invalidate()
+		a.scrollRender = scrollRenderCache{}
 		a.lastWidth = maxX
 		a.lastHeight = maxY
 	}
@@ -363,14 +364,43 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 	previewW := l.Main.Width() - 1
 	previewH := l.Main.Height() - 1
 
-	v.Clear()
 	if a.scroll.IsActive() {
 		v.Editable = false
-		a.renderScrollContent(v)
+		// Skip expensive v.Clear() + renderScrollContent when scroll render
+		// state has not changed. This prevents unnecessary redraws during
+		// active Claude Code output that would cause visual artifacts.
+		cursorY := a.scroll.CursorY()
+		selecting := a.scroll.IsSelecting()
+		selStart, selEnd := a.scroll.SelectionRange()
+		w := v.InnerWidth()
+		rc := &a.scrollRender
+		if rc.linesVersion != a.scroll.LinesVersion() ||
+			rc.cursorY != cursorY ||
+			rc.selecting != selecting ||
+			rc.selStart != selStart ||
+			rc.selEnd != selEnd ||
+			rc.width != w {
+			v.Clear()
+			a.renderScrollContent(v)
+			// Cache the rendered state. During the loading phase (lines
+			// empty), linesVersion is 0 and the loading message is static,
+			// so caching here correctly skips redundant loading redraws.
+			// When SetLines arrives, linesVersion bumps and triggers the
+			// next real render.
+			rc.linesVersion = a.scroll.LinesVersion()
+			rc.cursorY = cursorY
+			rc.selecting = selecting
+			rc.selStart = selStart
+			rc.selEnd = selEnd
+			rc.width = w
+		}
 	} else {
+		v.Clear()
 		a.renderPreview(v, items, previewW, previewH)
 		// Scroll offset for mouse scroll
 		v.SetOrigin(0, a.fullscreen.ScrollY())
+		// Invalidate scroll render cache so next scroll mode entry re-renders
+		a.scrollRender = scrollRenderCache{}
 	}
 
 	// Status bar

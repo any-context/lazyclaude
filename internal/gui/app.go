@@ -129,6 +129,7 @@ type App struct {
 	mcpServers         MCPProvider                  // MCP operations (nil until wired)
 	logCache           logFileCache                 // cached server log file content
 	logRender          logRenderCache               // tracks last rendered log state
+	scrollRender       scrollRenderCache            // tracks last rendered scroll state
 	previewByScope     map[keymap.Scope]func(*gocui.View, int, int) // scope -> preview renderer
 	// windowActivity tracks the 5-stage activity state per tmux window.
 	// All reads/writes happen on the gocui event loop goroutine (gui.Update callbacks

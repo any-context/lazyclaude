@@ -14,6 +14,7 @@ type ScrollState struct {
 	selAnchor    int
 	lines        []string // captured scrollback lines
 	generation   int      // incremented on scroll; used to discard stale async results
+	linesVersion int      // incremented on SetLines; used by render cache to detect content changes
 }
 
 // NewScrollState creates a ScrollState with default values.
@@ -39,6 +40,9 @@ func (s *ScrollState) Lines() []string { return s.lines }
 // Generation returns the current generation counter.
 func (s *ScrollState) Generation() int { return s.generation }
 
+// LinesVersion returns the lines version counter. Incremented on each SetLines call.
+func (s *ScrollState) LinesVersion() int { return s.linesVersion }
+
 // Enter activates scroll mode. Starts at the bottom (most recent output)
 // with the cursor on the last line.
 func (s *ScrollState) Enter(viewHeight int) {
@@ -62,6 +66,7 @@ func (s *ScrollState) Exit() {
 	s.selecting = false
 	s.selAnchor = 0
 	s.lines = nil
+	s.linesVersion = 0
 }
 
 // SetMaxOffset sets the upper bound for scroll offset.
@@ -120,6 +125,7 @@ func (s *ScrollState) CursorUp() {
 // (top of scrollback reached).
 func (s *ScrollState) SetLines(lines []string) {
 	s.lines = lines
+	s.linesVersion++
 	// If capture returned fewer lines than viewport, we've hit the top
 	if len(lines) > 0 && len(lines) < s.viewHeight && s.maxOffset == 0 {
 		s.maxOffset = s.scrollOffset

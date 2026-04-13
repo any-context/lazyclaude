@@ -147,6 +147,23 @@ type logRenderCache struct {
 	searchQuery string
 }
 
+// scrollRenderCache tracks the last rendered scroll state so that
+// layoutFullScreen can skip the expensive v.Clear() + renderScrollContent
+// cycle when nothing has changed (e.g. during Claude Code active output).
+// All access is from the gocui event loop goroutine only.
+//
+// scrollOffset is intentionally omitted: every scroll action that changes
+// the viewport calls SetLines (via captureScrollbackAsync), which bumps
+// linesVersion, so an offset change is always reflected via linesVersion.
+type scrollRenderCache struct {
+	linesVersion int
+	cursorY      int
+	selecting    bool
+	selStart     int
+	selEnd       int
+	width        int
+}
+
 // readLogLines returns all log lines in reverse order (newest first).
 // Results are cached and only refreshed when the file changes.
 // Must be called from the gocui event loop goroutine only.
@@ -319,6 +336,9 @@ func truncateToWidth(s string, maxW int) string {
 func (a *App) renderScrollContent(v *gocui.View) {
 	lines := a.scroll.Lines()
 	if len(lines) == 0 {
+		// Reset origin and cursor to prevent stale values from non-scroll mode
+		v.SetOrigin(0, 0)
+		v.SetCursor(0, 0)
 		fmt.Fprintln(v, presentation.Dim+"  Loading scrollback..."+presentation.Reset)
 		return
 	}
@@ -349,6 +369,11 @@ func (a *App) renderScrollContent(v *gocui.View) {
 		}
 	}
 
+	// Reset origin to a known state before positioning the cursor.
+	// Scroll mode loads at most viewHeight lines, so origin 0 is correct.
+	// Without this reset, a stale origin from non-scroll mode (e.g. preview
+	// scroll offset) would cause scrollToCursor to miscalculate.
+	v.SetOrigin(0, 0)
 	scrollToCursor(v, cursorY)
 }
 

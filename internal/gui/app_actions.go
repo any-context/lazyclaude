@@ -1242,6 +1242,9 @@ func (a *App) ScrollModeEnter() {
 }
 
 func (a *App) ScrollModeExit() {
+	// Bump generation to invalidate in-flight async captures so they
+	// cannot call SetLines after scroll mode is deactivated.
+	a.scroll.BumpGeneration()
 	a.scroll.Exit()
 	a.preview.Invalidate()
 }
@@ -1312,6 +1315,9 @@ func (a *App) ScrollModeCopy() {
 	if text != "" {
 		copyToClipboard(stripANSI(text))
 	}
+	// Bump generation to invalidate in-flight async captures so they
+	// cannot call SetLines after scroll mode is deactivated.
+	a.scroll.BumpGeneration()
 	a.scroll.Exit()
 	a.preview.Invalidate()
 }

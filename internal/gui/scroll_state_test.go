@@ -352,3 +352,52 @@ func TestScrollState_ExitClearsSelection(t *testing.T) {
 		t.Errorf("Exit should clear lines, got %d", len(s.Lines()))
 	}
 }
+
+func TestScrollState_LinesVersion(t *testing.T) {
+	s := NewScrollState()
+	s.Enter(40)
+
+	v0 := s.LinesVersion()
+
+	s.SetLines([]string{"a", "b", "c"})
+	v1 := s.LinesVersion()
+	if v1 != v0+1 {
+		t.Errorf("after first SetLines: version = %d, want %d", v1, v0+1)
+	}
+
+	// Same content still bumps version (change detection, not equality check)
+	s.SetLines([]string{"a", "b", "c"})
+	v2 := s.LinesVersion()
+	if v2 != v1+1 {
+		t.Errorf("after second SetLines: version = %d, want %d", v2, v1+1)
+	}
+}
+
+func TestScrollState_LinesVersionStartsAtZero(t *testing.T) {
+	s := NewScrollState()
+	if s.LinesVersion() != 0 {
+		t.Errorf("initial LinesVersion = %d, want 0", s.LinesVersion())
+	}
+}
+
+func TestScrollState_LinesVersionResetOnExit(t *testing.T) {
+	s := NewScrollState()
+	s.Enter(40)
+	s.SetLines([]string{"a", "b"})
+	s.SetLines([]string{"c", "d"})
+	if s.LinesVersion() != 2 {
+		t.Fatalf("before Exit: LinesVersion = %d, want 2", s.LinesVersion())
+	}
+
+	s.Exit()
+	if s.LinesVersion() != 0 {
+		t.Errorf("after Exit: LinesVersion = %d, want 0", s.LinesVersion())
+	}
+
+	// Re-enter and SetLines should start from 0 again
+	s.Enter(40)
+	s.SetLines([]string{"x"})
+	if s.LinesVersion() != 1 {
+		t.Errorf("after re-enter + SetLines: LinesVersion = %d, want 1", s.LinesVersion())
+	}
+}
