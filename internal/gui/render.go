@@ -151,6 +151,10 @@ type logRenderCache struct {
 // layoutFullScreen can skip the expensive v.Clear() + renderScrollContent
 // cycle when nothing has changed (e.g. during Claude Code active output).
 // All access is from the gocui event loop goroutine only.
+//
+// scrollOffset is intentionally omitted: every scroll action that changes
+// the viewport calls SetLines (via captureScrollbackAsync), which bumps
+// linesVersion, so an offset change is always reflected via linesVersion.
 type scrollRenderCache struct {
 	linesVersion int
 	cursorY      int

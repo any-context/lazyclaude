@@ -66,6 +66,7 @@ func (s *ScrollState) Exit() {
 	s.selecting = false
 	s.selAnchor = 0
 	s.lines = nil
+	s.linesVersion = 0
 }
 
 // SetMaxOffset sets the upper bound for scroll offset.

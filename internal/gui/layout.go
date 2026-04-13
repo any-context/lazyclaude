@@ -382,6 +382,11 @@ func (a *App) layoutFullScreen(g *gocui.Gui, maxX, maxY int) error {
 			rc.width != w {
 			v.Clear()
 			a.renderScrollContent(v)
+			// Cache the rendered state. During the loading phase (lines
+			// empty), linesVersion is 0 and the loading message is static,
+			// so caching here correctly skips redundant loading redraws.
+			// When SetLines arrives, linesVersion bumps and triggers the
+			// next real render.
 			rc.linesVersion = a.scroll.LinesVersion()
 			rc.cursorY = cursorY
 			rc.selecting = selecting
