@@ -232,7 +232,7 @@ func (m *Manager) createWorktreeSession(ctx context.Context, opts worktreeOpts) 
 		}
 	}
 
-	return m.launchWorktreeSession(ctx, opts.Name, wtPath, opts.UserPrompt, opts.ProjectRoot, opts.Role, "")
+	return m.launchWorktreeSession(ctx, opts.Name, wtPath, opts.UserPrompt, opts.ProjectRoot, opts.Role, "", false)
 }
 
 // CreateWorktree creates a git worktree and launches Claude Code with an initial prompt.
@@ -312,8 +312,9 @@ func (m *Manager) launchSession(ctx context.Context, sess Session, claudeCmd, st
 // running Claude Code in a worktree directory. Called by CreateWorktree,
 // ResumeWorktree, ResumeSession, and CreateWorkerSession. Caller must hold m.mu.
 // When sessionID is non-empty it is reused (resume of a GC'd session);
-// otherwise a fresh UUID is generated.
-func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userPrompt, projectRoot string, role Role, sessionID string) (*Session, error) {
+// otherwise a fresh UUID is generated. When resume is true, the launcher
+// script includes --resume so Claude Code resumes an existing conversation.
+func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userPrompt, projectRoot string, role Role, sessionID string, resume bool) (*Session, error) {
 	id := sessionID
 	if id == "" {
 		id = uuid.New().String()
@@ -329,7 +330,7 @@ func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userP
 		UpdatedAt: time.Now(),
 	}
 
-	claudeCmd, startDir, cleanupFn, err := m.buildLaunchCommand(sess, systemPrompt, userPrompt)
+	claudeCmd, startDir, cleanupFn, err := m.buildLaunchCommand(sess, systemPrompt, userPrompt, resume)
 	if err != nil {
 		return m.launchErrorSession(ctx, sess, err)
 	}
@@ -366,8 +367,10 @@ func (m *Manager) launchErrorSession(ctx context.Context, sess Session, buildErr
 // buildLaunchCommand builds the tmux command for launching Claude Code
 // in a worktree session. Writes a temp launcher script and returns
 // the command, start directory, optional cleanup function, and error.
-func (m *Manager) buildLaunchCommand(sess Session, systemPrompt, userPrompt string) (claudeCmd string, startDir string, cleanup func(), err error) {
-	launcher, launcherErr := writeWorktreeLauncher(systemPrompt, userPrompt, m.paths.RuntimeDir, sess.ID)
+// When resume is true, the script includes --resume to continue an
+// existing Claude Code conversation.
+func (m *Manager) buildLaunchCommand(sess Session, systemPrompt, userPrompt string, resume bool) (claudeCmd string, startDir string, cleanup func(), err error) {
+	launcher, launcherErr := writeWorktreeLauncher(systemPrompt, userPrompt, m.paths.RuntimeDir, sess.ID, resume)
 	if launcherErr != nil {
 		return "", "", nil, fmt.Errorf("write launcher: %w", launcherErr)
 	}
@@ -377,8 +380,10 @@ func (m *Manager) buildLaunchCommand(sess Session, systemPrompt, userPrompt stri
 
 // writeWorktreeLauncher writes a shell script that launches claude with
 // --append-system-prompt and an optional user prompt as positional argument.
+// When resume is true, the script includes --resume so Claude Code resumes
+// an existing conversation instead of failing with "Session ID already in use".
 // Returns the script path. The script self-deletes after execution.
-func writeWorktreeLauncher(systemPrompt, userPrompt, runtimeDir, sessionID string) (string, error) {
+func writeWorktreeLauncher(systemPrompt, userPrompt, runtimeDir, sessionID string, resume bool) (string, error) {
 	f, err := os.CreateTemp("", "lazyclaude-wt-*.sh")
 	if err != nil {
 		return "", fmt.Errorf("create temp script: %w", err)
@@ -389,6 +394,9 @@ func writeWorktreeLauncher(systemPrompt, userPrompt, runtimeDir, sessionID strin
 	// Self-delete the launcher script (already read by shell at this point).
 	sb.WriteString("rm -f \"$0\"\n")
 	sb.WriteString("exec claude")
+	if resume {
+		sb.WriteString(" --resume")
+	}
 	sb.WriteString(" --session-id ")
 	sb.WriteString(shell.Quote(sessionID))
 
@@ -617,7 +625,7 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot string) (*Ses
 		UpdatedAt: time.Now(),
 	}
 
-	claudeCmd, startDir, cleanupFn, buildErr := m.buildLaunchCommand(sess, systemPrompt, "")
+	claudeCmd, startDir, cleanupFn, buildErr := m.buildLaunchCommand(sess, systemPrompt, "", false)
 	if buildErr != nil {
 		return m.launchErrorSession(ctx, sess, buildErr)
 	}
@@ -683,7 +691,7 @@ func (m *Manager) ResumeSession(ctx context.Context, id, prompt, name string) (*
 		savedOld := *old
 		m.store.Remove(id)
 
-		result, launchErr := m.launchWorktreeSession(ctx, old.Name, old.Path, prompt, projectRoot, old.Role, id)
+		result, launchErr := m.launchWorktreeSession(ctx, old.Name, old.Path, prompt, projectRoot, old.Role, id, true)
 		if launchErr != nil {
 			// Restore old record since launch failed.
 			m.store.Add(savedOld, projectRoot)
@@ -724,7 +732,7 @@ func (m *Manager) ResumeSession(ctx context.Context, id, prompt, name string) (*
 		return nil, fmt.Errorf("worktree directory not found: %s", wtPath)
 	}
 
-	return m.launchWorktreeSession(ctx, name, wtPath, prompt, projectRoot, RoleWorker, id)
+	return m.launchWorktreeSession(ctx, name, wtPath, prompt, projectRoot, RoleWorker, id, true)
 }
 
 // findProjectRootForWorktree searches registered projects for one whose
