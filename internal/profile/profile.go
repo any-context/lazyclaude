@@ -8,6 +8,7 @@
 package profile
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,7 +60,10 @@ var (
 
 	// bannedFlags are reserved for lazyclaude's session lifecycle and must
 	// not be set via profile.args. Allowing them risks double-specification
-	// or session identity collisions.
+	// or session identity collisions. Only long-form flags are listed
+	// because the Claude CLI does not expose short-form aliases for any
+	// of these at the time of writing; add short forms here if that
+	// ever changes.
 	bannedFlags = []string{
 		"--session-id",
 		"--resume",
@@ -90,12 +94,15 @@ func Load(path string) (*Config, []ProfileDef, error) {
 	}
 
 	var cfg Config
-	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, nil, annotateJSONError(data, err)
 	}
 
+	if cfg.Version == 0 {
+		return nil, nil, errors.New("config.json missing required \"version\" field (expected 1)")
+	}
 	if cfg.Version != CurrentVersion {
 		return nil, nil, fmt.Errorf("config.json version %d is not supported (expected %d)", cfg.Version, CurrentVersion)
 	}
@@ -113,12 +120,31 @@ func Load(path string) (*Config, []ProfileDef, error) {
 	}
 
 	effective := make([]ProfileDef, 0, len(cfg.Profiles)+1)
-	effective = append(effective, cfg.Profiles...)
+	for _, p := range cfg.Profiles {
+		effective = append(effective, cloneProfileDef(p))
+	}
 	if _, hasDefault := seen[BuiltinDefaultName]; !hasDefault {
 		effective = append(effective, BuiltinDefault())
 	}
 
 	return &cfg, effective, nil
+}
+
+// cloneProfileDef returns a deep copy so callers that mutate Args or Env
+// on the effective slice cannot corrupt the parsed *Config.
+func cloneProfileDef(p ProfileDef) ProfileDef {
+	c := p
+	if p.Args != nil {
+		c.Args = make([]string, len(p.Args))
+		copy(c.Args, p.Args)
+	}
+	if p.Env != nil {
+		c.Env = make(map[string]string, len(p.Env))
+		for k, v := range p.Env {
+			c.Env[k] = v
+		}
+	}
+	return c
 }
 
 // Validate checks that a single ProfileDef is well-formed. It does not
@@ -149,9 +175,9 @@ func Validate(p ProfileDef) error {
 // When no profile is marked default, the built-in default is returned.
 func ResolveDefault(profiles []ProfileDef) (ProfileDef, []string) {
 	var (
-		chosen    ProfileDef
-		found     bool
-		warnings  []string
+		chosen     ProfileDef
+		found      bool
+		warnings   []string
 		otherNames []string
 	)
 	for _, p := range profiles {
@@ -203,12 +229,12 @@ func annotateJSONError(data []byte, err error) error {
 	var synErr *json.SyntaxError
 	if errors.As(err, &synErr) {
 		line, col := offsetToLineCol(data, synErr.Offset)
-		return fmt.Errorf("invalid JSON at line %d, col %d: %s", line, col, synErr.Error())
+		return fmt.Errorf("invalid JSON at line %d, col %d: %w", line, col, synErr)
 	}
 	var typErr *json.UnmarshalTypeError
 	if errors.As(err, &typErr) {
 		line, col := offsetToLineCol(data, typErr.Offset)
-		return fmt.Errorf("invalid JSON at line %d, col %d: %s", line, col, typErr.Error())
+		return fmt.Errorf("invalid JSON at line %d, col %d: %w", line, col, typErr)
 	}
 	return fmt.Errorf("invalid JSON: %w", err)
 }

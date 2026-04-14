@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -40,7 +41,6 @@ func TestValidate_CommandRequired(t *testing.T) {
 		{"path", "/usr/bin/claude", false},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			err := Validate(ProfileDef{Name: "p", Command: tc.command})
@@ -148,6 +148,38 @@ func TestLoad_VersionMismatch(t *testing.T) {
 	}
 }
 
+func TestLoad_VersionMissing(t *testing.T) {
+	t.Parallel()
+	path := writeFile(t, `{"profiles": []}`)
+
+	_, _, err := Load(path)
+	if err == nil {
+		t.Fatal("Load(no version) err=nil, want error")
+	}
+	if !strings.Contains(err.Error(), `missing required "version" field`) {
+		t.Errorf("error %q missing hint", err)
+	}
+}
+
+func TestLoad_TypeMismatchError_ReportsLineCol(t *testing.T) {
+	t.Parallel()
+	body := "{\n  \"version\": \"one\",\n  \"profiles\": []\n}\n"
+	path := writeFile(t, body)
+
+	_, _, err := Load(path)
+	if err == nil {
+		t.Fatal("Load(type mismatch) err=nil, want error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "invalid JSON at line ") || !strings.Contains(msg, "col ") {
+		t.Errorf("error %q missing line/col annotation", msg)
+	}
+	var typErr *json.UnmarshalTypeError
+	if !errors.As(err, &typErr) {
+		t.Errorf("error chain does not contain *json.UnmarshalTypeError: %v", err)
+	}
+}
+
 func TestLoad_UserDefinesDefault_NoBuiltinInjected(t *testing.T) {
 	t.Parallel()
 	path := writeFile(t, `{"version":1,"profiles":[
@@ -191,6 +223,31 @@ func TestLoad_BuiltinInjectedWhenMissing(t *testing.T) {
 	last := profiles[len(profiles)-1]
 	if last.Name != BuiltinDefaultName || !last.Builtin {
 		t.Errorf("last profile=%+v, want builtin default", last)
+	}
+}
+
+func TestLoad_EffectiveIsDeepCopy(t *testing.T) {
+	t.Parallel()
+	path := writeFile(t, `{"version":1,"profiles":[
+		{"name":"opus","command":"claude","args":["--model=opus"],"env":{"K":"v"}}
+	]}`)
+
+	cfg, effective, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load err=%v", err)
+	}
+	if cfg == nil {
+		t.Fatal("cfg=nil")
+	}
+	// Mutate effective; cfg must stay untouched.
+	effective[0].Args[0] = "--evil"
+	effective[0].Env["K"] = "mutated"
+
+	if cfg.Profiles[0].Args[0] != "--model=opus" {
+		t.Errorf("cfg Args aliased: %q", cfg.Profiles[0].Args[0])
+	}
+	if cfg.Profiles[0].Env["K"] != "v" {
+		t.Errorf("cfg Env aliased: %q", cfg.Profiles[0].Env["K"])
 	}
 }
 
@@ -300,7 +357,6 @@ func TestExpandPath(t *testing.T) {
 		{"~notuser/path", "~notuser/path"},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.in, func(t *testing.T) {
 			got, err := expandPath(tc.in)
 			if err != nil {

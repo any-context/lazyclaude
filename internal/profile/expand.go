@@ -11,6 +11,10 @@ import (
 // The input is never passed to a shell; no command execution occurs.
 // A leading `~` is only expanded at position 0; `~` elsewhere is preserved
 // (e.g. `/tmp/~foo` stays untouched).
+//
+// This is intended to be called by the P1 launch-spec layer when turning
+// a ProfileDef into an exec argv, not by Load/Validate. Parse-time values
+// are kept verbatim so the config.json is round-trippable.
 func expandPath(s string) (string, error) {
 	if s == "" {
 		return "", nil
