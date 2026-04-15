@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/any-context/lazyclaude/internal/core/config"
 	"github.com/any-context/lazyclaude/internal/core/shell"
 	"github.com/any-context/lazyclaude/internal/core/tmux"
+	"github.com/any-context/lazyclaude/internal/profile"
 	"github.com/google/uuid"
 )
 
@@ -34,6 +36,9 @@ type Manager struct {
 	log           *slog.Logger
 	mu            sync.Mutex // guards Create/Delete/Sync against concurrent GC
 	syncFailCount int        // consecutive Sync calls where HasSession returned false
+
+	profilesMu sync.RWMutex
+	profiles   []profile.ProfileDef
 }
 
 // NewManager creates a session manager.
@@ -52,6 +57,72 @@ func NewManager(store *Store, tmuxClient tmux.Client, paths config.Paths, log *s
 // Store returns the underlying store.
 func (m *Manager) Store() *Store {
 	return m.store
+}
+
+// SetProfiles installs the effective profile list (as returned by
+// profile.Load). Passing a nil or empty slice makes ResolveProfile fall back
+// to the built-in default for any resolution request.
+func (m *Manager) SetProfiles(profs []profile.ProfileDef) {
+	m.profilesMu.Lock()
+	defer m.profilesMu.Unlock()
+	if len(profs) == 0 {
+		m.profiles = nil
+		return
+	}
+	m.profiles = append([]profile.ProfileDef(nil), profs...)
+}
+
+// Profiles returns a copy of the currently installed profile list.
+func (m *Manager) Profiles() []profile.ProfileDef {
+	m.profilesMu.RLock()
+	defer m.profilesMu.RUnlock()
+	if len(m.profiles) == 0 {
+		return nil
+	}
+	out := make([]profile.ProfileDef, len(m.profiles))
+	copy(out, m.profiles)
+	return out
+}
+
+// ResolveProfile returns the profile to use for a launch request.
+//
+// An empty name resolves to the effective default: the first profile with
+// Default=true, a user-defined profile literally named "default", or the
+// built-in default. A non-empty name is looked up by exact match; if the
+// name is absent from the installed profile set and is not the reserved
+// built-in name, an error is returned so callers surface a user-actionable
+// diagnostic.
+func (m *Manager) ResolveProfile(name string) (profile.ProfileDef, error) {
+	m.profilesMu.RLock()
+	defer m.profilesMu.RUnlock()
+
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		if len(m.profiles) == 0 {
+			return profile.BuiltinDefault(), nil
+		}
+		def, _ := profile.ResolveDefault(m.profiles)
+		return def, nil
+	}
+	for _, p := range m.profiles {
+		if p.Name == trimmed {
+			return p, nil
+		}
+	}
+	if trimmed == profile.BuiltinDefaultName {
+		return profile.BuiltinDefault(), nil
+	}
+	return profile.ProfileDef{}, fmt.Errorf("profile %q not defined in %s", trimmed, profileConfigHint())
+}
+
+// profileConfigHint returns a human-readable path to config.json for use in
+// error messages. Falls back to the literal path string when the home
+// directory cannot be resolved.
+func profileConfigHint() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".lazyclaude", "config.json")
+	}
+	return "$HOME/.lazyclaude/config.json"
 }
 
 // Load reads sessions from disk and syncs with tmux.
@@ -155,32 +226,82 @@ func (m *Manager) EnsureClaudeConfigured(dirPath string) {
 	}
 }
 
-// Create creates a new session with a tmux window.
+// Create creates a new plain session with a tmux window running Claude Code.
 // Holds the manager mutex throughout to prevent GC from orphaning the new session.
 func (m *Manager) Create(ctx context.Context, dirPath string) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.createLocked(ctx, dirPath, "", nil)
+}
+
+// CreateOpts creates a plain session with profile/options support.
+func (m *Manager) CreateOpts(ctx context.Context, dirPath, profileName, options string) (*Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.createLocked(ctx, dirPath, profileName, splitOptions(options))
+}
+
+func (m *Manager) createLocked(ctx context.Context, dirPath, profileName string, extraFlags []string) (*Session, error) {
+	prof, err := m.ResolveProfile(profileName)
+	if err != nil {
+		return nil, err
+	}
+	if err := profile.Validate(prof); err != nil {
+		return nil, fmt.Errorf("profile %q: %w", prof.Name, err)
+	}
+	spec, err := NewLaunchSpec(prof)
+	if err != nil {
+		return nil, err
+	}
+
 	name := m.store.GenerateName(dirPath)
 	id := uuid.New().String()
-	m.log.Info("create.start", "name", name, "id", id[:8], "path", dirPath)
+	m.log.Info("create.start", "name", name, "id", id[:8], "path", dirPath, "profile", prof.Name)
+
+	absPath, err := filepath.Abs(dirPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve path %q: %w", dirPath, err)
+	}
 
 	sess := Session{
 		ID:        id,
 		Name:      name,
 		Path:      dirPath,
+		Profile:   profileNameForPersist(prof),
+		Flags:     append([]string(nil), extraFlags...),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 
-	claudeCmd := m.buildClaudeCommand(sess)
-
-	absPath, err := filepath.Abs(sess.Path)
+	claudeCmd, cleanupFn, err := m.buildClaudeCommand(sess, spec)
 	if err != nil {
-		return nil, fmt.Errorf("resolve path %q: %w", sess.Path, err)
+		return m.launchErrorSession(ctx, sess, err)
+	}
+	launchSuccess := false
+	if cleanupFn != nil {
+		defer func() {
+			if !launchSuccess {
+				cleanupFn()
+			}
+		}()
 	}
 
-	env := claudeEnv(id)
-	return m.launchSession(ctx, sess, claudeCmd, absPath, "", env)
+	env := claudeEnv(id, spec)
+	result, launchErr := m.launchSession(ctx, sess, claudeCmd, absPath, "", env)
+	if launchErr == nil {
+		launchSuccess = true
+	}
+	return result, launchErr
+}
+
+// profileNameForPersist returns the profile name to persist in state.json.
+// Built-in defaults are stored as the empty string so that resume uses
+// whatever the user's current default is, rather than pinning to "default".
+func profileNameForPersist(p profile.ProfileDef) string {
+	if p.Builtin {
+		return ""
+	}
+	return p.Name
 }
 
 // worktreeOpts configures how a worktree session is created.
@@ -191,6 +312,8 @@ type worktreeOpts struct {
 	ProjectRoot string
 	Role        Role // RoleNone for regular worktree, RoleWorker for worker sessions
 	SkipGitAdd  bool // true for ResumeWorktree (directory already exists)
+	Profile     string
+	ExtraFlags  []string
 }
 
 // createWorktreeSession is the shared implementation for CreateWorktree,
@@ -232,30 +355,101 @@ func (m *Manager) createWorktreeSession(ctx context.Context, opts worktreeOpts) 
 		}
 	}
 
-	return m.launchWorktreeSession(ctx, opts.Name, wtPath, opts.UserPrompt, opts.ProjectRoot, opts.Role, "", false)
+	return m.launchWorktreeSession(ctx, launchWorktreeArgs{
+		Name:        opts.Name,
+		WtPath:      wtPath,
+		UserPrompt:  opts.UserPrompt,
+		ProjectRoot: opts.ProjectRoot,
+		Role:        opts.Role,
+		Profile:     opts.Profile,
+		ExtraFlags:  opts.ExtraFlags,
+	})
+}
+
+// WorktreeOpts configures CreateWorktreeOpts.
+type WorktreeOpts struct {
+	Name        string
+	Prompt      string
+	ProjectRoot string
+	Profile     string // profile name; empty means effective default
+	Options     string // space-separated extra args appended to claude invocation
+}
+
+// WorkerOpts configures CreateWorkerSessionOpts.
+type WorkerOpts struct {
+	Name        string
+	Prompt      string
+	ProjectRoot string
+	Profile     string
+	Options     string
+}
+
+// PMOpts configures CreatePMSessionOpts.
+type PMOpts struct {
+	ProjectRoot string
+	Profile     string
+	Options     string
+}
+
+// ResumeWorktreeOpts configures ResumeWorktreeOpts.
+type ResumeWorktreeOpts struct {
+	WorktreePath string
+	Prompt       string
+	ProjectRoot  string
+	Profile      string
+	Options      string
+}
+
+// CreateWorktreeOpts creates a git worktree and launches Claude Code with an
+// initial prompt, using the supplied profile and extra options.
+func (m *Manager) CreateWorktreeOpts(ctx context.Context, opts WorktreeOpts) (*Session, error) {
+	return m.createWorktreeSession(ctx, worktreeOpts{
+		Name:        opts.Name,
+		UserPrompt:  opts.Prompt,
+		ProjectRoot: opts.ProjectRoot,
+		Role:        RoleWorker,
+		Profile:     opts.Profile,
+		ExtraFlags:  splitOptions(opts.Options),
+	})
 }
 
 // CreateWorktree creates a git worktree and launches Claude Code with an initial prompt.
 // The worktree is placed at {projectRoot}/.lazyclaude/worktrees/{name}/.
+//
+// Deprecated: Use CreateWorktreeOpts.
 func (m *Manager) CreateWorktree(ctx context.Context, name, userPrompt, projectRoot string) (*Session, error) {
-	return m.createWorktreeSession(ctx, worktreeOpts{
+	return m.CreateWorktreeOpts(ctx, WorktreeOpts{
 		Name:        name,
-		UserPrompt:  userPrompt,
+		Prompt:      userPrompt,
 		ProjectRoot: projectRoot,
+	})
+}
+
+// ResumeWorktreeOpts launches Claude Code in an existing worktree directory,
+// using the supplied profile and extra options. Unlike CreateWorktreeOpts, it
+// does not run `git worktree add`.
+func (m *Manager) ResumeWorktreeOpts(ctx context.Context, opts ResumeWorktreeOpts) (*Session, error) {
+	return m.createWorktreeSession(ctx, worktreeOpts{
+		Name:        filepath.Base(opts.WorktreePath),
+		WtPath:      opts.WorktreePath,
+		UserPrompt:  opts.Prompt,
+		ProjectRoot: opts.ProjectRoot,
 		Role:        RoleWorker,
+		SkipGitAdd:  true,
+		Profile:     opts.Profile,
+		ExtraFlags:  splitOptions(opts.Options),
 	})
 }
 
 // ResumeWorktree launches Claude Code in an existing worktree directory.
 // Unlike CreateWorktree, it does not run `git worktree add`.
+//
+// Deprecated: Use ResumeWorktreeOpts.
 func (m *Manager) ResumeWorktree(ctx context.Context, worktreePath, userPrompt, projectRoot string) (*Session, error) {
-	return m.createWorktreeSession(ctx, worktreeOpts{
-		Name:        filepath.Base(worktreePath),
-		WtPath:      worktreePath,
-		UserPrompt:  userPrompt,
-		ProjectRoot: projectRoot,
-		Role:        RoleWorker,
-		SkipGitAdd:  true,
+	return m.ResumeWorktreeOpts(ctx, ResumeWorktreeOpts{
+		WorktreePath: worktreePath,
+		Prompt:       userPrompt,
+		ProjectRoot:  projectRoot,
 	})
 }
 
@@ -308,46 +502,92 @@ func (m *Manager) launchSession(ctx context.Context, sess Session, claudeCmd, st
 	return &sess, nil
 }
 
+// launchWorktreeArgs bundles the inputs to launchWorktreeSession.
+type launchWorktreeArgs struct {
+	Name        string
+	WtPath      string
+	UserPrompt  string
+	ProjectRoot string
+	Role        Role
+	SessionID   string // reused when non-empty (resume of a GC'd session)
+	Resume      bool   // emit --resume <id> instead of --session-id <id>
+	Profile     string
+	ExtraFlags  []string
+}
+
 // launchWorktreeSession is the shared logic for creating a tmux window
-// running Claude Code in a worktree directory. Called by CreateWorktree,
-// ResumeWorktree, ResumeSession, and CreateWorkerSession. Caller must hold m.mu.
-// When sessionID is non-empty it is reused (resume of a GC'd session);
-// otherwise a fresh UUID is generated. When resume is true, the launcher
-// script includes --resume so Claude Code resumes an existing conversation.
-func (m *Manager) launchWorktreeSession(ctx context.Context, name, wtPath, userPrompt, projectRoot string, role Role, sessionID string, resume bool) (*Session, error) {
-	id := sessionID
+// running Claude Code in a worktree directory. Called by createWorktreeSession
+// and ResumeSession. Caller must hold m.mu. When args.SessionID is non-empty
+// it is reused; otherwise a fresh UUID is generated.
+func (m *Manager) launchWorktreeSession(ctx context.Context, args launchWorktreeArgs) (*Session, error) {
+	id := args.SessionID
 	if id == "" {
 		id = uuid.New().String()
 	}
-	systemPrompt := BuildWorkerPrompt(ctx, wtPath, projectRoot, id)
+
+	prof, err := m.ResolveProfile(args.Profile)
+	if err != nil {
+		return m.launchErrorSession(ctx, Session{
+			ID:        id,
+			Name:      args.Name,
+			Path:      args.WtPath,
+			Role:      args.Role,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}, err)
+	}
+	if err := profile.Validate(prof); err != nil {
+		return m.launchErrorSession(ctx, Session{
+			ID:        id,
+			Name:      args.Name,
+			Path:      args.WtPath,
+			Role:      args.Role,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}, fmt.Errorf("profile %q: %w", prof.Name, err))
+	}
+	spec, err := NewLaunchSpec(prof)
+	if err != nil {
+		return m.launchErrorSession(ctx, Session{
+			ID:        id,
+			Name:      args.Name,
+			Path:      args.WtPath,
+			Role:      args.Role,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}, err)
+	}
+
+	systemPrompt := BuildWorkerPrompt(ctx, args.WtPath, args.ProjectRoot, id)
 
 	sess := Session{
 		ID:        id,
-		Name:      name,
-		Path:      wtPath,
-		Role:      role,
+		Name:      args.Name,
+		Path:      args.WtPath,
+		Role:      args.Role,
+		Profile:   profileNameForPersist(prof),
+		Flags:     append([]string(nil), args.ExtraFlags...),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 
-	claudeCmd, startDir, cleanupFn, err := m.buildLaunchCommand(sess, systemPrompt, userPrompt, resume)
+	claudeCmd, startDir, cleanupFn, err := m.buildLaunchCommand(sess, spec, systemPrompt, args.UserPrompt, args.Resume)
 	if err != nil {
 		return m.launchErrorSession(ctx, sess, err)
 	}
+	launchSuccess := false
 	if cleanupFn != nil {
-		launchSuccess := false
 		defer func() {
 			if !launchSuccess {
 				cleanupFn()
 			}
 		}()
-		result, launchErr := m.launchSession(ctx, sess, claudeCmd, startDir, projectRoot, claudeEnv(id))
-		if launchErr == nil {
-			launchSuccess = true
-		}
-		return result, launchErr
 	}
-	return m.launchSession(ctx, sess, claudeCmd, startDir, projectRoot, claudeEnv(id))
+	result, launchErr := m.launchSession(ctx, sess, claudeCmd, startDir, args.ProjectRoot, claudeEnv(id, spec))
+	if launchErr == nil {
+		launchSuccess = true
+	}
+	return result, launchErr
 }
 
 // launchErrorSession creates a tmux window that displays an error message.
@@ -357,33 +597,76 @@ func (m *Manager) launchErrorSession(ctx context.Context, sess Session, buildErr
 	errMsg := fmt.Sprintf("echo 'lazyclaude: session launch failed'; echo; echo '%s'; echo; echo 'Press Enter to close'; read",
 		strings.ReplaceAll(buildErr.Error(), "'", "'\\''"))
 	abs, _ := filepath.Abs(".")
-	result, launchErr := m.launchSession(ctx, sess, errMsg, abs, "", claudeEnv(sess.ID))
+	result, launchErr := m.launchSession(ctx, sess, errMsg, abs, "", claudeEnv(sess.ID, LaunchSpec{}))
 	if launchErr != nil {
 		return nil, fmt.Errorf("%w (additionally, tmux window creation failed: %v)", buildErr, launchErr)
 	}
 	return result, nil
 }
 
-// buildLaunchCommand builds the tmux command for launching Claude Code
-// in a worktree session. Writes a temp launcher script and returns
-// the command, start directory, optional cleanup function, and error.
-// When resume is true, the script includes --resume to continue an
-// existing Claude Code conversation.
-func (m *Manager) buildLaunchCommand(sess Session, systemPrompt, userPrompt string, resume bool) (claudeCmd string, startDir string, cleanup func(), err error) {
-	launcher, launcherErr := writeWorktreeLauncher(systemPrompt, userPrompt, m.paths.RuntimeDir, sess.ID, resume)
-	if launcherErr != nil {
-		return "", "", nil, fmt.Errorf("write launcher: %w", launcherErr)
+// buildClaudeCommand builds the tmux command for launching a plain Claude
+// Code session via a self-deleting launcher script. Returns the shell command,
+// a cleanup function (called on launch failure), and an error.
+func (m *Manager) buildClaudeCommand(sess Session, spec LaunchSpec) (string, func(), error) {
+	launcher, err := writeLauncher(launcherOpts{
+		Spec:       spec,
+		SessionID:  sess.ID,
+		Resume:     false,
+		RuntimeDir: m.paths.RuntimeDir,
+		ExtraFlags: sess.Flags,
+	})
+	if err != nil {
+		return "", nil, fmt.Errorf("write launcher: %w", err)
+	}
+	cmd := fmt.Sprintf("exec \"$SHELL\" -lic 'exec bash %s'", shell.Quote(launcher))
+	return cmd, func() { os.Remove(launcher) }, nil
+}
+
+// buildLaunchCommand builds the tmux command for launching Claude Code in a
+// worktree session. Writes a temp launcher script and returns the command,
+// start directory, optional cleanup function, and error.
+func (m *Manager) buildLaunchCommand(sess Session, spec LaunchSpec, systemPrompt, userPrompt string, resume bool) (claudeCmd string, startDir string, cleanup func(), err error) {
+	launcher, werr := writeLauncher(launcherOpts{
+		Spec:         spec,
+		SessionID:    sess.ID,
+		Resume:       resume,
+		RuntimeDir:   m.paths.RuntimeDir,
+		SystemPrompt: systemPrompt,
+		UserPrompt:   userPrompt,
+		ExtraFlags:   sess.Flags,
+	})
+	if werr != nil {
+		return "", "", nil, fmt.Errorf("write launcher: %w", werr)
 	}
 	claudeCmd = fmt.Sprintf("exec \"$SHELL\" -lic 'exec bash %s'", shell.Quote(launcher))
 	return claudeCmd, sess.Path, func() { os.Remove(launcher) }, nil
 }
 
-// writeWorktreeLauncher writes a shell script that launches claude with
-// --append-system-prompt and an optional user prompt as positional argument.
-// When resume is true, the script uses --resume <id> instead of --session-id <id>
-// so Claude Code resumes an existing conversation.
-// Returns the script path. The script self-deletes after execution.
-func writeWorktreeLauncher(systemPrompt, userPrompt, runtimeDir, sessionID string, resume bool) (string, error) {
+// launcherOpts drives writeLauncher. SystemPrompt and UserPrompt are
+// optional; when empty, the corresponding flags are omitted.
+type launcherOpts struct {
+	Spec         LaunchSpec
+	SessionID    string
+	Resume       bool
+	RuntimeDir   string
+	SystemPrompt string
+	UserPrompt   string
+	ExtraFlags   []string
+}
+
+// writeLauncher writes a self-deleting shell script that exec's the Claude
+// Code CLI with the resolved profile command, profile args, session-identity
+// flags, optional system/user prompts, and any extra flags. Returns the
+// script path. The caller should remove the file on launch failure; on
+// success the script rm's itself at the top.
+//
+// The script lives in /tmp with a `lazyclaude-wt-*.sh` basename (no spaces,
+// no quotes) so wrapping the path in the outer `exec "$SHELL" -lic 'exec bash
+// <path>'` is safe despite the enclosing single quotes.
+func writeLauncher(opts launcherOpts) (string, error) {
+	if opts.Spec.Command == "" {
+		return "", errors.New("launcher: empty command")
+	}
 	f, err := os.CreateTemp("", "lazyclaude-wt-*.sh")
 	if err != nil {
 		return "", fmt.Errorf("create temp script: %w", err)
@@ -393,28 +676,46 @@ func writeWorktreeLauncher(systemPrompt, userPrompt, runtimeDir, sessionID strin
 	sb.WriteString("#!/bin/sh\n")
 	// Self-delete the launcher script (already read by shell at this point).
 	sb.WriteString("rm -f \"$0\"\n")
-	sb.WriteString("exec claude")
-	if resume {
-		// Use --resume <id> to continue an existing conversation.
-		// --session-id and --resume cannot be combined without --fork-session.
-		sb.WriteString(" --resume ")
-	} else {
-		sb.WriteString(" --session-id ")
+	sb.WriteString("exec ")
+	sb.WriteString(shell.Quote(opts.Spec.Command))
+	for _, a := range opts.Spec.Args {
+		sb.WriteString(" ")
+		sb.WriteString(shell.Quote(a))
 	}
-	sb.WriteString(shell.Quote(sessionID))
 
-	// Inject hooks via --settings file so ~/.claude/settings.json stays untouched.
-	// Using a file avoids shell quoting issues with nested single quotes in hook commands.
-	if settingsFile, err := config.WriteHooksSettingsFile(runtimeDir); err == nil {
+	// Session identity: inject --session-id or --resume unless the profile
+	// or caller has already supplied one. Composite check prevents Claude
+	// Code from receiving the flag twice.
+	if !hasSessionFlag(opts.Spec.Args, opts.ExtraFlags) {
+		if opts.Resume {
+			sb.WriteString(" --resume ")
+		} else {
+			sb.WriteString(" --session-id ")
+		}
+		sb.WriteString(shell.Quote(opts.SessionID))
+	}
+
+	// Inject hooks via --settings file so ~/.claude/settings.json stays
+	// untouched. Writing to a file avoids shell quoting issues with nested
+	// single quotes in hook commands.
+	if settingsFile, werr := config.WriteHooksSettingsFile(opts.RuntimeDir); werr == nil {
 		sb.WriteString(" --settings ")
 		sb.WriteString(shell.Quote(settingsFile))
 	}
 
-	sb.WriteString(" --append-system-prompt ")
-	sb.WriteString(shell.Quote(systemPrompt))
-	if strings.TrimSpace(userPrompt) != "" {
+	if strings.TrimSpace(opts.SystemPrompt) != "" {
+		sb.WriteString(" --append-system-prompt ")
+		sb.WriteString(shell.Quote(opts.SystemPrompt))
+	}
+
+	for _, fl := range opts.ExtraFlags {
 		sb.WriteString(" ")
-		sb.WriteString(shell.Quote(userPrompt))
+		sb.WriteString(shell.Quote(fl))
+	}
+
+	if strings.TrimSpace(opts.UserPrompt) != "" {
+		sb.WriteString(" ")
+		sb.WriteString(shell.Quote(opts.UserPrompt))
 	}
 	sb.WriteString("\n")
 
@@ -503,49 +804,45 @@ func (m *Manager) ToggleProjectExpanded(projectID string) {
 	m.store.ToggleProjectExpanded(projectID)
 }
 
-// hasSessionFlag returns true if flags already contain --resume or --session-id,
-// indicating that the caller manages session identity explicitly.
-func hasSessionFlag(flags []string) bool {
-	for _, f := range flags {
-		// Exact match for "--session-id" (two-token form) and prefix match for
-		// "--session-id=" (single-token --session-id=value form).
-		if f == "--resume" || f == "--session-id" || strings.HasPrefix(f, "--session-id=") {
-			return true
+// hasSessionFlag returns true when any of the supplied argument slices
+// contains a flag that manages Claude Code session identity (--session-id or
+// --resume, both bare and = forms). Callers pass the composite of
+// profile.Args and sess.Flags so neither source is allowed to collide with
+// lazyclaude's own identity flags.
+func hasSessionFlag(argSets ...[]string) bool {
+	for _, args := range argSets {
+		for _, f := range args {
+			if f == "--resume" || f == "--session-id" {
+				return true
+			}
+			if strings.HasPrefix(f, "--session-id=") || strings.HasPrefix(f, "--resume=") {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-func (m *Manager) buildClaudeCommand(sess Session) string {
-	claudeArgs := "claude"
-
-	// sess.ID is always uuid.New().String() (hex + hyphens only), safe to embed
-	// inside the outer 'exec ...' single-quoted context without shell.Quote.
-	if !hasSessionFlag(sess.Flags) {
-		claudeArgs += " --session-id " + sess.ID
+// splitOptions converts a space-separated options string into a token slice.
+// Quoted arguments are not supported; this is a documented limitation that
+// matches the rest of the options-input surface. Empty input returns nil.
+func splitOptions(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
 	}
-
-	// Inject hooks via --settings file so ~/.claude/settings.json stays untouched.
-	// The path is NOT wrapped in shell.Quote because the entire claudeArgs string
-	// is already inside single quotes in the final command. Nesting single quotes
-	// would break the shell parsing. Runtime dir paths (/tmp, /var/folders/...)
-	// never contain spaces or special characters.
-	if settingsFile, err := config.WriteHooksSettingsFile(m.paths.RuntimeDir); err == nil {
-		claudeArgs += " --settings " + settingsFile
-	}
-
-	for _, f := range sess.Flags {
-		claudeArgs += " " + shell.Quote(f)
-	}
-	// exec $SHELL -lic runs in login shell so PATH (.zshrc/.profile) is loaded
-	return fmt.Sprintf("exec \"$SHELL\" -lic 'exec %s'", claudeArgs)
+	return strings.Fields(s)
 }
 
 // claudeEnv returns environment variables to pass to Claude Code sessions.
 // Inherits auth tokens and Claude-specific vars from the parent process.
 // Server port/token are NOT injected as env vars — hooks always discover the
 // server via lock file scanning so they survive server restarts.
-func claudeEnv(sessionID string) map[string]string {
+//
+// When spec.Env is non-empty, those values are merged last and so override
+// any passthrough keys that happen to collide (profile wins). Values in
+// spec.Env are already $VAR-expanded by NewLaunchSpec.
+func claudeEnv(sessionID string, spec LaunchSpec) map[string]string {
 	env := map[string]string{
 		"CLAUDE_CODE_AUTO_CONNECT_IDE": "true",
 	}
@@ -563,6 +860,9 @@ func claudeEnv(sessionID string) map[string]string {
 		if val := os.Getenv(key); val != "" {
 			env[key] = val
 		}
+	}
+	for k, v := range spec.Env {
+		env[k] = v
 	}
 	return env
 }
@@ -595,19 +895,30 @@ func termSize() (int, int) {
 	return w, h
 }
 
-// CreatePMSession creates a PM (Project Manager) session for the given projectRoot.
-// Returns an error if a PM session already exists for this projectRoot.
-// Holds the manager mutex throughout to prevent races.
-func (m *Manager) CreatePMSession(ctx context.Context, projectRoot string) (*Session, error) {
+// CreatePMSessionOpts creates a PM (Project Manager) session with profile
+// and extra-options support.
+func (m *Manager) CreatePMSessionOpts(ctx context.Context, opts PMOpts) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if p := m.store.FindProjectByPath(projectRoot); p != nil && p.PM != nil {
-		return nil, fmt.Errorf("pm session already exists for %q", projectRoot)
+	if p := m.store.FindProjectByPath(opts.ProjectRoot); p != nil && p.PM != nil {
+		return nil, fmt.Errorf("pm session already exists for %q", opts.ProjectRoot)
+	}
+
+	prof, err := m.ResolveProfile(opts.Profile)
+	if err != nil {
+		return nil, err
+	}
+	if err := profile.Validate(prof); err != nil {
+		return nil, fmt.Errorf("profile %q: %w", prof.Name, err)
+	}
+	spec, err := NewLaunchSpec(prof)
+	if err != nil {
+		return nil, err
 	}
 
 	var workerLines []string
-	if p := m.store.FindProjectByPath(projectRoot); p != nil {
+	if p := m.store.FindProjectByPath(opts.ProjectRoot); p != nil {
 		for _, s := range p.Sessions {
 			if s.Role == RoleWorker {
 				workerLines = append(workerLines, fmt.Sprintf("- %s (id=%s, path=%s)", s.Name, s.ID, s.Path))
@@ -617,44 +928,57 @@ func (m *Manager) CreatePMSession(ctx context.Context, projectRoot string) (*Ses
 	workerList := strings.Join(workerLines, "\n")
 
 	id := uuid.New().String()
-	systemPrompt := BuildPMPrompt(ctx, projectRoot, id, workerList)
+	systemPrompt := BuildPMPrompt(ctx, opts.ProjectRoot, id, workerList)
 
 	sess := Session{
 		ID:        id,
 		Name:      "pm",
-		Path:      projectRoot,
+		Path:      opts.ProjectRoot,
 		Role:      RolePM,
+		Profile:   profileNameForPersist(prof),
+		Flags:     splitOptions(opts.Options),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 
-	claudeCmd, startDir, cleanupFn, buildErr := m.buildLaunchCommand(sess, systemPrompt, "", false)
+	claudeCmd, startDir, cleanupFn, buildErr := m.buildLaunchCommand(sess, spec, systemPrompt, "", false)
 	if buildErr != nil {
 		return m.launchErrorSession(ctx, sess, buildErr)
 	}
 
-	m.log.Info("createPMSession", "id", id[:8], "path", projectRoot)
+	m.log.Info("createPMSession", "id", id[:8], "path", opts.ProjectRoot, "profile", prof.Name)
 
+	launchSuccess := false
 	if cleanupFn != nil {
-		launchSuccess := false
 		defer func() {
 			if !launchSuccess {
 				cleanupFn()
 			}
 		}()
-		result, launchErr := m.launchSession(ctx, sess, claudeCmd, startDir, projectRoot, claudeEnv(id))
-		if launchErr == nil {
-			launchSuccess = true
-		}
-		return result, launchErr
 	}
-	return m.launchSession(ctx, sess, claudeCmd, startDir, projectRoot, claudeEnv(id))
+	result, launchErr := m.launchSession(ctx, sess, claudeCmd, startDir, opts.ProjectRoot, claudeEnv(id, spec))
+	if launchErr == nil {
+		launchSuccess = true
+	}
+	return result, launchErr
+}
+
+// CreatePMSession creates a PM (Project Manager) session for the given projectRoot.
+// Returns an error if a PM session already exists for this projectRoot.
+//
+// Deprecated: Use CreatePMSessionOpts.
+func (m *Manager) CreatePMSession(ctx context.Context, projectRoot string) (*Session, error) {
+	return m.CreatePMSessionOpts(ctx, PMOpts{ProjectRoot: projectRoot})
 }
 
 // ResumeSession resumes a session by ID. If the session is still in state.json,
 // it cleans up the old entry and re-launches at the same worktree path. If the
 // session has been GC'd, it uses the provided worktree name to reconstruct the
 // path and launches a new session with the original ID preserved.
+//
+// The session's persisted Profile (state.json) is re-resolved through
+// ResolveProfile. If the profile name no longer exists, a clear error is
+// returned so the user can restore or rename the profile.
 //
 // Only local worktree/worker sessions can be resumed. Remote sessions and PM
 // sessions are rejected because they require different launch semantics.
@@ -694,7 +1018,17 @@ func (m *Manager) ResumeSession(ctx context.Context, id, prompt, name string) (*
 		savedOld := *old
 		m.store.Remove(id)
 
-		result, launchErr := m.launchWorktreeSession(ctx, old.Name, old.Path, prompt, projectRoot, old.Role, id, true)
+		result, launchErr := m.launchWorktreeSession(ctx, launchWorktreeArgs{
+			Name:        old.Name,
+			WtPath:      old.Path,
+			UserPrompt:  prompt,
+			ProjectRoot: projectRoot,
+			Role:        old.Role,
+			SessionID:   id,
+			Resume:      true,
+			Profile:     old.Profile,
+			ExtraFlags:  old.Flags,
+		})
 		if launchErr != nil {
 			// Restore old record since launch failed.
 			m.store.Add(savedOld, projectRoot)
@@ -735,7 +1069,15 @@ func (m *Manager) ResumeSession(ctx context.Context, id, prompt, name string) (*
 		return nil, fmt.Errorf("worktree directory not found: %s", wtPath)
 	}
 
-	return m.launchWorktreeSession(ctx, name, wtPath, prompt, projectRoot, RoleWorker, id, true)
+	return m.launchWorktreeSession(ctx, launchWorktreeArgs{
+		Name:        name,
+		WtPath:      wtPath,
+		UserPrompt:  prompt,
+		ProjectRoot: projectRoot,
+		Role:        RoleWorker,
+		SessionID:   id,
+		Resume:      true,
+	})
 }
 
 // findProjectRootForWorktree searches registered projects for one whose
@@ -755,14 +1097,28 @@ func (m *Manager) findProjectRootForWorktree(name string) (string, error) {
 	return "", fmt.Errorf("no project found containing worktree %q", name)
 }
 
-// CreateWorkerSession creates a git worktree and launches Claude Code with the
-// Worker role and MCP-integrated system prompt.
-func (m *Manager) CreateWorkerSession(ctx context.Context, name, userPrompt, projectRoot string) (*Session, error) {
+// CreateWorkerSessionOpts creates a git worktree and launches Claude Code
+// with the Worker role, MCP-integrated system prompt, and the supplied
+// profile/options.
+func (m *Manager) CreateWorkerSessionOpts(ctx context.Context, opts WorkerOpts) (*Session, error) {
 	return m.createWorktreeSession(ctx, worktreeOpts{
-		Name:        name,
-		UserPrompt:  userPrompt,
-		ProjectRoot: projectRoot,
+		Name:        opts.Name,
+		UserPrompt:  opts.Prompt,
+		ProjectRoot: opts.ProjectRoot,
 		Role:        RoleWorker,
+		Profile:     opts.Profile,
+		ExtraFlags:  splitOptions(opts.Options),
 	})
 }
 
+// CreateWorkerSession creates a git worktree and launches Claude Code with the
+// Worker role and MCP-integrated system prompt.
+//
+// Deprecated: Use CreateWorkerSessionOpts.
+func (m *Manager) CreateWorkerSession(ctx context.Context, name, userPrompt, projectRoot string) (*Session, error) {
+	return m.CreateWorkerSessionOpts(ctx, WorkerOpts{
+		Name:        name,
+		Prompt:      userPrompt,
+		ProjectRoot: projectRoot,
+	})
+}

@@ -373,12 +373,12 @@ func TestExpandPath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
-			got, err := expandPath(tc.in)
+			got, err := ExpandPath(tc.in)
 			if err != nil {
-				t.Fatalf("expandPath(%q) err=%v", tc.in, err)
+				t.Fatalf("ExpandPath(%q) err=%v", tc.in, err)
 			}
 			if got != tc.want {
-				t.Errorf("expandPath(%q)=%q, want %q", tc.in, got, tc.want)
+				t.Errorf("ExpandPath(%q)=%q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}
@@ -391,21 +391,21 @@ func TestExpandPath_HomeOnly(t *testing.T) {
 	}
 	t.Setenv("HOME", home) // ensure $HOME expansion matches os.UserHomeDir on this platform
 
-	got, err := expandPath("$HOME/bin")
+	got, err := ExpandPath("$HOME/bin")
 	if err != nil {
 		t.Fatalf("expandPath err=%v", err)
 	}
 	want := home + "/bin"
 	if got != want {
-		t.Errorf("expandPath($HOME/bin)=%q, want %q", got, want)
+		t.Errorf("ExpandPath($HOME/bin)=%q, want %q", got, want)
 	}
 
-	got2, err := expandPath("${HOME}/bin")
+	got2, err := ExpandPath("${HOME}/bin")
 	if err != nil {
 		t.Fatalf("expandPath err=%v", err)
 	}
 	if got2 != want {
-		t.Errorf("expandPath(${HOME}/bin)=%q, want %q", got2, want)
+		t.Errorf("ExpandPath(${HOME}/bin)=%q, want %q", got2, want)
 	}
 }
 

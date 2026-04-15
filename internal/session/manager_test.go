@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/any-context/lazyclaude/internal/core/config"
@@ -759,6 +760,35 @@ func TestManager_launchWorktreeSession_RoleWorker_UsesWorkerPrompt(t *testing.T)
 
 // --- buildClaudeCommand tests ---
 
+// readLauncherScript extracts the launcher script path from the shell command
+// returned by buildClaudeCommand (format: `exec "$SHELL" -lic 'exec bash <path>'`)
+// and reads its contents. Registers a cleanup to remove the file.
+func readLauncherScript(t *testing.T, cmd string, cleanup func()) string {
+	t.Helper()
+	if cleanup != nil {
+		t.Cleanup(cleanup)
+	}
+	const marker = "exec bash "
+	idx := strings.Index(cmd, marker)
+	if idx < 0 {
+		t.Fatalf("launcher marker missing in cmd=%q", cmd)
+	}
+	rest := cmd[idx+len(marker):]
+	// rest is `<quoted-path>'` — trim trailing single quote and surrounding
+	// quoting produced by shell.Quote.
+	rest = strings.TrimSuffix(rest, "'")
+	rest = strings.Trim(rest, "'")
+	data, err := os.ReadFile(rest)
+	if err != nil {
+		t.Fatalf("read launcher %s: %v", rest, err)
+	}
+	return string(data)
+}
+
+func defaultSpec() session.LaunchSpec {
+	return session.LaunchSpec{Command: "claude"}
+}
+
 func TestBuildClaudeCommand_IncludesSessionID(t *testing.T) {
 	t.Parallel()
 	mgr, _ := newTestManager(t)
@@ -768,8 +798,10 @@ func TestBuildClaudeCommand_IncludesSessionID(t *testing.T) {
 		Name: "test",
 		Path: "/tmp/test",
 	}
-	cmd := mgr.BuildClaudeCommand(sess)
-	assert.Contains(t, cmd, "--session-id aaaabbbb-cccc-dddd-eeee-ffffffffffff")
+	cmd, cleanup, err := mgr.BuildClaudeCommand(sess, defaultSpec())
+	require.NoError(t, err)
+	content := readLauncherScript(t, cmd, cleanup)
+	assert.Contains(t, content, "--session-id 'aaaabbbb-cccc-dddd-eeee-ffffffffffff'")
 }
 
 func TestBuildClaudeCommand_SkipsSessionID_WhenResumeFlag(t *testing.T) {
@@ -782,8 +814,10 @@ func TestBuildClaudeCommand_SkipsSessionID_WhenResumeFlag(t *testing.T) {
 		Path:  "/tmp/test",
 		Flags: []string{"--resume"},
 	}
-	cmd := mgr.BuildClaudeCommand(sess)
-	assert.NotContains(t, cmd, "--session-id")
+	cmd, cleanup, err := mgr.BuildClaudeCommand(sess, defaultSpec())
+	require.NoError(t, err)
+	content := readLauncherScript(t, cmd, cleanup)
+	assert.NotContains(t, content, "--session-id")
 }
 
 func TestBuildClaudeCommand_SkipsSessionID_WhenSessionIDFlag(t *testing.T) {
@@ -796,10 +830,11 @@ func TestBuildClaudeCommand_SkipsSessionID_WhenSessionIDFlag(t *testing.T) {
 		Path:  "/tmp/test",
 		Flags: []string{"--session-id", "explicit-value"},
 	}
-	cmd := mgr.BuildClaudeCommand(sess)
-	// Should not inject a second --session-id; only the one from Flags
-	assert.NotContains(t, cmd, "aaaabbbb-cccc-dddd-eeee-ffffffffffff")
-	assert.Contains(t, cmd, "explicit-value")
+	cmd, cleanup, err := mgr.BuildClaudeCommand(sess, defaultSpec())
+	require.NoError(t, err)
+	content := readLauncherScript(t, cmd, cleanup)
+	assert.NotContains(t, content, "'aaaabbbb-cccc-dddd-eeee-ffffffffffff'")
+	assert.Contains(t, content, "'explicit-value'")
 }
 
 func TestBuildClaudeCommand_SkipsSessionID_WhenSessionIDEqualForm(t *testing.T) {
@@ -812,14 +847,16 @@ func TestBuildClaudeCommand_SkipsSessionID_WhenSessionIDEqualForm(t *testing.T) 
 		Path:  "/tmp/test",
 		Flags: []string{"--session-id=other-uuid"},
 	}
-	cmd := mgr.BuildClaudeCommand(sess)
-	assert.NotContains(t, cmd, "aaaabbbb-cccc-dddd-eeee-ffffffffffff")
-	assert.Contains(t, cmd, "--session-id=other-uuid")
+	cmd, cleanup, err := mgr.BuildClaudeCommand(sess, defaultSpec())
+	require.NoError(t, err)
+	content := readLauncherScript(t, cmd, cleanup)
+	assert.NotContains(t, content, "'aaaabbbb-cccc-dddd-eeee-ffffffffffff'")
+	assert.Contains(t, content, "'--session-id=other-uuid'")
 }
 
 func TestClaudeEnv_InjectsSessionID(t *testing.T) {
 	t.Parallel()
-	env := session.ClaudeEnv("sess-abc")
+	env := session.ClaudeEnv("sess-abc", session.LaunchSpec{})
 
 	assert.Equal(t, "sess-abc", env["LAZYCLAUDE_SESSION_ID"])
 	assert.Equal(t, "true", env["CLAUDE_CODE_AUTO_CONNECT_IDE"])
@@ -833,7 +870,7 @@ func TestClaudeEnv_InjectsSessionID(t *testing.T) {
 
 func TestClaudeEnv_OmitsEmptySessionID(t *testing.T) {
 	t.Parallel()
-	env := session.ClaudeEnv("")
+	env := session.ClaudeEnv("", session.LaunchSpec{})
 
 	_, hasID := env["LAZYCLAUDE_SESSION_ID"]
 	assert.False(t, hasID, "empty sessionID should not be set")
@@ -841,6 +878,6 @@ func TestClaudeEnv_OmitsEmptySessionID(t *testing.T) {
 
 func TestClaudeEnv_AlwaysHasAutoConnectIDE(t *testing.T) {
 	t.Parallel()
-	env := session.ClaudeEnv("")
+	env := session.ClaudeEnv("", session.LaunchSpec{})
 	assert.Equal(t, "true", env["CLAUDE_CODE_AUTO_CONNECT_IDE"])
 }
