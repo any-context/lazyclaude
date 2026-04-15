@@ -226,6 +226,9 @@ func (s *DaemonServer) handleSessionCreate(w http.ResponseWriter, r *http.Reques
 
 	switch req.SessionType {
 	case "plain", "":
+		// Profile/Options support for plain sessions is deferred to Phase 2b.
+		// The API fields are accepted but not forwarded to keep the schema
+		// forward-compatible without breaking existing callers.
 		sess, err = s.mgr.Create(ctx, req.Path)
 	case "worktree":
 		sess, err = s.mgr.CreateWorktreeOpts(ctx, session.WorktreeOpts{
