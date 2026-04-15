@@ -14,6 +14,9 @@ Use `lazyclaude sessions -v` to see additional details including tmux window IDs
 lazyclaude msg create --from %s --name <worker-name> --type worker --prompt "<initial task>"
 ```
 
+Optional flags: `--profile <name>` selects a launch profile (empty uses the effective default).
+`--options "--flag1 --flag2"` appends extra flags to the claude invocation (space-separated).
+
 ### Resume a terminated Worker session
 
 ```bash

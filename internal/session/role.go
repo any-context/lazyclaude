@@ -51,7 +51,8 @@ func localFileReader() fileReader {
 //
 //  1. {projectRoot}/.lazyclaude/worktree/{branch}/.lazyclaude/prompts/{filename}
 //  2. {projectRoot}/.lazyclaude/prompts/{filename}
-//  3. Embedded default (compiled into the binary)
+//  3. {homeDir}/.lazyclaude/prompts/{filename}
+//  4. Embedded default (compiled into the binary)
 //
 // Note: the worktree custom config path uses "worktree" (singular) for per-branch
 // configuration, which is distinct from the "worktrees" (plural) directory where
@@ -59,8 +60,9 @@ func localFileReader() fileReader {
 //
 // worktreePath may be empty (e.g. for PM sessions that run in the project root).
 // When empty, the worktree-level search is skipped.
+// homeDir may be empty; when empty, layer 3 is skipped.
 // projectRoot must be an absolute path; relative paths fall back to the default.
-func resolvePrompt(projectRoot, worktreePath, filename, fallback string, read fileReader) string {
+func resolvePrompt(projectRoot, worktreePath, homeDir, filename, fallback string, read fileReader) string {
 	if !filepath.IsAbs(projectRoot) {
 		return fallback
 	}
@@ -81,6 +83,16 @@ func resolvePrompt(projectRoot, worktreePath, filename, fallback string, read fi
 	projectCandidate := filepath.Join(projectRoot, ".lazyclaude", "prompts", filename)
 	if strings.HasPrefix(projectCandidate, cleanRoot) {
 		candidates = append(candidates, projectCandidate)
+	}
+
+	// Layer 3: $HOME/.lazyclaude/prompts/ — global user override.
+	// Use prefix check (not just ".." scan) to defend against absolute paths like "/etc/passwd".
+	if homeDir != "" {
+		homePromptsRoot := filepath.Clean(filepath.Join(homeDir, ".lazyclaude", "prompts")) + string(os.PathSeparator)
+		homeCandidate := filepath.Clean(filepath.Join(homeDir, ".lazyclaude", "prompts", filename))
+		if strings.HasPrefix(homeCandidate, homePromptsRoot) {
+			candidates = append(candidates, homeCandidate)
+		}
 	}
 
 	for _, candidate := range candidates {
@@ -113,11 +125,17 @@ func branchFromWorktreePath(projectRoot, wtPath string) string {
 	return branch
 }
 
+// userHomeDir returns os.UserHomeDir() or empty string on error.
+func userHomeDir() string {
+	home, _ := os.UserHomeDir()
+	return home
+}
+
 // BuildPMPrompt generates the system prompt injected into a PM session at launch.
 // The final prompt is composed of pm.md (role-specific, custom-searchable) +
 // base.md (shared communication reference, always embedded).
 func BuildPMPrompt(ctx context.Context, projectRoot, sessionID, workerList string) string {
-	roleTmpl := resolvePrompt(projectRoot, "", "pm.md", prompts.DefaultPM(), localFileReader())
+	roleTmpl := resolvePrompt(projectRoot, "", userHomeDir(), "pm.md", prompts.DefaultPM(), localFileReader())
 	baseTmpl := prompts.DefaultBase()
 
 	role := fmt.Sprintf(roleTmpl,
@@ -135,7 +153,7 @@ func BuildPMPrompt(ctx context.Context, projectRoot, sessionID, workerList strin
 // The final prompt is composed of worker.md (role-specific, custom-searchable) +
 // base.md (shared communication reference, always embedded).
 func BuildWorkerPrompt(ctx context.Context, worktreePath, projectRoot, sessionID string) string {
-	roleTmpl := resolvePrompt(projectRoot, worktreePath, "worker.md", prompts.DefaultWorker(), localFileReader())
+	roleTmpl := resolvePrompt(projectRoot, worktreePath, userHomeDir(), "worker.md", prompts.DefaultWorker(), localFileReader())
 	baseTmpl := prompts.DefaultBase()
 
 	role := fmt.Sprintf(roleTmpl,
