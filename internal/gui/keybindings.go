@@ -237,16 +237,9 @@ func (a *App) setupGlobalKeybindings() error {
 	// j/k navigation in worktree profile chooser
 	worktreeProfileMove := func(delta int) func(*gocui.Gui, *gocui.View) error {
 		return func(g *gocui.Gui, v *gocui.View) error {
-			chooser.Move(&chooser.State{Items: a.dialog.ProfileItems, Cursor: a.dialog.ProfileCursor}, delta)
-			// Move updates a copy; apply the delta manually.
-			next := a.dialog.ProfileCursor + delta
-			if next < 0 {
-				next = 0
-			}
-			if n := len(a.dialog.ProfileItems); n > 0 && next >= n {
-				next = n - 1
-			}
-			a.dialog.ProfileCursor = next
+			s := &chooser.State{Items: a.dialog.ProfileItems, Cursor: a.dialog.ProfileCursor}
+			chooser.Move(s, delta)
+			a.dialog.ProfileCursor = s.Cursor
 			if pv, err2 := g.View("worktree-profile-chooser"); err2 == nil {
 				renderProfileChooser(pv, a.dialog.ProfileItems, a.dialog.ProfileCursor)
 			}
@@ -440,14 +433,9 @@ func (a *App) setupGlobalKeybindings() error {
 	// j/k navigation in resume profile chooser
 	resumeProfileMove := func(delta int) func(*gocui.Gui, *gocui.View) error {
 		return func(g *gocui.Gui, v *gocui.View) error {
-			next := a.dialog.ProfileCursor + delta
-			if next < 0 {
-				next = 0
-			}
-			if n := len(a.dialog.ProfileItems); n > 0 && next >= n {
-				next = n - 1
-			}
-			a.dialog.ProfileCursor = next
+			s := &chooser.State{Items: a.dialog.ProfileItems, Cursor: a.dialog.ProfileCursor}
+			chooser.Move(s, delta)
+			a.dialog.ProfileCursor = s.Cursor
 			if pv, err2 := g.View("worktree-resume-profile-chooser"); err2 == nil {
 				renderProfileChooser(pv, a.dialog.ProfileItems, a.dialog.ProfileCursor)
 			}
@@ -577,14 +565,9 @@ func (a *App) setupGlobalKeybindings() error {
 	// j/k and arrow navigation in profile chooser
 	profileChooserMove := func(delta int) func(*gocui.Gui, *gocui.View) error {
 		return func(g *gocui.Gui, v *gocui.View) error {
-			next := a.dialog.ProfileCursor + delta
-			if next < 0 {
-				next = 0
-			}
-			if n := len(a.dialog.ProfileItems); n > 0 && next >= n {
-				next = n - 1
-			}
-			a.dialog.ProfileCursor = next
+			s := &chooser.State{Items: a.dialog.ProfileItems, Cursor: a.dialog.ProfileCursor}
+			chooser.Move(s, delta)
+			a.dialog.ProfileCursor = s.Cursor
 			renderProfileChooser(v, a.dialog.ProfileItems, a.dialog.ProfileCursor)
 			return nil
 		}
