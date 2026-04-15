@@ -803,7 +803,7 @@ func (a *App) closeRenameInput(g *gocui.Gui) {
 // showWorktreeDialog creates the worktree input views (branch + prompt + profile + options).
 // Returns true if all views were created successfully and dialog is active.
 func (a *App) showWorktreeDialog(g *gocui.Gui) bool {
-	items := loadProfileItems()
+	items := a.sessionProfileItems()
 	defaultIdx := chooser.IndexOfDefault(items)
 	a.dialog.ProfileItems = items
 	a.dialog.ProfileCursor = defaultIdx
@@ -1006,7 +1006,7 @@ func (a *App) closeWorktreeChooser(g *gocui.Gui) {
 
 // showWorktreeResumePrompt creates the resume dialog (prompt + profile + options).
 func (a *App) showWorktreeResumePrompt(g *gocui.Gui, worktreeName string) bool {
-	items := loadProfileItems()
+	items := a.sessionProfileItems()
 	defaultIdx := chooser.IndexOfDefault(items)
 	a.dialog.ProfileItems = items
 	a.dialog.ProfileCursor = defaultIdx
@@ -1213,12 +1213,27 @@ func loadProfileItems() []chooser.Item {
 	return items
 }
 
+// sessionProfileItems returns profile chooser items for the session provider.
+// When a.sessions.ProfileItems() returns a non-empty list, that list is used
+// so that the session Manager and the GUI always share the same profile
+// snapshot (re-read from disk and synced into the Manager each time a dialog
+// opens). Falls back to the package-level loadProfileItems() when sessions is
+// nil or returns empty (e.g. mock providers in headless tests).
+func (a *App) sessionProfileItems() []chooser.Item {
+	if a.sessions != nil {
+		if items := a.sessions.ProfileItems(); len(items) > 0 {
+			return items
+		}
+	}
+	return loadProfileItems()
+}
+
 // showProfileDialog opens the standalone profile chooser dialog used by the
 // n, N, and P actions. confirmKind specifies which session type to create
 // ("session", "session_cwd", "pm_session") and sessionPath is the path to
 // pass on confirm (empty for session_cwd, projectRoot for pm_session).
 func (a *App) showProfileDialog(g *gocui.Gui, confirmKind, sessionPath string) bool {
-	items := loadProfileItems()
+	items := a.sessionProfileItems()
 	defaultIdx := chooser.IndexOfDefault(items)
 	a.dialog.ProfileItems = items
 	a.dialog.ProfileCursor = defaultIdx

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/any-context/lazyclaude/internal/core/model"
+	"github.com/any-context/lazyclaude/internal/gui/chooser"
 	"github.com/any-context/lazyclaude/internal/gui/keymap"
 	"github.com/jesseduffield/gocui"
 	"github.com/stretchr/testify/assert"
@@ -232,6 +233,7 @@ func (m *miniSessionProvider) CreatePMSessionWithOpts(_, _, _ string) error     
 func (m *miniSessionProvider) CreateWorkerSession(_, _, _ string) error               { return nil }
 func (m *miniSessionProvider) CreateWithOpts(_, _, _ string) error                    { return nil }
 func (m *miniSessionProvider) CreateAtPaneCWDWithOpts(_, _ string) error              { return nil }
+func (m *miniSessionProvider) ProfileItems() []chooser.Item                           { return nil }
 
 // --- test helpers ---
 

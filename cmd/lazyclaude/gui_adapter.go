@@ -5,11 +5,16 @@ import (
 	"sync"
 	"time"
 
+	"os"
+	"path/filepath"
+
 	"github.com/any-context/lazyclaude/internal/core/config"
 	"github.com/any-context/lazyclaude/internal/core/model"
 	"github.com/any-context/lazyclaude/internal/daemon"
 	"github.com/any-context/lazyclaude/internal/gui"
+	"github.com/any-context/lazyclaude/internal/gui/chooser"
 	"github.com/any-context/lazyclaude/internal/notify"
+	"github.com/any-context/lazyclaude/internal/profile"
 	"github.com/any-context/lazyclaude/internal/session"
 )
 
@@ -380,6 +385,35 @@ func (a *guiCompositeAdapter) CreatePMSessionWithOpts(projectRoot, profile, opti
 
 func (a *guiCompositeAdapter) CreateWorkerSession(name, prompt, projectRoot string) error {
 	return a.commands.CreateWorkerSession(a.resolveTarget(projectRoot), name, prompt)
+}
+
+// ProfileItems re-reads ~/.lazyclaude/config.json and syncs the profile list
+// into the session Manager, then returns chooser.Item values for the GUI.
+// This ensures the GUI and Manager always share the same profile snapshot,
+// even if config.json was edited while the app is running.
+// Falls back to the builtin default when config is absent or invalid.
+func (a *guiCompositeAdapter) ProfileItems() []chooser.Item {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return []chooser.Item{{Label: profile.BuiltinDefaultName, Default: true, Data: profile.BuiltinDefaultName}}
+	}
+	configPath := filepath.Join(home, ".lazyclaude", "config.json")
+	_, profs, loadErr := profile.Load(configPath)
+	if loadErr != nil || len(profs) == 0 {
+		return []chooser.Item{{Label: profile.BuiltinDefaultName, Default: true, Data: profile.BuiltinDefaultName}}
+	}
+	// Sync newly read profiles into the Manager so backend resolution matches.
+	a.localMgr.SetProfiles(profs)
+	defProfile, _ := profile.ResolveDefault(profs)
+	items := make([]chooser.Item, len(profs))
+	for i, p := range profs {
+		items[i] = chooser.Item{
+			Label:   p.Name,
+			Default: p.Name == defProfile.Name,
+			Data:    p.Name,
+		}
+	}
+	return items
 }
 
 // resolveTarget builds an OperationTarget from a project root path.

@@ -7,6 +7,7 @@ import (
 
 	"github.com/any-context/lazyclaude/internal/core/model"
 	"github.com/any-context/lazyclaude/internal/gui"
+	"github.com/any-context/lazyclaude/internal/gui/chooser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -88,6 +89,7 @@ func (m *mockSessionProvider) CreatePMSessionWithOpts(_, _, _ string) error     
 func (m *mockSessionProvider) CreateWorkerSession(_, _, _ string) error                 { return nil }
 func (m *mockSessionProvider) CreateWithOpts(_, _, _ string) error                      { return nil }
 func (m *mockSessionProvider) CreateAtPaneCWDWithOpts(_, _ string) error                { return nil }
+func (m *mockSessionProvider) ProfileItems() []chooser.Item                             { return nil }
 
 func (m *mockSessionProvider) getSentChoices() []sentChoice {
 	m.mu.Lock()
