@@ -2,9 +2,6 @@ package session
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"runtime"
 	"sync"
 	"time"
 )
@@ -69,22 +66,16 @@ func (gc *GC) collect(ctx context.Context) {
 	now := time.Now()
 	sessions := gc.svc.Sessions()
 	for _, s := range sessions {
-		if s.Status == StatusDead || s.Status == StatusOrphan {
+		// Only delete Dead sessions (pane has exited). Orphan means the tmux
+		// session was temporarily unreachable (e.g. high load causing HasSession
+		// to return false), NOT that the window is actually gone. Deleting Orphan
+		// sessions was causing state.json wipeout during heavy go test runs.
+		if s.Status == StatusDead {
 			if now.Sub(s.CreatedAt) < gcGracePeriod {
 				gc.debugLog("gc.skip.grace", "name", s.Name, "age", now.Sub(s.CreatedAt))
 				continue
 			}
 			gc.debugLog("gc.delete", "name", s.Name, "id", s.ID[:8], "status", s.Status)
-			// Crash diagnosis: log GC deletes with stack trace.
-			if f, err := os.OpenFile("/tmp/lazyclaude/crash.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
-				fmt.Fprintf(f, "[%s] GC DELETE name=%s status=%s age=%s\n", time.Now().Format(time.RFC3339), s.Name, s.Status, time.Since(s.CreatedAt))
-				buf := make([]byte, 2048)
-				n := runtime.Stack(buf, false)
-				f.Write(buf[:n])
-				fmt.Fprintln(f)
-				f.Sync()
-				f.Close()
-			}
 			gc.svc.Delete(ctx, s.ID)
 		}
 	}

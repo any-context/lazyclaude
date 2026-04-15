@@ -48,7 +48,10 @@ func TestGC_RemovesDeadSessions(t *testing.T) {
 	gc.Stop()
 }
 
-func TestGC_RemovesOrphanSessions(t *testing.T) {
+func TestGC_DoesNotRemoveOrphanSessions(t *testing.T) {
+	// GC must NOT delete Orphan sessions. Orphan means HasSession returned false
+	// transiently (e.g. under high load), not that the window is actually gone.
+	// Deleting Orphan sessions caused state.json wipeout during go test runs.
 	t.Parallel()
 	tmp := t.TempDir()
 	paths := config.TestPaths(tmp)
@@ -62,16 +65,16 @@ func TestGC_RemovesOrphanSessions(t *testing.T) {
 	// Backdate past GC grace period
 	store.BackdateForTest(sess.ID, 30*time.Second)
 
-	// Mock: tmux session exists but has no matching window (orphan)
-	mock.Sessions["lazyclaude"] = []tmux.WindowInfo{}
-	mock.Panes["lazyclaude"] = []tmux.PaneInfo{}
+	// Mark as Orphan directly (simulate what SyncWithTmux would do)
+	store.MarkAllStatus(session.StatusOrphan)
 
 	gc := session.NewGC(mgr, 50*time.Millisecond)
 	gc.Start()
 
-	require.Eventually(t, func() bool {
-		return len(mgr.Sessions()) == 0
-	}, 2*time.Second, 50*time.Millisecond)
+	// Wait several GC cycles — session must remain
+	time.Sleep(300 * time.Millisecond)
+
+	assert.Len(t, mgr.Sessions(), 1, "GC must not delete Orphan sessions")
 
 	gc.Stop()
 }
@@ -142,7 +145,8 @@ func TestGC_GracePeriodSkipsNewSessions(t *testing.T) {
 	gc.Stop()
 }
 
-func TestGC_DeletesAfterGracePeriod(t *testing.T) {
+func TestGC_DeletesDeadAfterGracePeriod(t *testing.T) {
+	// GC deletes Dead (pane exited) sessions once past the grace period.
 	t.Parallel()
 	tmp := t.TempDir()
 	paths := config.TestPaths(tmp)
@@ -150,25 +154,27 @@ func TestGC_DeletesAfterGracePeriod(t *testing.T) {
 	mock := tmux.NewMockClient()
 	mgr := session.NewManager(store, mock, paths, nil)
 
-	// Create a session and backdate CreatedAt to be outside grace period
-	_, err := mgr.Create(context.Background(), "/home/user/app")
+	sess, err := mgr.Create(context.Background(), "/home/user/app")
 	require.NoError(t, err)
 
-	// Backdate the session to make it older than grace period
-	all := store.All()
-	require.Len(t, all, 1)
-	store.BackdateForTest(all[0].ID, 30*time.Second)
+	// Backdate past grace period
+	store.BackdateForTest(sess.ID, 30*time.Second)
 
-	// Mock: tmux session exists but no matching window (orphan)
-	mock.Sessions["lazyclaude"] = []tmux.WindowInfo{}
-	mock.Panes["lazyclaude"] = []tmux.PaneInfo{}
+	// Mock: tmux session exists, window present but pane is dead
+	windowName := sess.WindowName()
+	mock.Sessions["lazyclaude"] = []tmux.WindowInfo{
+		{ID: "@1", Name: windowName, Session: "lazyclaude"},
+	}
+	mock.Panes["lazyclaude"] = []tmux.PaneInfo{
+		{ID: "%1", Window: "@1", PID: 0, Dead: true},
+	}
 
 	gc := session.NewGC(mgr, 50*time.Millisecond)
 	gc.Start()
 
 	require.Eventually(t, func() bool {
 		return len(mgr.Sessions()) == 0
-	}, 2*time.Second, 50*time.Millisecond, "GC should delete session after grace period")
+	}, 2*time.Second, 50*time.Millisecond, "GC should delete Dead session after grace period")
 
 	gc.Stop()
 }
