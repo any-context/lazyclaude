@@ -233,12 +233,12 @@ func TestManager_Sync_ConsecutiveFailCount(t *testing.T) {
 	require.Len(t, all, 1)
 	assert.Equal(t, session.StatusRunning, all[0].Status, "2nd failure should not orphan")
 
-	// Third Sync: failCount=3 → orphan
+	// Third Sync: failCount=3 → still Running (no longer marks Orphan on HasSession failure)
 	err = mgr.Sync(ctx)
 	require.NoError(t, err)
 	all = mgr.Sessions()
 	require.Len(t, all, 1)
-	assert.Equal(t, session.StatusOrphan, all[0].Status, "3rd failure should orphan")
+	assert.Equal(t, session.StatusRunning, all[0].Status, "3rd failure must not orphan: HasSession transient failure should not mark live sessions as Orphan")
 }
 
 func TestManager_Sync_FailCountResetsOnSuccess(t *testing.T) {
