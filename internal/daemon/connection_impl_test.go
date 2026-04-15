@@ -57,6 +57,9 @@ func (m *mockClientAPI) SubscribeNotifications(context.Context) (<-chan Notifica
 func (m *mockClientAPI) PendingNotifications(context.Context) ([]*ToolNotificationInfo, error) {
 	return nil, nil
 }
+func (m *mockClientAPI) Profiles(context.Context) ([]ProfileDefAPI, string, error) {
+	return nil, "", nil
+}
 
 func TestExponentialBackoff(t *testing.T) {
 	b := NewExponentialBackoff(1*time.Second, 30*time.Second, 2)

@@ -664,6 +664,18 @@ func (rp *RemoteProvider) createWorkerSessionResp(name, prompt, projectRoot stri
 	})
 }
 
+// --- Profiles ---
+
+// Profiles fetches the remote daemon's profile list via GET /profiles.
+// Returns the profiles, any daemon-reported error string, and a transport error.
+func (rp *RemoteProvider) Profiles(ctx context.Context) ([]ProfileDefAPI, string, error) {
+	client, err := rp.conn.Client()
+	if err != nil {
+		return nil, "", fmt.Errorf("profiles: %w", err)
+	}
+	return client.Profiles(ctx)
+}
+
 // --- ConnectionAware ---
 
 func (rp *RemoteProvider) ConnectionState() ConnectionState {

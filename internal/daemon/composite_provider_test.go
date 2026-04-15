@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"context"
+	"sync"
 	"testing"
 
 	"github.com/any-context/lazyclaude/internal/core/model"
@@ -391,6 +393,275 @@ func TestCompositeProvider_CapturePreview_RemoteStillUsesLocal(t *testing.T) {
 	if len(remote.scrollbackCalls) != 0 || len(remote.historySizeCalls) != 0 {
 		t.Errorf("remote provider should not serve preview; got scrollback=%v history=%v", remote.scrollbackCalls, remote.historySizeCalls)
 	}
+}
+
+// --- Profile cache tests ---
+
+// stubProfileProvider extends stubProvider with profile fetching support.
+type stubProfileProvider struct {
+	stubProvider
+	profiles     []ProfileDefAPI
+	profileErr   string
+	fetchErr     error
+	fetchCount   int
+}
+
+func (s *stubProfileProvider) Profiles(_ context.Context) ([]ProfileDefAPI, string, error) {
+	s.fetchCount++
+	return s.profiles, s.profileErr, s.fetchErr
+}
+
+func TestCompositeProvider_Profiles_Success(t *testing.T) {
+	local := &stubProvider{connSt: Connected}
+	cp := NewCompositeProvider(local, nil)
+
+	want := []ProfileDefAPI{
+		{Name: "opus", Command: "claude", Args: []string{"--model=opus-4"}},
+	}
+	remote := &stubProfileProvider{
+		stubProvider: stubProvider{host: "srv", connSt: Connected},
+		profiles:     want,
+	}
+	cp.AddRemote("srv", remote)
+
+	got, errStr, err := cp.Profiles(context.Background(), "srv")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if errStr != "" {
+		t.Errorf("unexpected errStr: %q", errStr)
+	}
+	if len(got) != 1 || got[0].Name != "opus" {
+		t.Errorf("got profiles=%v, want [{opus ...}]", got)
+	}
+}
+
+func TestCompositeProvider_Profiles_CachesOnSecondCall(t *testing.T) {
+	local := &stubProvider{connSt: Connected}
+	cp := NewCompositeProvider(local, nil)
+
+	remote := &stubProfileProvider{
+		stubProvider: stubProvider{host: "srv", connSt: Connected},
+		profiles:     []ProfileDefAPI{{Name: "default", Command: "claude"}},
+	}
+	cp.AddRemote("srv", remote)
+
+	// First call fetches.
+	if _, _, err := cp.Profiles(context.Background(), "srv"); err != nil {
+		t.Fatal(err)
+	}
+	// Second call should use cache, not call remote again.
+	if _, _, err := cp.Profiles(context.Background(), "srv"); err != nil {
+		t.Fatal(err)
+	}
+	if remote.fetchCount != 1 {
+		t.Errorf("fetchCount=%d, want 1 (second call must use cache)", remote.fetchCount)
+	}
+}
+
+func TestCompositeProvider_Profiles_DaemonError(t *testing.T) {
+	local := &stubProvider{connSt: Connected}
+	cp := NewCompositeProvider(local, nil)
+
+	remote := &stubProfileProvider{
+		stubProvider: stubProvider{host: "srv", connSt: Connected},
+		profiles:     nil,
+		profileErr:   "invalid JSON at line 3, col 2: unexpected end",
+	}
+	cp.AddRemote("srv", remote)
+
+	got, errStr, err := cp.Profiles(context.Background(), "srv")
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if errStr == "" {
+		t.Error("expected non-empty daemon error string")
+	}
+	if got != nil {
+		t.Errorf("expected nil profiles on parse error, got %v", got)
+	}
+}
+
+func TestCompositeProvider_Profiles_UnknownHost(t *testing.T) {
+	local := &stubProvider{connSt: Connected}
+	cp := NewCompositeProvider(local, nil)
+
+	_, _, err := cp.Profiles(context.Background(), "unknown-host")
+	if err == nil {
+		t.Fatal("expected error for unknown host")
+	}
+}
+
+func TestCompositeProvider_Profiles_LocalHost(t *testing.T) {
+	// When host == "", Profiles() must delegate to the local provider if it
+	// implements profileFetcher.
+	localFetcher := &stubProfileProvider{
+		stubProvider: stubProvider{connSt: Connected},
+		profiles:     []ProfileDefAPI{{Name: "default", Command: "claude", Builtin: true}},
+	}
+	cp := NewCompositeProvider(localFetcher, nil)
+
+	got, errStr, err := cp.Profiles(context.Background(), "")
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if errStr != "" {
+		t.Errorf("unexpected errStr: %q", errStr)
+	}
+	if len(got) != 1 || got[0].Name != "default" {
+		t.Errorf("got profiles=%v, want [{default ...}]", got)
+	}
+}
+
+func TestCompositeProvider_Profiles_LocalHostNotFetcher(t *testing.T) {
+	// When the local provider does not implement profileFetcher, Profiles("")
+	// should return an error.
+	local := &stubProvider{connSt: Connected}
+	cp := NewCompositeProvider(local, nil)
+
+	_, _, err := cp.Profiles(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error when local provider does not support profiles")
+	}
+}
+
+func TestCompositeProvider_Profiles_NotFetcher(t *testing.T) {
+	local := &stubProvider{connSt: Connected}
+	cp := NewCompositeProvider(local, nil)
+
+	// stubProvider does not implement profileFetcher.
+	remote := &stubProvider{host: "srv", connSt: Connected}
+	cp.AddRemote("srv", remote)
+
+	_, _, err := cp.Profiles(context.Background(), "srv")
+	if err == nil {
+		t.Fatal("expected error when provider does not implement profileFetcher")
+	}
+}
+
+func TestCompositeProvider_RemoveRemote_ClearsProfileCache(t *testing.T) {
+	local := &stubProvider{connSt: Connected}
+	cp := NewCompositeProvider(local, nil)
+
+	remote := &stubProfileProvider{
+		stubProvider: stubProvider{host: "srv", connSt: Connected},
+		profiles:     []ProfileDefAPI{{Name: "default", Command: "claude"}},
+	}
+	cp.AddRemote("srv", remote)
+
+	// Populate the cache.
+	if _, _, err := cp.Profiles(context.Background(), "srv"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Remove the remote; cache must be cleared.
+	cp.RemoveRemote("srv")
+
+	cp.mu.RLock()
+	_, cacheExists := cp.profilesCache["srv"]
+	_, errExists := cp.profilesError["srv"]
+	cp.mu.RUnlock()
+
+	if cacheExists {
+		t.Error("profilesCache not cleared after RemoveRemote")
+	}
+	if errExists {
+		t.Error("profilesError not cleared after RemoveRemote")
+	}
+}
+
+// TestCompositeProvider_Profiles_StaleUpdateIgnored verifies that if
+// RemoveRemote is called between the fetch and the cache-write (dual-lock
+// pattern), the stale update is discarded.
+func TestCompositeProvider_Profiles_StaleUpdateIgnored(t *testing.T) {
+	local := &stubProvider{connSt: Connected}
+	cp := NewCompositeProvider(local, nil)
+
+	remote := &stubProfileProvider{
+		stubProvider: stubProvider{host: "srv", connSt: Connected},
+		profiles:     []ProfileDefAPI{{Name: "opus", Command: "claude"}},
+	}
+	cp.AddRemote("srv", remote)
+
+	// Manually do what Profiles() does but inject RemoveRemote between
+	// the fetch and the apply.
+	cp.mu.RLock()
+	rp, found := cp.remotes["srv"]
+	cp.mu.RUnlock()
+	if !found {
+		t.Fatal("provider not found")
+	}
+
+	pf, ok := rp.(profileFetcher)
+	if !ok {
+		t.Fatal("provider does not implement profileFetcher")
+	}
+	profiles, errStr, err := pf.Profiles(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Remove the remote before applying the cache write.
+	cp.RemoveRemote("srv")
+
+	cp.mu.Lock()
+	if cp.remotes["srv"] == rp {
+		cp.profilesCache["srv"] = profiles
+		if errStr != "" {
+			cp.profilesError["srv"] = errStr
+		}
+	}
+	cp.mu.Unlock()
+
+	// After RemoveRemote, the provider pointer won't match, so cache should
+	// remain empty.
+	cp.mu.RLock()
+	_, cacheExists := cp.profilesCache["srv"]
+	cp.mu.RUnlock()
+	if cacheExists {
+		t.Error("stale cache write should have been discarded after RemoveRemote")
+	}
+}
+
+// TestCompositeProvider_Sessions_StaleCacheRace verifies that concurrent
+// Sessions() calls and RemoveRemote() do not race under -race.
+// This is the regression test for the staleCache dual-lock fix.
+func TestCompositeProvider_Sessions_StaleCacheRace(t *testing.T) {
+	local := &stubProvider{connSt: Connected}
+	cp := NewCompositeProvider(local, nil)
+
+	remote := &stubProvider{
+		host:   "srv",
+		connSt: Connected,
+		sessions: []SessionInfo{
+			{ID: "s1", Name: "session-1"},
+		},
+	}
+	cp.AddRemote("srv", remote)
+
+	const goroutines = 20
+	var wg sync.WaitGroup
+	wg.Add(goroutines * 2)
+
+	// Goroutines calling Sessions() concurrently.
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			_, _ = cp.Sessions()
+		}()
+	}
+
+	// Goroutines concurrently removing and re-adding the remote.
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			cp.RemoveRemote("srv")
+			cp.AddRemote("srv", remote)
+		}()
+	}
+
+	wg.Wait()
+	// No assertion needed: -race will flag any detected data race.
 }
 
 func TestRemapRemoteWindow(t *testing.T) {

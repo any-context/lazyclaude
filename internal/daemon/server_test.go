@@ -311,3 +311,74 @@ func TestGenerateDaemonToken(t *testing.T) {
 		t.Errorf("want 32 chars, got %d", len(token))
 	}
 }
+
+// TestAPIVersion_Constant verifies that the health endpoint reports the
+// current APIVersion constant. This acts as a regression guard: if APIVersion
+// is bumped without updating the health handler, this test will catch it.
+func TestAPIVersion_Constant(t *testing.T) {
+	_, ts, _ := newTestServer(t)
+
+	resp, err := http.Get(ts.URL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var health HealthResponse
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		t.Fatal(err)
+	}
+	if health.APIVersion != APIVersion {
+		t.Errorf("health.api_version=%d, want constant APIVersion=%d", health.APIVersion, APIVersion)
+	}
+	if APIVersion != 4 {
+		t.Errorf("APIVersion constant=%d, want 4 (Phase 2b bump)", APIVersion)
+	}
+}
+
+// TestProfilesEndpoint_NoConfig verifies that GET /profiles returns an empty
+// profile list (with the builtin default) when the user has no config.json.
+func TestProfilesEndpoint_NoConfig(t *testing.T) {
+	_, ts, _ := newTestServer(t)
+
+	req := authReq("GET", ts.URL+"/profiles", "")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+
+	var result ProfileListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	// The daemon loads from the actual home directory; since config.json is
+	// almost certainly absent in a test environment, we expect either an empty
+	// list or the builtin default only. No parse error should be present.
+	if result.Error != "" {
+		t.Errorf("unexpected error: %q", result.Error)
+	}
+	// Profiles slice must not be nil (absent config returns the builtin default
+	// or empty list, never nil).
+	if result.Profiles == nil {
+		t.Error("Profiles should not be nil when config is absent")
+	}
+}
+
+// TestProfilesEndpoint_Unauthorized verifies that GET /profiles requires auth.
+func TestProfilesEndpoint_Unauthorized(t *testing.T) {
+	_, ts, _ := newTestServer(t)
+
+	resp, err := http.Get(ts.URL + "/profiles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("want 401, got %d", resp.StatusCode)
+	}
+}

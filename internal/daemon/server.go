@@ -23,6 +23,7 @@ import (
 	"github.com/any-context/lazyclaude/internal/core/event"
 	"github.com/any-context/lazyclaude/internal/core/model"
 	"github.com/any-context/lazyclaude/internal/core/tmux"
+	"github.com/any-context/lazyclaude/internal/profile"
 	"github.com/any-context/lazyclaude/internal/session"
 )
 
@@ -115,6 +116,9 @@ func NewDaemonServer(
 	mux.HandleFunc("POST /msg/send", s.withAuth(s.handleMsgSend))
 	mux.HandleFunc("POST /msg/create", s.withAuth(s.handleMsgCreate))
 	mux.HandleFunc("GET /msg/sessions", s.withAuth(s.handleMsgSessions))
+
+	// Profiles
+	mux.HandleFunc("GET /profiles", s.withAuth(s.handleProfiles))
 
 	// System info
 	mux.HandleFunc("GET /cwd", s.withAuth(s.handleCWD))
@@ -224,11 +228,27 @@ func (s *DaemonServer) handleSessionCreate(w http.ResponseWriter, r *http.Reques
 	case "plain", "":
 		sess, err = s.mgr.Create(ctx, req.Path)
 	case "worktree":
-		sess, err = s.mgr.CreateWorktree(ctx, req.Name, req.Prompt, req.ProjectRoot)
+		sess, err = s.mgr.CreateWorktreeOpts(ctx, session.WorktreeOpts{
+			Name:        req.Name,
+			Prompt:      req.Prompt,
+			ProjectRoot: req.ProjectRoot,
+			Profile:     req.Profile,
+			Options:     req.Options,
+		})
 	case "pm":
-		sess, err = s.mgr.CreatePMSession(ctx, req.ProjectRoot)
+		sess, err = s.mgr.CreatePMSessionOpts(ctx, session.PMOpts{
+			ProjectRoot: req.ProjectRoot,
+			Profile:     req.Profile,
+			Options:     req.Options,
+		})
 	case "worker":
-		sess, err = s.mgr.CreateWorkerSession(ctx, req.Name, req.Prompt, req.ProjectRoot)
+		sess, err = s.mgr.CreateWorkerSessionOpts(ctx, session.WorkerOpts{
+			Name:        req.Name,
+			Prompt:      req.Prompt,
+			ProjectRoot: req.ProjectRoot,
+			Profile:     req.Profile,
+			Options:     req.Options,
+		})
 	default:
 		http.Error(w, "invalid session_type", http.StatusBadRequest)
 		return
@@ -364,7 +384,13 @@ func (s *DaemonServer) handleWorktreeCreate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	sess, err := s.mgr.CreateWorktree(r.Context(), req.Name, req.Prompt, req.ProjectRoot)
+	sess, err := s.mgr.CreateWorktreeOpts(r.Context(), session.WorktreeOpts{
+		Name:        req.Name,
+		Prompt:      req.Prompt,
+		ProjectRoot: req.ProjectRoot,
+		Profile:     req.Profile,
+		Options:     req.Options,
+	})
 	if err != nil {
 		s.log.Printf("worktree/create: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -388,7 +414,13 @@ func (s *DaemonServer) handleWorktreeResume(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	sess, err := s.mgr.ResumeWorktree(r.Context(), req.WorktreePath, req.Prompt, req.ProjectRoot)
+	sess, err := s.mgr.ResumeWorktreeOpts(r.Context(), session.ResumeOpts{
+		WorktreePath: req.WorktreePath,
+		Prompt:       req.Prompt,
+		ProjectRoot:  req.ProjectRoot,
+		Profile:      req.Profile,
+		Options:      req.Options,
+	})
 	if err != nil {
 		s.log.Printf("worktree/resume: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -537,9 +569,19 @@ func (s *DaemonServer) handleMsgCreate(w http.ResponseWriter, r *http.Request) {
 
 	switch req.Type {
 	case "worker":
-		sess, err = s.mgr.CreateWorkerSession(ctx, req.Name, req.Prompt, project.Path)
+		sess, err = s.mgr.CreateWorkerSessionOpts(ctx, session.WorkerOpts{
+			Name:        req.Name,
+			Prompt:      req.Prompt,
+			ProjectRoot: project.Path,
+			Profile:     req.Profile,
+			Options:     req.Options,
+		})
 	case "pm":
-		sess, err = s.mgr.CreatePMSession(ctx, project.Path)
+		sess, err = s.mgr.CreatePMSessionOpts(ctx, session.PMOpts{
+			ProjectRoot: project.Path,
+			Profile:     req.Profile,
+			Options:     req.Options,
+		})
 	default:
 		http.Error(w, "type must be worker or pm", http.StatusBadRequest)
 		return
@@ -564,6 +606,71 @@ func (s *DaemonServer) handleMsgSessions(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	writeJSON(w, http.StatusOK, MsgSessionsResponse{Sessions: items})
+}
+
+// --- Profiles handler ---
+
+// handleProfiles returns the profile list from the daemon's own
+// $HOME/.lazyclaude/config.json. Because the daemon runs on the remote host,
+// os.UserHomeDir() automatically resolves to the remote user's home directory,
+// making this the canonical way to discover remote profiles.
+//
+// HTTP 200 is always returned; errors are encoded in ProfileListResponse.Error:
+//
+//   - Config present, valid:   Profiles: [...user profiles + builtin default]
+//   - Config absent:           Profiles: [{builtin default}], Error: ""
+//   - Config malformed:        Profiles: nil, Error: "invalid JSON at line N..."
+//   - Home dir unavailable:    Profiles: nil, Error: "resolve home dir: ..."
+//
+// Security note: ProfileDefAPI.Env carries raw environment variable values from
+// config.json. This endpoint is protected by token authentication
+// (X-Daemon-Authorization), so only callers that already possess the daemon
+// token receive these values. Users who store secrets in profile.env accept
+// that any authenticated API client can read them.
+func (s *DaemonServer) handleProfiles(w http.ResponseWriter, _ *http.Request) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		writeJSON(w, http.StatusOK, ProfileListResponse{
+			Error: fmt.Sprintf("resolve home dir: %v", err),
+		})
+		return
+	}
+	configPath := filepath.Join(home, ".lazyclaude", "config.json")
+	_, profiles, loadErr := profile.Load(configPath)
+	if loadErr != nil {
+		writeJSON(w, http.StatusOK, ProfileListResponse{
+			Error: loadErr.Error(),
+		})
+		return
+	}
+
+	apiProfiles := make([]ProfileDefAPI, len(profiles))
+	for i, p := range profiles {
+		apiProfiles[i] = profileDefToAPI(p)
+	}
+	writeJSON(w, http.StatusOK, ProfileListResponse{Profiles: apiProfiles})
+}
+
+// profileDefToAPI converts a profile.ProfileDef to the wire representation.
+func profileDefToAPI(p profile.ProfileDef) ProfileDefAPI {
+	api := ProfileDefAPI{
+		Name:        p.Name,
+		Command:     p.Command,
+		Description: p.Description,
+		Default:     p.Default,
+		Builtin:     p.Builtin,
+	}
+	if len(p.Args) > 0 {
+		api.Args = make([]string, len(p.Args))
+		copy(api.Args, p.Args)
+	}
+	if len(p.Env) > 0 {
+		api.Env = make(map[string]string, len(p.Env))
+		for k, v := range p.Env {
+			api.Env[k] = v
+		}
+	}
+	return api
 }
 
 // --- CWD handler ---

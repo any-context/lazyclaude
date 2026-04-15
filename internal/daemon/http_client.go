@@ -162,6 +162,18 @@ func (c *HTTPClient) HistorySize(ctx context.Context, id string) (int, error) {
 	return resp.Lines, nil
 }
 
+// --- Profiles ---
+
+// Profiles fetches the remote daemon's profile list via GET /profiles.
+// Returns the profiles, any daemon-reported error string, and a transport error.
+func (c *HTTPClient) Profiles(ctx context.Context) ([]ProfileDefAPI, string, error) {
+	var resp ProfileListResponse
+	if err := c.getJSON(ctx, "/profiles", &resp); err != nil {
+		return nil, "", fmt.Errorf("profiles: %w", err)
+	}
+	return resp.Profiles, resp.Error, nil
+}
+
 // --- System Info ---
 
 func (c *HTTPClient) CWD(ctx context.Context) (string, error) {

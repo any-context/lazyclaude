@@ -75,6 +75,14 @@ type ClientAPI interface {
 	// CWD returns the daemon process's working directory.
 	CWD(ctx context.Context) (string, error)
 
+	// --- Profiles ---
+
+	// Profiles returns the remote daemon's profile list.
+	// The string return value is the daemon-reported error (e.g. malformed
+	// config.json); it is empty on success. The error return value covers
+	// transport / HTTP failures.
+	Profiles(ctx context.Context) ([]ProfileDefAPI, string, error)
+
 	// --- Health / Lifecycle ---
 
 	// Health returns the daemon's health status.

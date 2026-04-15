@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -91,7 +92,8 @@ type MessageSender interface {
 //
 // Concurrency model:
 // - c.local is set at construction and never replaced; safe to read without mutex.
-// - c.remotes and c.staleCache are protected by c.mu.
+// - c.remotes, c.staleCache, c.profilesCache, and c.profilesError are
+//   protected by c.mu.
 type CompositeProvider struct {
 	mu      sync.RWMutex
 	local   SessionProvider
@@ -101,15 +103,27 @@ type CompositeProvider struct {
 	// staleCache holds the last known sessions from disconnected remotes.
 	// Entries are stored with Host already populated (set in Sessions()).
 	staleCache map[string][]SessionInfo
+
+	// profilesCache stores the most recent profile fetch result per host. The
+	// value is non-nil on success and nil when the daemon reported a config
+	// error. profilesError stores the corresponding error string (empty on
+	// success). A host absent from profilesCache means "not yet fetched".
+	// Error responses are cached for the lifetime of the connection; callers
+	// must RemoveRemote + AddRemote to trigger a re-fetch after the remote
+	// config is repaired.
+	profilesCache map[string][]ProfileDefAPI
+	profilesError map[string]string
 }
 
 // NewCompositeProvider creates a CompositeProvider with the given local backend.
 func NewCompositeProvider(local SessionProvider, router MessageSender) *CompositeProvider {
 	return &CompositeProvider{
-		local:      local,
-		remotes:    make(map[string]SessionProvider),
-		router:     router,
-		staleCache: make(map[string][]SessionInfo),
+		local:         local,
+		remotes:       make(map[string]SessionProvider),
+		router:        router,
+		staleCache:    make(map[string][]SessionInfo),
+		profilesCache: make(map[string][]ProfileDefAPI),
+		profilesError: make(map[string]string),
 	}
 }
 
@@ -127,12 +141,14 @@ func (c *CompositeProvider) RemoteProvider(host string) SessionProvider {
 	return c.remotes[host]
 }
 
-// RemoveRemote unregisters a remote provider.
+// RemoveRemote unregisters a remote provider and clears all associated caches.
 func (c *CompositeProvider) RemoveRemote(host string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.remotes, host)
 	delete(c.staleCache, host)
+	delete(c.profilesCache, host)
+	delete(c.profilesError, host)
 }
 
 // Sessions returns all sessions from local and remote providers merged.
@@ -149,6 +165,7 @@ func (c *CompositeProvider) Sessions() ([]SessionInfo, error) {
 	c.mu.RLock()
 	type cacheUpdate struct {
 		host     string
+		provider SessionProvider // snapshot for pointer re-check in apply phase
 		sessions []SessionInfo
 	}
 	var updates []cacheUpdate
@@ -156,12 +173,17 @@ func (c *CompositeProvider) Sessions() ([]SessionInfo, error) {
 		if rp.ConnectionState() == Connected {
 			remote, rerr := rp.Sessions()
 			if rerr == nil {
+				// Copy before mutating: providers may return a reference to
+				// their internal slice, so writing Host in-place would race
+				// with concurrent Sessions() calls.
+				tagged := make([]SessionInfo, len(remote))
+				copy(tagged, remote)
 				// Set Host field so the TUI can distinguish remote sessions.
-				for i := range remote {
-					remote[i].Host = host
+				for i := range tagged {
+					tagged[i].Host = host
 				}
-				items = append(items, remote...)
-				updates = append(updates, cacheUpdate{host: host, sessions: remote})
+				items = append(items, tagged...)
+				updates = append(updates, cacheUpdate{host: host, provider: rp, sessions: tagged})
 			} else {
 				items = append(items, c.staleCache[host]...)
 			}
@@ -172,9 +194,17 @@ func (c *CompositeProvider) Sessions() ([]SessionInfo, error) {
 	c.mu.RUnlock()
 
 	// Apply cache updates under write lock.
+	// Re-check provider pointer identity before writing: a concurrent
+	// RemoveRemote call may have deregistered the provider between the
+	// RUnlock above and the Lock below. Writing stale data for a removed
+	// host would re-introduce ghost entries into the cache.
 	if len(updates) > 0 {
 		c.mu.Lock()
 		for _, u := range updates {
+			if c.remotes[u.host] != u.provider {
+				// Provider was replaced or removed; discard this update.
+				continue
+			}
 			cached := make([]SessionInfo, len(u.sessions))
 			copy(cached, u.sessions)
 			c.staleCache[u.host] = cached
@@ -183,6 +213,72 @@ func (c *CompositeProvider) Sessions() ([]SessionInfo, error) {
 	}
 
 	return items, nil
+}
+
+// profileFetcher is implemented by providers that can fetch profiles from a
+// remote daemon. Defined here to avoid importing the profile package.
+type profileFetcher interface {
+	Profiles(ctx context.Context) ([]ProfileDefAPI, string, error)
+}
+
+// Profiles returns the profile list for the given host. The result is cached
+// after the first fetch; subsequent calls return the cached value without a
+// network round-trip (see profilesCache comment for cache lifetime semantics).
+//
+// When host is "" the local provider is queried directly (no mutex involved;
+// the local provider is immutable after construction). Remote hosts use the
+// dual-lock pattern (RLock collect → Unlock → Lock apply) with provider
+// pointer re-check to guard against concurrent RemoveRemote.
+//
+// Returns (profiles, daemonErrStr, transportErr):
+//   - daemonErrStr is the error string reported by the daemon (e.g. malformed
+//     config.json) and is empty on success.
+//   - transportErr is a transport/HTTP error and is nil on success.
+func (c *CompositeProvider) Profiles(ctx context.Context, host string) ([]ProfileDefAPI, string, error) {
+	// Local path: bypass the remote cache for the local provider.
+	if host == "" {
+		pf, ok := c.local.(profileFetcher)
+		if !ok {
+			return nil, "", fmt.Errorf("local provider does not support profiles")
+		}
+		return pf.Profiles(ctx)
+	}
+
+	// Fast path: return cached value if available.
+	c.mu.RLock()
+	if cached, ok := c.profilesCache[host]; ok {
+		errStr := c.profilesError[host]
+		c.mu.RUnlock()
+		return cached, errStr, nil
+	}
+	// Snapshot provider pointer under read lock.
+	rp, found := c.remotes[host]
+	c.mu.RUnlock()
+
+	if !found {
+		return nil, "", fmt.Errorf("no remote provider for host %q", host)
+	}
+	pf, ok := rp.(profileFetcher)
+	if !ok {
+		return nil, "", fmt.Errorf("remote provider for host %q does not support profiles", host)
+	}
+
+	profiles, errStr, err := pf.Profiles(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Apply phase: re-check pointer identity before writing cache.
+	c.mu.Lock()
+	if c.remotes[host] == rp {
+		c.profilesCache[host] = profiles
+		if errStr != "" {
+			c.profilesError[host] = errStr
+		}
+	}
+	c.mu.Unlock()
+
+	return profiles, errStr, nil
 }
 
 // Create creates a session, routing to the provider for the given host.

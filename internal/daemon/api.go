@@ -19,7 +19,10 @@ import (
 //        contain the remote tmux's historical scrollback).
 //   - 3: adds POST /session/resume for resuming GC'd sessions by ID with
 //        worktree name fallback.
-const APIVersion = 3
+//   - 4: adds GET /profiles for remote profile discovery. Adds Profile and
+//        Options fields to session/worktree/msg create requests so that the
+//        caller can select a launch profile and append extra flags.
+const APIVersion = 4
 
 // --- Session CRUD ---
 
@@ -31,6 +34,12 @@ type SessionCreateRequest struct {
 	Name        string `json:"name,omitempty"`
 	Prompt      string `json:"prompt,omitempty"`
 	ProjectRoot string `json:"project_root,omitempty"`
+	// Profile selects a launch profile by name. Empty string resolves to the
+	// effective default profile.
+	Profile string `json:"profile,omitempty"`
+	// Options is a space-separated list of extra flags appended to the claude
+	// invocation.
+	Options string `json:"options,omitempty"`
 }
 
 // SessionCreateResponse is returned after a session is created.
@@ -139,6 +148,12 @@ type WorktreeCreateRequest struct {
 	Name        string `json:"name"`
 	Prompt      string `json:"prompt,omitempty"`
 	ProjectRoot string `json:"project_root"`
+	// Profile selects a launch profile by name. Empty string resolves to the
+	// effective default profile.
+	Profile string `json:"profile,omitempty"`
+	// Options is a space-separated list of extra flags appended to the claude
+	// invocation.
+	Options string `json:"options,omitempty"`
 }
 
 // WorktreeCreateResponse is returned after a worktree is created.
@@ -155,6 +170,12 @@ type WorktreeResumeRequest struct {
 	WorktreePath string `json:"worktree_path"`
 	Prompt       string `json:"prompt,omitempty"`
 	ProjectRoot  string `json:"project_root"`
+	// Profile selects a launch profile by name. Empty string resolves to the
+	// effective default profile.
+	Profile string `json:"profile,omitempty"`
+	// Options is a space-separated list of extra flags appended to the claude
+	// invocation.
+	Options string `json:"options,omitempty"`
 }
 
 // WorktreeResumeResponse is returned after a worktree session is resumed.
@@ -224,6 +245,12 @@ type MsgCreateRequest struct {
 	Name   string `json:"name"`
 	Type   string `json:"type"` // "worker", "pm"
 	Prompt string `json:"prompt"`
+	// Profile selects a launch profile by name. Empty string resolves to the
+	// effective default profile.
+	Profile string `json:"profile,omitempty"`
+	// Options is a space-separated list of extra flags appended to the claude
+	// invocation.
+	Options string `json:"options,omitempty"`
 }
 
 // MsgCreateResponse is returned after a new session is created via messaging.
@@ -242,6 +269,34 @@ type MsgSessionInfo struct {
 	Name string `json:"name"`
 	Role string `json:"role,omitempty"`
 	Host string `json:"host,omitempty"`
+}
+
+// --- Profiles ---
+
+// ProfileListResponse is returned by GET /profiles.
+// If config.json is absent, Profiles is an empty slice and Error is empty.
+// If config.json is malformed, Profiles is nil and Error contains a
+// human-readable description (e.g. "invalid JSON at line N, col M: ...").
+type ProfileListResponse struct {
+	Profiles []ProfileDefAPI `json:"profiles"`
+	Error    string          `json:"error,omitempty"`
+}
+
+// ProfileDefAPI is the wire representation of a profile definition.
+// It mirrors profile.ProfileDef but is defined here to avoid importing
+// the profile package into api.go (which is a types-only file).
+//
+// Security: Env carries raw environment variable values from config.json.
+// The GET /profiles endpoint is protected by token authentication; only
+// callers in possession of the daemon token receive these values.
+type ProfileDefAPI struct {
+	Name        string            `json:"name"`
+	Command     string            `json:"command"`
+	Args        []string          `json:"args,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Default     bool              `json:"default,omitempty"`
+	Builtin     bool              `json:"builtin,omitempty"`
 }
 
 // --- Health ---

@@ -1045,6 +1045,67 @@ func TestBuildTmuxAttachCommand(t *testing.T) {
 	})
 }
 
+// --- Profiles tests ---
+
+func TestRemoteProvider_Profiles_Success(t *testing.T) {
+	want := []ProfileDefAPI{
+		{Name: "opus", Command: "claude", Args: []string{"--model=opus-4"}},
+		{Name: "default", Command: "claude", Builtin: true},
+	}
+	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
+		"GET /profiles": func(w http.ResponseWriter, _ *http.Request) {
+			testWriteJSON(w, ProfileListResponse{Profiles: want})
+		},
+	})
+	defer srv.Close()
+
+	got, errStr, err := rp.Profiles(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if errStr != "" {
+		t.Errorf("unexpected daemon errStr: %q", errStr)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d profiles, want 2", len(got))
+	}
+	if got[0].Name != "opus" {
+		t.Errorf("got[0].Name=%q, want opus", got[0].Name)
+	}
+}
+
+func TestRemoteProvider_Profiles_DaemonError(t *testing.T) {
+	rp, srv := newRemoteTestSetup(t, map[string]http.HandlerFunc{
+		"GET /profiles": func(w http.ResponseWriter, _ *http.Request) {
+			testWriteJSON(w, ProfileListResponse{
+				Error: "invalid JSON at line 3, col 2: unexpected end",
+			})
+		},
+	})
+	defer srv.Close()
+
+	got, errStr, err := rp.Profiles(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if errStr == "" {
+		t.Error("expected non-empty daemon error string")
+	}
+	if got != nil {
+		t.Errorf("expected nil profiles on daemon error, got %v", got)
+	}
+}
+
+func TestRemoteProvider_Profiles_TransportError(t *testing.T) {
+	conn := &mockConnManager{state: Disconnected, err: fmt.Errorf("not connected")}
+	rp := NewRemoteProvider("host", conn)
+
+	_, _, err := rp.Profiles(context.Background())
+	if err == nil {
+		t.Fatal("expected transport error when client unavailable")
+	}
+}
+
 // --- Helpers ---
 
 type nopReadCloser struct {
