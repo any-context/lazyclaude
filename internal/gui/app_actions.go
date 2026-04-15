@@ -505,36 +505,39 @@ func (a *App) currentSessionHost() (string, bool) {
 
 // --- Session operations ---
 
-func (a *App) CreateSession() { a.createSession(a.currentProjectRoot()) }
+func (a *App) CreateSession() {
+	if a.sessions == nil || a.HasActiveDialog() {
+		return
+	}
+	localPath := a.currentProjectRoot()
+	debugLog("CreateSession: path=%q", localPath)
+	a.gui.Update(func(g *gocui.Gui) error {
+		if !a.showProfileDialog(g, "session", localPath) {
+			a.showError(g, "Error: could not open profile dialog")
+		}
+		return nil
+	})
+}
 
 // CreateSessionAtCWD creates a session in the lazyclaude pane's CWD. Unlike
 // CreateSession, routing is pane-based, not cursor-based: it delegates to
-// sessions.CreateAtPaneCWD() which uses pendingHost rather than the cursor's
+// sessions.CreateAtPaneCWDWithOpts() which uses pendingHost rather than the cursor's
 // tree node host. This keeps N predictable regardless of cursor position.
 func (a *App) CreateSessionAtCWD() {
 	if a.sessions == nil || a.HasActiveDialog() {
 		return
 	}
 	debugLog("CreateSessionAtCWD")
-	go func() {
-		err := a.sessions.CreateAtPaneCWD()
-		a.gui.Update(func(g *gocui.Gui) error {
-			if err != nil {
-				a.showError(g, fmt.Sprintf("Error: %v", err))
-			} else {
-				a.setStatus(g, "Session created")
-				a.moveCursorToLastSession()
-			}
-			return nil
-		})
-	}()
+	a.gui.Update(func(g *gocui.Gui) error {
+		if !a.showProfileDialog(g, "session_cwd", "") {
+			a.showError(g, "Error: could not open profile dialog")
+		}
+		return nil
+	})
 }
 
-// createSession is the shared implementation for CreateSession.
+// createSession is the shared implementation used in tests and legacy paths.
 // localPath is the fallback directory for non-SSH sessions.
-// Routes to the host of the currently selected tree node. Falls back to
-// pendingHost (inside the adapter) when no node is selected.
-// Runs asynchronously to avoid blocking the GUI thread during remote operations.
 func (a *App) createSession(localPath string) {
 	if a.sessions == nil || a.HasActiveDialog() {
 		return
@@ -706,17 +709,12 @@ func (a *App) StartPMSession() {
 	}
 	projectRoot := a.currentProjectRoot()
 	debugLog("StartPMSession: projectRoot=%q", projectRoot)
-	go func() {
-		err := a.sessions.CreatePMSession(projectRoot)
-		a.gui.Update(func(g *gocui.Gui) error {
-			if err != nil {
-				a.showError(g, fmt.Sprintf("PM error: %v", err))
-			} else {
-				a.setStatus(g, "PM session started")
-			}
-			return nil
-		})
-	}()
+	a.gui.Update(func(g *gocui.Gui) error {
+		if !a.showProfileDialog(g, "pm_session", projectRoot) {
+			a.showError(g, "Error: could not open profile dialog")
+		}
+		return nil
+	})
 }
 
 func (a *App) StartWorktreeInput() {

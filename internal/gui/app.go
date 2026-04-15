@@ -71,6 +71,16 @@ type SessionProvider interface {
 	ListWorktrees(projectRoot string) ([]WorktreeInfo, error)
 	CreatePMSession(projectRoot string) error
 	CreateWorkerSession(name, prompt, projectRoot string) error
+
+	// Profile-aware create methods (Phase 2a). profile is the profile name
+	// (empty string resolves to the effective default). options is a
+	// space-separated list of extra CLI arguments.
+	// Remote sessions fall back to the non-opts behaviour until Phase 2b.
+	CreateWithOpts(path, profile, options string) error
+	CreateAtPaneCWDWithOpts(profile, options string) error
+	CreatePMSessionWithOpts(projectRoot, profile, options string) error
+	CreateWorktreeWithOpts(name, prompt, projectRoot, profile, options string) error
+	ResumeWorktreeWithOpts(worktreePath, prompt, projectRoot, profile, options string) error
 }
 
 // WorktreeInfo describes an existing worktree for the chooser.

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/any-context/lazyclaude/internal/core/model"
+	"github.com/any-context/lazyclaude/internal/gui/chooser"
 	"github.com/any-context/lazyclaude/internal/gui/keymap"
 	"github.com/any-context/lazyclaude/internal/gui/presentation"
 	"github.com/any-context/lazyclaude/internal/session"
@@ -122,6 +123,17 @@ func renderConnectChooser(v *gocui.View, hosts []string, cursor int) {
 	fmt.Fprintf(v, " %s+ Manual input%s\n", presentation.FgGreen, presentation.Reset)
 
 	v.SetCursor(0, cursor)
+}
+
+// renderProfileChooser writes a profile selection list to a gocui view using
+// chooser.Render to display the cursor (▸) and default (*) markers.
+func renderProfileChooser(v *gocui.View, items []chooser.Item, cursor int) {
+	v.Clear()
+	state := chooser.State{Items: items, Cursor: cursor}
+	lines := chooser.Render(state, v.InnerWidth())
+	for _, line := range lines {
+		fmt.Fprintln(v, line)
+	}
 }
 
 // logFileCache caches readLogLines results, only re-reading when the

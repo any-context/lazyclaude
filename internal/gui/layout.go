@@ -2,12 +2,16 @@ package gui
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/any-context/lazyclaude/internal/gui/chooser"
 	"github.com/any-context/lazyclaude/internal/gui/keymap"
 	"github.com/any-context/lazyclaude/internal/gui/presentation"
+	"github.com/any-context/lazyclaude/internal/profile"
 	"github.com/any-context/lazyclaude/internal/session"
 	"github.com/jesseduffield/gocui"
 )
@@ -314,7 +318,10 @@ func (a *App) layoutMain(g *gocui.Gui, maxX, maxY int) error {
 			if _, err := g.SetCurrentView(viewName); err != nil && !isUnknownView(err) {
 				return err
 			}
-			if a.dialog.Kind != DialogWorktreeChooser && a.dialog.Kind != DialogConnectChooser {
+			// Chooser views use Highlight for selection; text-input views need cursor.
+			if isChooserView(viewName) {
+				g.Cursor = false
+			} else {
 				g.Cursor = true
 			}
 		}
@@ -793,22 +800,42 @@ func (a *App) closeRenameInput(g *gocui.Gui) {
 	}
 }
 
-// showWorktreeDialog creates the worktree input views (branch name + prompt).
+// showWorktreeDialog creates the worktree input views (branch + prompt + profile + options).
 // Returns true if all views were created successfully and dialog is active.
 func (a *App) showWorktreeDialog(g *gocui.Gui) bool {
+	items := loadProfileItems()
+	defaultIdx := chooser.IndexOfDefault(items)
+	a.dialog.ProfileItems = items
+	a.dialog.ProfileCursor = defaultIdx
+	a.dialog.OptionsText = ""
+
 	maxX, maxY := g.Size()
 	w := 50
 	if w > maxX-4 {
 		w = maxX - 4
 	}
 	x0 := (maxX - w) / 2
-	branchY0 := maxY/2 - 6
-	if branchY0 < 1 {
-		branchY0 = 1
+
+	numItems := len(items)
+	if numItems < 1 {
+		numItems = 1
 	}
+	profileH := numItems + 2
+	if profileH > 8 {
+		profileH = 8
+	}
+	// Compute a top-aligned start that centres the whole stack vertically.
+	// Layout: branch(3) + gap + prompt(6) + gap + profile(profileH) + gap + options(3) + hint(2)
+	totalH := 3 + 1 + 6 + 1 + profileH + 1 + 3 + 2
+	startY := (maxY - totalH) / 2
+	if startY < 1 {
+		startY = 1
+	}
+
+	branchY0 := startY
 	branchY1 := branchY0 + 2
 
-	// Branch name input (1 line)
+	// Branch name input (1 visible line)
 	v, err := g.SetView("worktree-branch", x0, branchY0, x0+w, branchY1, 0)
 	if err != nil && !isUnknownView(err) {
 		return false
@@ -821,9 +848,9 @@ func (a *App) showWorktreeDialog(g *gocui.Gui) bool {
 	v.RenderTextArea()
 	setRoundedFrame(v)
 
-	// Prompt input (6 lines)
+	// Prompt input (4 visible lines)
 	promptY0 := branchY1 + 1
-	promptY1 := promptY0 + 7
+	promptY1 := promptY0 + 5
 	if promptY1 >= maxY-2 {
 		promptY1 = maxY - 3
 	}
@@ -840,12 +867,50 @@ func (a *App) showWorktreeDialog(g *gocui.Gui) bool {
 	v2.Clear()
 	v2.TextArea.Clear()
 	v2.TextArea.AutoWrap = true
-	v2.TextArea.AutoWrapWidth = w - 2 // view 幅からフレーム分を引く
+	v2.TextArea.AutoWrapWidth = w - 2
 	v2.RenderTextArea()
 	setRoundedFrame(v2)
 
+	// Profile chooser
+	profileY0 := promptY1 + 1
+	profileY1 := profileY0 + profileH
+	if profileY1 >= maxY-2 {
+		profileY1 = maxY - 3
+	}
+
+	v4, err := g.SetView("worktree-profile-chooser", x0, profileY0, x0+w, profileY1, 0)
+	if err != nil && !isUnknownView(err) {
+		a.closeWorktreeDialog(g)
+		return false
+	}
+	v4.Title = " Profile "
+	v4.Editable = false
+	v4.Highlight = false
+	setRoundedFrame(v4)
+	renderProfileChooser(v4, a.dialog.ProfileItems, a.dialog.ProfileCursor)
+
+	// Options input (1 visible line)
+	optionsY0 := profileY1 + 1
+	optionsY1 := optionsY0 + 2
+	if optionsY1 >= maxY-2 {
+		optionsY1 = maxY - 3
+	}
+
+	v5, err := g.SetView("worktree-options", x0, optionsY0, x0+w, optionsY1, 0)
+	if err != nil && !isUnknownView(err) {
+		a.closeWorktreeDialog(g)
+		return false
+	}
+	v5.Title = " Options "
+	v5.Editable = true
+	v5.Editor = gocui.DefaultEditor
+	v5.Clear()
+	v5.TextArea.Clear()
+	v5.RenderTextArea()
+	setRoundedFrame(v5)
+
 	// Hint bar (frameless)
-	hintY0 := promptY1
+	hintY0 := optionsY1
 	hintY1 := hintY0 + 2
 	if hintY1 >= maxY {
 		hintY1 = maxY - 1
@@ -866,6 +931,7 @@ func (a *App) showWorktreeDialog(g *gocui.Gui) bool {
 		return false
 	}
 	g.Cursor = true
+	a.dialog.ActiveField = "worktree-branch"
 	a.dialog.Kind = DialogWorktree
 	return true
 }
@@ -874,8 +940,12 @@ func (a *App) showWorktreeDialog(g *gocui.Gui) bool {
 func (a *App) closeWorktreeDialog(g *gocui.Gui) {
 	a.dialog.Kind = DialogNone
 	a.dialog.ActiveField = ""
+	a.dialog.ProfileItems = nil
+	a.dialog.OptionsText = ""
 	g.DeleteView("worktree-branch")
 	g.DeleteView("worktree-prompt")
+	g.DeleteView("worktree-profile-chooser")
+	g.DeleteView("worktree-options")
 	g.DeleteView("worktree-hint")
 	g.Cursor = false
 	if _, err := g.SetCurrentView("sessions"); err != nil && !isUnknownView(err) {
@@ -934,19 +1004,38 @@ func (a *App) closeWorktreeChooser(g *gocui.Gui) {
 	}
 }
 
-// showWorktreeResumePrompt creates a prompt-only dialog for an existing worktree.
+// showWorktreeResumePrompt creates the resume dialog (prompt + profile + options).
 func (a *App) showWorktreeResumePrompt(g *gocui.Gui, worktreeName string) bool {
+	items := loadProfileItems()
+	defaultIdx := chooser.IndexOfDefault(items)
+	a.dialog.ProfileItems = items
+	a.dialog.ProfileCursor = defaultIdx
+	a.dialog.OptionsText = ""
+
 	maxX, maxY := g.Size()
 	w := 50
 	if w > maxX-4 {
 		w = maxX - 4
 	}
 	x0 := (maxX - w) / 2
-	promptY0 := maxY/2 - 4
-	if promptY0 < 1 {
-		promptY0 = 1
+
+	numItems := len(items)
+	if numItems < 1 {
+		numItems = 1
 	}
-	promptY1 := promptY0 + 7
+	profileH := numItems + 2
+	if profileH > 8 {
+		profileH = 8
+	}
+	// Layout: prompt(6) + gap + profile(profileH) + gap + options(3) + hint(2)
+	totalH := 6 + 1 + profileH + 1 + 3 + 2
+	startY := (maxY - totalH) / 2
+	if startY < 1 {
+		startY = 1
+	}
+
+	promptY0 := startY
+	promptY1 := promptY0 + 5
 	if promptY1 >= maxY-2 {
 		promptY1 = maxY - 3
 	}
@@ -965,7 +1054,45 @@ func (a *App) showWorktreeResumePrompt(g *gocui.Gui, worktreeName string) bool {
 	v.RenderTextArea()
 	setRoundedFrame(v)
 
-	hintY0 := promptY1
+	// Profile chooser
+	profileY0 := promptY1 + 1
+	profileY1 := profileY0 + profileH
+	if profileY1 >= maxY-2 {
+		profileY1 = maxY - 3
+	}
+
+	v3, err := g.SetView("worktree-resume-profile-chooser", x0, profileY0, x0+w, profileY1, 0)
+	if err != nil && !isUnknownView(err) {
+		a.closeWorktreeResumePrompt(g)
+		return false
+	}
+	v3.Title = " Profile "
+	v3.Editable = false
+	v3.Highlight = false
+	setRoundedFrame(v3)
+	renderProfileChooser(v3, a.dialog.ProfileItems, a.dialog.ProfileCursor)
+
+	// Options input
+	optionsY0 := profileY1 + 1
+	optionsY1 := optionsY0 + 2
+	if optionsY1 >= maxY-2 {
+		optionsY1 = maxY - 3
+	}
+
+	v4, err := g.SetView("worktree-resume-options", x0, optionsY0, x0+w, optionsY1, 0)
+	if err != nil && !isUnknownView(err) {
+		a.closeWorktreeResumePrompt(g)
+		return false
+	}
+	v4.Title = " Options "
+	v4.Editable = true
+	v4.Editor = gocui.DefaultEditor
+	v4.Clear()
+	v4.TextArea.Clear()
+	v4.RenderTextArea()
+	setRoundedFrame(v4)
+
+	hintY0 := optionsY1
 	hintY1 := hintY0 + 2
 	if hintY1 >= maxY {
 		hintY1 = maxY - 1
@@ -978,6 +1105,7 @@ func (a *App) showWorktreeResumePrompt(g *gocui.Gui, worktreeName string) bool {
 	v2.Frame = false
 	v2.Clear()
 	fmt.Fprint(v2, " "+presentation.StyledKey("Enter", "launch")+"  "+
+		presentation.StyledKey("Tab", "switch")+"  "+
 		presentation.StyledKey("Esc", "cancel"))
 
 	if _, err := g.SetCurrentView("worktree-resume-prompt"); err != nil && !isUnknownView(err) {
@@ -985,6 +1113,7 @@ func (a *App) showWorktreeResumePrompt(g *gocui.Gui, worktreeName string) bool {
 		return false
 	}
 	g.Cursor = true
+	a.dialog.ActiveField = "worktree-resume-prompt"
 	a.dialog.Kind = DialogWorktreeResume
 	return true
 }
@@ -1043,9 +1172,219 @@ func (a *App) closeConnectChooser(g *gocui.Gui) {
 // closeWorktreeResumePrompt removes the resume prompt dialog and restores focus.
 func (a *App) closeWorktreeResumePrompt(g *gocui.Gui) {
 	a.dialog.Kind = DialogNone
+	a.dialog.ActiveField = ""
 	a.dialog.SelectedPath = ""
+	a.dialog.ProfileItems = nil
+	a.dialog.OptionsText = ""
 	g.DeleteView("worktree-resume-prompt")
 	g.DeleteView("worktree-resume-hint")
+	g.DeleteView("worktree-resume-profile-chooser")
+	g.DeleteView("worktree-resume-options")
+	g.Cursor = false
+	if _, err := g.SetCurrentView("sessions"); err != nil && !isUnknownView(err) {
+		_ = err
+	}
+}
+
+// loadProfileItems loads profiles from $HOME/.lazyclaude/config.json and
+// converts them to chooser.Item values. The effective default profile is
+// marked with Default=true. Falls back to a single builtin-default item if
+// the config file is absent or cannot be parsed.
+func loadProfileItems() []chooser.Item {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return []chooser.Item{{Label: profile.BuiltinDefaultName, Default: true, Data: profile.BuiltinDefaultName}}
+	}
+	configPath := filepath.Join(home, ".lazyclaude", "config.json")
+	_, profiles, loadErr := profile.Load(configPath)
+	if loadErr != nil || len(profiles) == 0 {
+		debugLog("loadProfileItems: %v", loadErr)
+		return []chooser.Item{{Label: profile.BuiltinDefaultName, Default: true, Data: profile.BuiltinDefaultName}}
+	}
+	defProfile, _ := profile.ResolveDefault(profiles)
+	items := make([]chooser.Item, len(profiles))
+	for i, p := range profiles {
+		items[i] = chooser.Item{
+			Label:   p.Name,
+			Default: p.Name == defProfile.Name,
+			Data:    p.Name,
+		}
+	}
+	return items
+}
+
+// showProfileDialog opens the standalone profile chooser dialog used by the
+// n, N, and P actions. confirmKind specifies which session type to create
+// ("session", "session_cwd", "pm_session") and sessionPath is the path to
+// pass on confirm (empty for session_cwd, projectRoot for pm_session).
+func (a *App) showProfileDialog(g *gocui.Gui, confirmKind, sessionPath string) bool {
+	items := loadProfileItems()
+	defaultIdx := chooser.IndexOfDefault(items)
+	a.dialog.ProfileItems = items
+	a.dialog.ProfileCursor = defaultIdx
+	a.dialog.OptionsText = ""
+	a.dialog.ProfileConfirmKind = confirmKind
+	a.dialog.ProfileSessionPath = sessionPath
+	a.dialog.ActiveField = "profile-chooser"
+
+	maxX, maxY := g.Size()
+	w := 50
+	if w > maxX-4 {
+		w = maxX - 4
+	}
+	x0 := (maxX - w) / 2
+
+	numItems := len(items)
+	if numItems < 1 {
+		numItems = 1
+	}
+	chooserH := numItems + 2
+	if chooserH > 10 {
+		chooserH = 10
+	}
+	// Total height: chooserH + 1(gap) + 3(options) + 2(hint)
+	totalH := chooserH + 1 + 3 + 2
+	startY := (maxY - totalH) / 2
+	if startY < 1 {
+		startY = 1
+	}
+
+	chooserY0 := startY
+	chooserY1 := chooserY0 + chooserH
+	if chooserY1 >= maxY-2 {
+		chooserY1 = maxY - 3
+	}
+
+	v, err := g.SetView("profile-chooser", x0, chooserY0, x0+w, chooserY1, 0)
+	if err != nil && !isUnknownView(err) {
+		return false
+	}
+	v.Title = " Profile "
+	v.Editable = false
+	v.Highlight = false
+	setRoundedFrame(v)
+	renderProfileChooser(v, a.dialog.ProfileItems, a.dialog.ProfileCursor)
+
+	optionsY0 := chooserY1 + 1
+	optionsY1 := optionsY0 + 2
+	if optionsY1 >= maxY-2 {
+		optionsY1 = maxY - 3
+	}
+
+	v2, err := g.SetView("profile-options", x0, optionsY0, x0+w, optionsY1, 0)
+	if err != nil && !isUnknownView(err) {
+		a.closeProfileDialog(g)
+		return false
+	}
+	v2.Title = " Options "
+	v2.Editable = true
+	v2.Editor = gocui.DefaultEditor
+	v2.Clear()
+	v2.TextArea.Clear()
+	v2.RenderTextArea()
+	setRoundedFrame(v2)
+
+	hintY0 := optionsY1
+	hintY1 := hintY0 + 2
+	if hintY1 >= maxY {
+		hintY1 = maxY - 1
+	}
+	v3, err := g.SetView("profile-hint", x0, hintY0, x0+w, hintY1, 0)
+	if err != nil && !isUnknownView(err) {
+		a.closeProfileDialog(g)
+		return false
+	}
+	v3.Frame = false
+	v3.Clear()
+	fmt.Fprint(v3, " "+presentation.StyledKey("Enter", "launch")+"  "+
+		presentation.StyledKey("Tab", "switch")+"  "+
+		presentation.StyledKey("Esc", "cancel"))
+
+	if _, err := g.SetCurrentView("profile-chooser"); err != nil && !isUnknownView(err) {
+		a.closeProfileDialog(g)
+		return false
+	}
+	g.Cursor = false
+	a.dialog.Kind = DialogProfile
+	return true
+}
+
+// closeProfileDialog removes all profile dialog views and resets dialog state.
+func (a *App) closeProfileDialog(g *gocui.Gui) {
+	a.dialog.Kind = DialogNone
+	a.dialog.ActiveField = ""
+	a.dialog.ProfileItems = nil
+	a.dialog.OptionsText = ""
+	a.dialog.ProfileConfirmKind = ""
+	a.dialog.ProfileSessionPath = ""
+	g.DeleteView("profile-chooser")
+	g.DeleteView("profile-options")
+	g.DeleteView("profile-hint")
+	g.Cursor = false
+	if _, err := g.SetCurrentView("sessions"); err != nil && !isUnknownView(err) {
+		_ = err
+	}
+}
+
+// showRemoteProfileErrorDialog displays an error panel for a malformed remote
+// config.json (UI4). Only Esc is accepted; all other keys are suppressed.
+func (a *App) showRemoteProfileErrorDialog(g *gocui.Gui, host, reason string) bool {
+	msg := fmt.Sprintf("Failed to parse $HOME/.lazyclaude/config.json on %s: %s", host, reason)
+	a.dialog.RemoteProfileErrorMsg = msg
+
+	maxX, maxY := g.Size()
+	w := 60
+	if w > maxX-4 {
+		w = maxX - 4
+	}
+	x0 := (maxX - w) / 2
+
+	errorH := 5 // 3 inner lines + 2 frame
+	startY := (maxY - errorH - 2) / 2
+	if startY < 1 {
+		startY = 1
+	}
+
+	v, err := g.SetView("remote-profile-error", x0, startY, x0+w, startY+errorH, 0)
+	if err != nil && !isUnknownView(err) {
+		return false
+	}
+	v.Title = " Profile Error "
+	v.Editable = false
+	v.Wrap = true
+	setRoundedFrame(v)
+	v.Clear()
+	fmt.Fprintln(v, msg)
+
+	hintY0 := startY + errorH
+	hintY1 := hintY0 + 2
+	if hintY1 >= maxY {
+		hintY1 = maxY - 1
+	}
+	v2, err := g.SetView("remote-profile-error-hint", x0, hintY0, x0+w, hintY1, 0)
+	if err != nil && !isUnknownView(err) {
+		a.closeRemoteProfileErrorDialog(g)
+		return false
+	}
+	v2.Frame = false
+	v2.Clear()
+	fmt.Fprint(v2, " "+presentation.StyledKey("Esc", "close"))
+
+	if _, err := g.SetCurrentView("remote-profile-error"); err != nil && !isUnknownView(err) {
+		a.closeRemoteProfileErrorDialog(g)
+		return false
+	}
+	g.Cursor = false
+	a.dialog.Kind = DialogRemoteProfileError
+	return true
+}
+
+// closeRemoteProfileErrorDialog removes the error dialog and resets state.
+func (a *App) closeRemoteProfileErrorDialog(g *gocui.Gui) {
+	a.dialog.Kind = DialogNone
+	a.dialog.RemoteProfileErrorMsg = ""
+	g.DeleteView("remote-profile-error")
+	g.DeleteView("remote-profile-error-hint")
 	g.Cursor = false
 	if _, err := g.SetCurrentView("sessions"); err != nil && !isUnknownView(err) {
 		_ = err

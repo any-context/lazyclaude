@@ -207,6 +207,14 @@ func (s *SessionCommandService) completeRemoteCreate(placeholderID string, targe
 	s.triggerGUIUpdate()
 }
 
+// CreateWithOpts creates a new local session with profile and options.
+func (s *SessionCommandService) CreateWithOpts(target OperationTarget, profile, options string) error {
+	// Local only: remote falls back to Create (handled at guiCompositeAdapter level).
+	ctx := context.Background()
+	_, err := s.localMgr.CreateOpts(ctx, target.ProjectRoot, profile, options)
+	return err
+}
+
 // CreateWorktree creates a worktree session on the appropriate host.
 func (s *SessionCommandService) CreateWorktree(target OperationTarget, name, prompt string) error {
 	if err := s.prepareRemote(&target); err != nil {
@@ -215,12 +223,40 @@ func (s *SessionCommandService) CreateWorktree(target OperationTarget, name, pro
 	return s.cp.CreateWorktree(name, prompt, target.ProjectRoot, target.Host)
 }
 
+// CreateWorktreeWithOpts creates a worktree session with profile and options.
+func (s *SessionCommandService) CreateWorktreeWithOpts(target OperationTarget, name, prompt, profile, options string) error {
+	// Local only: remote falls back to CreateWorktree (handled at guiCompositeAdapter level).
+	ctx := context.Background()
+	_, err := s.localMgr.CreateWorktreeOpts(ctx, session.WorktreeOpts{
+		Name:        name,
+		Prompt:      prompt,
+		ProjectRoot: target.ProjectRoot,
+		Profile:     profile,
+		Options:     options,
+	})
+	return err
+}
+
 // ResumeWorktree resumes an existing worktree session.
 func (s *SessionCommandService) ResumeWorktree(target OperationTarget, wtPath, prompt string) error {
 	if err := s.prepareRemote(&target); err != nil {
 		return err
 	}
 	return s.cp.ResumeWorktree(wtPath, prompt, target.ProjectRoot, target.Host)
+}
+
+// ResumeWorktreeWithOpts resumes a worktree session with profile and options.
+func (s *SessionCommandService) ResumeWorktreeWithOpts(target OperationTarget, wtPath, prompt, profile, options string) error {
+	// Local only: remote falls back to ResumeWorktree (handled at guiCompositeAdapter level).
+	ctx := context.Background()
+	_, err := s.localMgr.ResumeWorktreeOpts(ctx, session.ResumeOpts{
+		WorktreePath: wtPath,
+		Prompt:       prompt,
+		ProjectRoot:  target.ProjectRoot,
+		Profile:      profile,
+		Options:      options,
+	})
+	return err
 }
 
 // ResumeSession resumes a session by ID with worktree name fallback.
@@ -257,6 +293,19 @@ func (s *SessionCommandService) CreatePMSession(target OperationTarget) error {
 	debugLog("SessionCommandService.CreatePMSession: calling cp.CreatePMSession")
 	err := s.cp.CreatePMSession(target.ProjectRoot, target.Host)
 	debugLog("SessionCommandService.CreatePMSession: result: %v", err)
+	return err
+}
+
+// CreatePMSessionWithOpts creates a PM session with profile and options.
+func (s *SessionCommandService) CreatePMSessionWithOpts(target OperationTarget, profile, options string) error {
+	debugLog("SessionCommandService.CreatePMSessionWithOpts: projectRoot=%q profile=%q", target.ProjectRoot, profile)
+	// Local only: remote falls back to CreatePMSession (handled at guiCompositeAdapter level).
+	ctx := context.Background()
+	_, err := s.localMgr.CreatePMSessionOpts(ctx, session.PMOpts{
+		ProjectRoot: target.ProjectRoot,
+		Profile:     profile,
+		Options:     options,
+	})
 	return err
 }
 

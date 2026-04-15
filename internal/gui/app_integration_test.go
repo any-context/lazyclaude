@@ -76,13 +76,18 @@ func (m *mockSessionProvider) SendChoice(window string, choice gui.Choice) error
 	m.sentChoices = append(m.sentChoices, sentChoice{Window: window, Choice: choice})
 	return nil
 }
-func (m *mockSessionProvider) AttachSession(_ string) error                       { return nil }
-func (m *mockSessionProvider) LaunchLazygit(_ string) error                       { return nil }
-func (m *mockSessionProvider) CreateWorktree(_, _, _ string) error                { return nil }
-func (m *mockSessionProvider) ResumeWorktree(_, _, _ string) error                { return nil }
-func (m *mockSessionProvider) ListWorktrees(_ string) ([]gui.WorktreeInfo, error) { return nil, nil }
-func (m *mockSessionProvider) CreatePMSession(_ string) error                     { return nil }
-func (m *mockSessionProvider) CreateWorkerSession(_, _, _ string) error           { return nil }
+func (m *mockSessionProvider) AttachSession(_ string) error                             { return nil }
+func (m *mockSessionProvider) LaunchLazygit(_ string) error                             { return nil }
+func (m *mockSessionProvider) CreateWorktree(_, _, _ string) error                      { return nil }
+func (m *mockSessionProvider) CreateWorktreeWithOpts(_, _, _, _, _ string) error        { return nil }
+func (m *mockSessionProvider) ResumeWorktree(_, _, _ string) error                      { return nil }
+func (m *mockSessionProvider) ResumeWorktreeWithOpts(_, _, _, _, _ string) error        { return nil }
+func (m *mockSessionProvider) ListWorktrees(_ string) ([]gui.WorktreeInfo, error)       { return nil, nil }
+func (m *mockSessionProvider) CreatePMSession(_ string) error                           { return nil }
+func (m *mockSessionProvider) CreatePMSessionWithOpts(_, _, _ string) error             { return nil }
+func (m *mockSessionProvider) CreateWorkerSession(_, _, _ string) error                 { return nil }
+func (m *mockSessionProvider) CreateWithOpts(_, _, _ string) error                      { return nil }
+func (m *mockSessionProvider) CreateAtPaneCWDWithOpts(_, _ string) error                { return nil }
 
 func (m *mockSessionProvider) getSentChoices() []sentChoice {
 	m.mu.Lock()

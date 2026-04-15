@@ -62,12 +62,27 @@ func (m *mockCommands) LaunchLazygit(target OperationTarget) error {
 	return nil
 }
 
+func (m *mockCommands) CreateWithOpts(target OperationTarget, _, _ string) error {
+	m.createCalls = append(m.createCalls, target)
+	return nil
+}
+
 func (m *mockCommands) CreateWorktree(target OperationTarget, name, prompt string) error {
 	m.createWorktreeCalls = append(m.createWorktreeCalls, worktreeCall{Target: target, Name: name, Prompt: prompt})
 	return nil
 }
 
+func (m *mockCommands) CreateWorktreeWithOpts(target OperationTarget, name, prompt, _, _ string) error {
+	m.createWorktreeCalls = append(m.createWorktreeCalls, worktreeCall{Target: target, Name: name, Prompt: prompt})
+	return nil
+}
+
 func (m *mockCommands) ResumeWorktree(target OperationTarget, wtPath, prompt string) error {
+	m.resumeWorktreeCalls = append(m.resumeWorktreeCalls, worktreeCall{Target: target, Name: wtPath, Prompt: prompt})
+	return nil
+}
+
+func (m *mockCommands) ResumeWorktreeWithOpts(target OperationTarget, wtPath, prompt, _, _ string) error {
 	m.resumeWorktreeCalls = append(m.resumeWorktreeCalls, worktreeCall{Target: target, Name: wtPath, Prompt: prompt})
 	return nil
 }
@@ -82,6 +97,11 @@ func (m *mockCommands) ListWorktrees(target OperationTarget) ([]gui.WorktreeInfo
 }
 
 func (m *mockCommands) CreatePMSession(target OperationTarget) error {
+	m.createPMCalls = append(m.createPMCalls, target)
+	return nil
+}
+
+func (m *mockCommands) CreatePMSessionWithOpts(target OperationTarget, _, _ string) error {
 	m.createPMCalls = append(m.createPMCalls, target)
 	return nil
 }

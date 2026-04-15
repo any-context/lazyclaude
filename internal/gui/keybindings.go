@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/any-context/lazyclaude/internal/gui/chooser"
 	"github.com/any-context/lazyclaude/internal/gui/keyhandler"
 	"github.com/any-context/lazyclaude/internal/gui/keymap"
 	"github.com/any-context/lazyclaude/internal/session"
@@ -140,6 +141,15 @@ func (a *App) setupGlobalKeybindings() error {
 			return nil
 		}
 
+		selectedProfile := ""
+		if a.dialog.ProfileCursor < len(a.dialog.ProfileItems) {
+			selectedProfile = a.dialog.ProfileItems[a.dialog.ProfileCursor].Label
+		}
+		options := ""
+		if optView, err2 := g.View("worktree-options"); err2 == nil {
+			options = strings.TrimSpace(optView.TextArea.GetContent())
+		}
+
 		projectRoot := a.currentProjectRoot()
 		a.closeWorktreeDialog(g)
 
@@ -147,7 +157,7 @@ func (a *App) setupGlobalKeybindings() error {
 			if a.sessions == nil {
 				return
 			}
-			err := a.sessions.CreateWorktree(branchName, userPrompt, projectRoot)
+			err := a.sessions.CreateWorktreeWithOpts(branchName, userPrompt, projectRoot, selectedProfile, options)
 			if err != nil {
 				a.gui.Update(func(g *gocui.Gui) error {
 					a.showError(g, fmt.Sprintf("Error: %v", err))
@@ -168,7 +178,7 @@ func (a *App) setupGlobalKeybindings() error {
 		return nil
 	}
 
-	for _, viewName := range []string{"worktree-branch", "worktree-prompt"} {
+	for _, viewName := range []string{"worktree-branch", "worktree-prompt", "worktree-profile-chooser", "worktree-options"} {
 		if err := a.gui.SetKeybinding(viewName, gocui.KeyEnter, gocui.ModNone, worktreeConfirm); err != nil {
 			return err
 		}
@@ -186,7 +196,7 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// Tab: switch between branch and prompt fields
+	// Tab navigation: Branch → Prompt → Profile → Options → Branch (loop)
 	if err := a.gui.SetKeybinding("worktree-branch", gocui.KeyTab, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		a.dialog.ActiveField = "worktree-prompt"
 		if _, err := g.SetCurrentView("worktree-prompt"); err != nil && !isUnknownView(err) {
@@ -197,6 +207,24 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 	if err := a.gui.SetKeybinding("worktree-prompt", gocui.KeyTab, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.dialog.ActiveField = "worktree-profile-chooser"
+		if _, err := g.SetCurrentView("worktree-profile-chooser"); err != nil && !isUnknownView(err) {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := a.gui.SetKeybinding("worktree-profile-chooser", gocui.KeyTab, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.dialog.ActiveField = "worktree-options"
+		if _, err := g.SetCurrentView("worktree-options"); err != nil && !isUnknownView(err) {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := a.gui.SetKeybinding("worktree-options", gocui.KeyTab, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		a.dialog.ActiveField = "worktree-branch"
 		if _, err := g.SetCurrentView("worktree-branch"); err != nil && !isUnknownView(err) {
 			return err
@@ -204,6 +232,44 @@ func (a *App) setupGlobalKeybindings() error {
 		return nil
 	}); err != nil {
 		return err
+	}
+
+	// j/k navigation in worktree profile chooser
+	worktreeProfileMove := func(delta int) func(*gocui.Gui, *gocui.View) error {
+		return func(g *gocui.Gui, v *gocui.View) error {
+			chooser.Move(&chooser.State{Items: a.dialog.ProfileItems, Cursor: a.dialog.ProfileCursor}, delta)
+			// Move updates a copy; apply the delta manually.
+			next := a.dialog.ProfileCursor + delta
+			if next < 0 {
+				next = 0
+			}
+			if n := len(a.dialog.ProfileItems); n > 0 && next >= n {
+				next = n - 1
+			}
+			a.dialog.ProfileCursor = next
+			if pv, err2 := g.View("worktree-profile-chooser"); err2 == nil {
+				renderProfileChooser(pv, a.dialog.ProfileItems, a.dialog.ProfileCursor)
+			}
+			return nil
+		}
+	}
+	for _, key := range []gocui.Key{gocui.KeyArrowDown, gocui.KeyArrowUp} {
+		delta := 1
+		if key == gocui.KeyArrowUp {
+			delta = -1
+		}
+		if err := a.gui.SetKeybinding("worktree-profile-chooser", key, gocui.ModNone, worktreeProfileMove(delta)); err != nil {
+			return err
+		}
+	}
+	for _, ch := range []rune{'j', 'k'} {
+		delta := 1
+		if ch == 'k' {
+			delta = -1
+		}
+		if err := a.gui.SetKeybinding("worktree-profile-chooser", ch, gocui.ModNone, worktreeProfileMove(delta)); err != nil {
+			return err
+		}
 	}
 
 	// 7. Worktree chooser bindings (j/k/Enter/Esc)
@@ -274,18 +340,32 @@ func (a *App) setupGlobalKeybindings() error {
 		return err
 	}
 
-	// 8. Worktree resume prompt bindings (Enter/Esc/Ctrl+J)
-	if err := a.gui.SetKeybinding("worktree-resume-prompt", gocui.KeyEnter, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		userPrompt := v.TextArea.GetContent()
+	// 8. Worktree resume prompt bindings (Enter/Esc/Ctrl+J + profile/options)
+	resumeConfirm := func(g *gocui.Gui, v *gocui.View) error {
+		promptView, err := g.View("worktree-resume-prompt")
+		if err != nil {
+			return nil
+		}
+		userPrompt := promptView.TextArea.GetContent()
 		wtPath := a.dialog.SelectedPath
 		projectRoot := a.currentProjectRoot()
+
+		selectedProfile := ""
+		if a.dialog.ProfileCursor < len(a.dialog.ProfileItems) {
+			selectedProfile = a.dialog.ProfileItems[a.dialog.ProfileCursor].Label
+		}
+		options := ""
+		if optView, err2 := g.View("worktree-resume-options"); err2 == nil {
+			options = strings.TrimSpace(optView.TextArea.GetContent())
+		}
+
 		a.closeWorktreeResumePrompt(g)
 
 		go func() {
 			if a.sessions == nil {
 				return
 			}
-			err := a.sessions.ResumeWorktree(wtPath, userPrompt, projectRoot)
+			err := a.sessions.ResumeWorktreeWithOpts(wtPath, userPrompt, projectRoot, selectedProfile, options)
 			if err != nil {
 				a.gui.Update(func(g *gocui.Gui) error {
 					a.showError(g, fmt.Sprintf("Error: %v", err))
@@ -300,20 +380,237 @@ func (a *App) setupGlobalKeybindings() error {
 			})
 		}()
 		return nil
-	}); err != nil {
-		return err
 	}
 
-	if err := a.gui.SetKeybinding("worktree-resume-prompt", gocui.KeyEsc, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+	resumeCancel := func(g *gocui.Gui, v *gocui.View) error {
 		a.closeWorktreeResumePrompt(g)
 		return nil
-	}); err != nil {
-		return err
+	}
+
+	for _, viewName := range []string{
+		"worktree-resume-prompt",
+		"worktree-resume-profile-chooser",
+		"worktree-resume-options",
+	} {
+		if err := a.gui.SetKeybinding(viewName, gocui.KeyEnter, gocui.ModNone, resumeConfirm); err != nil {
+			return err
+		}
+		if err := a.gui.SetKeybinding(viewName, gocui.KeyEsc, gocui.ModNone, resumeCancel); err != nil {
+			return err
+		}
 	}
 
 	if err := a.gui.SetKeybinding("worktree-resume-prompt", gocui.KeyCtrlJ, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		v.TextArea.TypeCharacter("\n")
 		v.RenderTextArea()
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// Tab navigation for resume dialog: Prompt → Profile → Options → Prompt (loop)
+	if err := a.gui.SetKeybinding("worktree-resume-prompt", gocui.KeyTab, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.dialog.ActiveField = "worktree-resume-profile-chooser"
+		if _, err := g.SetCurrentView("worktree-resume-profile-chooser"); err != nil && !isUnknownView(err) {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := a.gui.SetKeybinding("worktree-resume-profile-chooser", gocui.KeyTab, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.dialog.ActiveField = "worktree-resume-options"
+		if _, err := g.SetCurrentView("worktree-resume-options"); err != nil && !isUnknownView(err) {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := a.gui.SetKeybinding("worktree-resume-options", gocui.KeyTab, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.dialog.ActiveField = "worktree-resume-prompt"
+		if _, err := g.SetCurrentView("worktree-resume-prompt"); err != nil && !isUnknownView(err) {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// j/k navigation in resume profile chooser
+	resumeProfileMove := func(delta int) func(*gocui.Gui, *gocui.View) error {
+		return func(g *gocui.Gui, v *gocui.View) error {
+			next := a.dialog.ProfileCursor + delta
+			if next < 0 {
+				next = 0
+			}
+			if n := len(a.dialog.ProfileItems); n > 0 && next >= n {
+				next = n - 1
+			}
+			a.dialog.ProfileCursor = next
+			if pv, err2 := g.View("worktree-resume-profile-chooser"); err2 == nil {
+				renderProfileChooser(pv, a.dialog.ProfileItems, a.dialog.ProfileCursor)
+			}
+			return nil
+		}
+	}
+	for _, key := range []gocui.Key{gocui.KeyArrowDown, gocui.KeyArrowUp} {
+		delta := 1
+		if key == gocui.KeyArrowUp {
+			delta = -1
+		}
+		if err := a.gui.SetKeybinding("worktree-resume-profile-chooser", key, gocui.ModNone, resumeProfileMove(delta)); err != nil {
+			return err
+		}
+	}
+	for _, ch := range []rune{'j', 'k'} {
+		delta := 1
+		if ch == 'k' {
+			delta = -1
+		}
+		if err := a.gui.SetKeybinding("worktree-resume-profile-chooser", ch, gocui.ModNone, resumeProfileMove(delta)); err != nil {
+			return err
+		}
+	}
+
+	// 8.5. Profile dialog bindings (Enter/Esc/Tab + j/k for chooser)
+	profileDialogConfirm := func(g *gocui.Gui, v *gocui.View) error {
+		selectedProfile := ""
+		if a.dialog.ProfileCursor < len(a.dialog.ProfileItems) {
+			selectedProfile = a.dialog.ProfileItems[a.dialog.ProfileCursor].Label
+		}
+		options := ""
+		if optView, err2 := g.View("profile-options"); err2 == nil {
+			options = strings.TrimSpace(optView.TextArea.GetContent())
+		}
+
+		kind := a.dialog.ProfileConfirmKind
+		sessionPath := a.dialog.ProfileSessionPath
+		a.closeProfileDialog(g)
+
+		switch kind {
+		case "session":
+			go func() {
+				if a.sessions == nil {
+					return
+				}
+				err := a.sessions.CreateWithOpts(sessionPath, selectedProfile, options)
+				a.gui.Update(func(g *gocui.Gui) error {
+					if err != nil {
+						a.showError(g, fmt.Sprintf("Error: %v", err))
+					} else {
+						a.setStatus(g, "Session created")
+						a.moveCursorToLastSession()
+					}
+					return nil
+				})
+			}()
+		case "session_cwd":
+			go func() {
+				if a.sessions == nil {
+					return
+				}
+				err := a.sessions.CreateAtPaneCWDWithOpts(selectedProfile, options)
+				a.gui.Update(func(g *gocui.Gui) error {
+					if err != nil {
+						a.showError(g, fmt.Sprintf("Error: %v", err))
+					} else {
+						a.setStatus(g, "Session created")
+						a.moveCursorToLastSession()
+					}
+					return nil
+				})
+			}()
+		case "pm_session":
+			go func() {
+				if a.sessions == nil {
+					return
+				}
+				err := a.sessions.CreatePMSessionWithOpts(sessionPath, selectedProfile, options)
+				a.gui.Update(func(g *gocui.Gui) error {
+					if err != nil {
+						a.showError(g, fmt.Sprintf("Error: %v", err))
+					} else {
+						a.setStatus(g, "PM session started")
+					}
+					return nil
+				})
+			}()
+		}
+		return nil
+	}
+
+	profileDialogCancel := func(g *gocui.Gui, v *gocui.View) error {
+		a.closeProfileDialog(g)
+		return nil
+	}
+
+	for _, viewName := range []string{"profile-chooser", "profile-options"} {
+		if err := a.gui.SetKeybinding(viewName, gocui.KeyEnter, gocui.ModNone, profileDialogConfirm); err != nil {
+			return err
+		}
+		if err := a.gui.SetKeybinding(viewName, gocui.KeyEsc, gocui.ModNone, profileDialogCancel); err != nil {
+			return err
+		}
+	}
+
+	// Tab: Profile chooser → Options → Profile chooser (loop)
+	if err := a.gui.SetKeybinding("profile-chooser", gocui.KeyTab, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.dialog.ActiveField = "profile-options"
+		if _, err := g.SetCurrentView("profile-options"); err != nil && !isUnknownView(err) {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := a.gui.SetKeybinding("profile-options", gocui.KeyTab, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.dialog.ActiveField = "profile-chooser"
+		if _, err := g.SetCurrentView("profile-chooser"); err != nil && !isUnknownView(err) {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// j/k and arrow navigation in profile chooser
+	profileChooserMove := func(delta int) func(*gocui.Gui, *gocui.View) error {
+		return func(g *gocui.Gui, v *gocui.View) error {
+			next := a.dialog.ProfileCursor + delta
+			if next < 0 {
+				next = 0
+			}
+			if n := len(a.dialog.ProfileItems); n > 0 && next >= n {
+				next = n - 1
+			}
+			a.dialog.ProfileCursor = next
+			renderProfileChooser(v, a.dialog.ProfileItems, a.dialog.ProfileCursor)
+			return nil
+		}
+	}
+	for _, key := range []gocui.Key{gocui.KeyArrowDown, gocui.KeyArrowUp} {
+		delta := 1
+		if key == gocui.KeyArrowUp {
+			delta = -1
+		}
+		if err := a.gui.SetKeybinding("profile-chooser", key, gocui.ModNone, profileChooserMove(delta)); err != nil {
+			return err
+		}
+	}
+	for _, ch := range []rune{'j', 'k'} {
+		delta := 1
+		if ch == 'k' {
+			delta = -1
+		}
+		if err := a.gui.SetKeybinding("profile-chooser", ch, gocui.ModNone, profileChooserMove(delta)); err != nil {
+			return err
+		}
+	}
+
+	// 8.6. Remote profile error dialog (Esc only)
+	if err := a.gui.SetKeybinding("remote-profile-error", gocui.KeyEsc, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.closeRemoteProfileErrorDialog(g)
 		return nil
 	}); err != nil {
 		return err

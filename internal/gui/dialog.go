@@ -1,21 +1,26 @@
 package gui
 
-import "github.com/any-context/lazyclaude/internal/gui/keymap"
+import (
+	"github.com/any-context/lazyclaude/internal/gui/chooser"
+	"github.com/any-context/lazyclaude/internal/gui/keymap"
+)
 
 // DialogKind identifies which input dialog is currently active.
 type DialogKind int
 
 const (
-	DialogNone             DialogKind = iota // no dialog
-	DialogRename                           // rename-input
-	DialogWorktree                         // worktree-branch + worktree-prompt (new)
-	DialogWorktreeChooser                  // worktree-chooser (select existing)
-	DialogWorktreeResume                   // worktree-resume-prompt (prompt only for existing)
-	DialogKeybindHelp                      // keybind-help overlay (Telescope style)
-	DialogSearch                           // inline "/" search on active panel
-	DialogConnect                          // connect-input for remote host
-	DialogConnectChooser                   // connect-chooser (SSH host selection)
-	DialogAskpass                          // askpass-input (masked password)
+	DialogNone               DialogKind = iota // no dialog
+	DialogRename                               // rename-input
+	DialogWorktree                             // worktree-branch + worktree-prompt (new)
+	DialogWorktreeChooser                      // worktree-chooser (select existing)
+	DialogWorktreeResume                       // worktree-resume-prompt (prompt only for existing)
+	DialogKeybindHelp                          // keybind-help overlay (Telescope style)
+	DialogSearch                               // inline "/" search on active panel
+	DialogConnect                              // connect-input for remote host
+	DialogConnectChooser                       // connect-chooser (SSH host selection)
+	DialogAskpass                              // askpass-input (masked password)
+	DialogProfile                              // profile chooser + options input (n/N/P)
+	DialogRemoteProfileError                   // remote config.json parse error (UI4)
 )
 
 // DialogState groups all input dialog state into a single struct,
@@ -23,7 +28,7 @@ const (
 type DialogState struct {
 	Kind           DialogKind     // current dialog (DialogNone = no dialog)
 	RenameID       string         // session ID being renamed (empty = no rename)
-	ActiveField    string         // which worktree dialog field has focus
+	ActiveField    string         // which dialog field has focus
 	WorktreeItems  []WorktreeInfo // items in worktree chooser
 	WorktreeCursor int            // selected index in chooser (len(items) = "New")
 	SelectedPath   string         // path of chosen existing worktree
@@ -47,6 +52,16 @@ type DialogState struct {
 	// Active filter (persisted after Enter confirms a search)
 	ActiveFilter      string // confirmed filter query (empty = no filter)
 	ActiveFilterPanel string // panel the filter applies to
+
+	// Profile dialog state (DialogProfile, and embedded in DialogWorktree / DialogWorktreeResume)
+	ProfileItems       []chooser.Item // list of profile items for chooser display
+	ProfileCursor      int            // cursor position in profile chooser
+	OptionsText        string         // options text input value (kept across re-renders)
+	ProfileConfirmKind string         // "session" | "session_cwd" | "pm_session"
+	ProfileSessionPath string         // path passed to the session-creation call on confirm
+
+	// Remote profile error dialog state (DialogRemoteProfileError)
+	RemoteProfileErrorMsg string // formatted error message shown to the user
 }
 
 // HasActiveDialog returns true if any input dialog is open.
@@ -74,6 +89,9 @@ func (a *App) dialogFocusView() string {
 	case DialogWorktreeChooser:
 		return "worktree-chooser"
 	case DialogWorktreeResume:
+		if a.dialog.ActiveField != "" {
+			return a.dialog.ActiveField
+		}
 		return "worktree-resume-prompt"
 	case DialogKeybindHelp:
 		return "keybind-help-input"
@@ -85,7 +103,30 @@ func (a *App) dialogFocusView() string {
 		return "connect-chooser"
 	case DialogAskpass:
 		return "askpass-input"
+	case DialogProfile:
+		if a.dialog.ActiveField != "" {
+			return a.dialog.ActiveField
+		}
+		return "profile-chooser"
+	case DialogRemoteProfileError:
+		return "remote-profile-error"
 	default:
 		return ""
 	}
+}
+
+// isChooserView reports whether the given view name is a non-editable
+// chooser (uses Highlight for selection) rather than a text-input view.
+// layoutMain uses this to suppress gocui's cursor on chooser views.
+func isChooserView(name string) bool {
+	switch name {
+	case "worktree-chooser",
+		"connect-chooser",
+		"profile-chooser",
+		"worktree-profile-chooser",
+		"worktree-resume-profile-chooser",
+		"remote-profile-error":
+		return true
+	}
+	return false
 }

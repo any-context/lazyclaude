@@ -149,6 +149,50 @@ func (a *App) FormatConnectionStatusForTest() string {
 	return a.formatConnectionStatus()
 }
 
+// ShowProfileDialogForTest opens the profile dialog for testing.
+func (a *App) ShowProfileDialogForTest(confirmKind, sessionPath string) bool {
+	return a.showProfileDialog(a.gui, confirmKind, sessionPath)
+}
+
+// CloseProfileDialogForTest closes the profile dialog for testing.
+func (a *App) CloseProfileDialogForTest() {
+	a.closeProfileDialog(a.gui)
+}
+
+// ShowRemoteProfileErrorDialogForTest opens the remote profile error dialog for testing.
+func (a *App) ShowRemoteProfileErrorDialogForTest(host, reason string) bool {
+	return a.showRemoteProfileErrorDialog(a.gui, host, reason)
+}
+
+// CloseRemoteProfileErrorDialogForTest closes the remote profile error dialog for testing.
+func (a *App) CloseRemoteProfileErrorDialogForTest() {
+	a.closeRemoteProfileErrorDialog(a.gui)
+}
+
+// ProfileItemsForTest returns the current profile items in dialog state for testing.
+func (a *App) ProfileItemsForTest() []interface{} {
+	items := make([]interface{}, len(a.dialog.ProfileItems))
+	for i, item := range a.dialog.ProfileItems {
+		items[i] = item
+	}
+	return items
+}
+
+// ProfileCursorForTest returns the current profile cursor position for testing.
+func (a *App) ProfileCursorForTest() int {
+	return a.dialog.ProfileCursor
+}
+
+// ProfileConfirmKindForTest returns the current profile confirm kind for testing.
+func (a *App) ProfileConfirmKindForTest() string {
+	return a.dialog.ProfileConfirmKind
+}
+
+// ProfileSessionPathForTest returns the current profile session path for testing.
+func (a *App) ProfileSessionPathForTest() string {
+	return a.dialog.ProfileSessionPath
+}
+
 // DrainBrokerForTest drains any pending events from the notify broker subscription
 // and calls showToolPopup for each one. Simulates what the ticker goroutine does
 // when the broker channel has events, without needing to run the event loop.
