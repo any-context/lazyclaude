@@ -140,13 +140,12 @@ func TestManager_PurgeOrphans(t *testing.T) {
 	s2, _ := mgr.Create(ctx, "/home/user/app2")
 
 	// Manually set one as orphan
-	all := mgr.Store().All()
 	_ = s1
 	_ = s2
 	// Sync with empty tmux → all become orphans
 	mgr.Store().SyncWithTmux(nil, nil)
 
-	all = mgr.Store().All()
+	all := mgr.Store().All()
 	for _, s := range all {
 		assert.Equal(t, session.StatusOrphan, s.Status)
 	}

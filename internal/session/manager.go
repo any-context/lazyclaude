@@ -278,13 +278,11 @@ func (m *Manager) createLocked(ctx context.Context, dirPath, profileName string,
 		return m.launchErrorSession(ctx, sess, err)
 	}
 	launchSuccess := false
-	if cleanupFn != nil {
-		defer func() {
-			if !launchSuccess {
-				cleanupFn()
-			}
-		}()
-	}
+	defer func() {
+		if !launchSuccess {
+			cleanupFn()
+		}
+	}()
 
 	env := claudeEnv(id, spec)
 	result, launchErr := m.launchSession(ctx, sess, claudeCmd, absPath, "", env)
@@ -366,38 +364,52 @@ func (m *Manager) createWorktreeSession(ctx context.Context, opts worktreeOpts) 
 	})
 }
 
-// WorktreeOpts configures CreateWorktreeOpts.
+// WorktreeOpts holds arguments for Manager.CreateWorktreeOpts.
 type WorktreeOpts struct {
 	Name        string
 	Prompt      string
 	ProjectRoot string
-	Profile     string // profile name; empty means effective default
-	Options     string // space-separated extra args appended to claude invocation
+	// Profile selects a profile by name. Empty string resolves to the
+	// effective default profile.
+	Profile string
+	// Options is a space-separated list of extra arguments appended to the
+	// claude invocation. Quoted arguments with internal spaces are NOT
+	// supported; use profile.Args for that.
+	Options string
 }
 
-// WorkerOpts configures CreateWorkerSessionOpts.
+// WorkerOpts holds arguments for Manager.CreateWorkerSessionOpts.
 type WorkerOpts struct {
 	Name        string
 	Prompt      string
 	ProjectRoot string
 	Profile     string
-	Options     string
+	// Options is a space-separated list of extra arguments appended to the
+	// claude invocation. Quoted arguments with internal spaces are NOT
+	// supported; use profile.Args for that.
+	Options string
 }
 
-// PMOpts configures CreatePMSessionOpts.
+// PMOpts holds arguments for Manager.CreatePMSessionOpts.
 type PMOpts struct {
 	ProjectRoot string
 	Profile     string
-	Options     string
+	// Options is a space-separated list of extra arguments appended to the
+	// claude invocation. Quoted arguments with internal spaces are NOT
+	// supported; use profile.Args for that.
+	Options string
 }
 
-// ResumeWorktreeOpts configures ResumeWorktreeOpts.
-type ResumeWorktreeOpts struct {
+// ResumeOpts holds arguments for Manager.ResumeWorktreeOpts.
+type ResumeOpts struct {
 	WorktreePath string
 	Prompt       string
 	ProjectRoot  string
 	Profile      string
-	Options      string
+	// Options is a space-separated list of extra arguments appended to the
+	// claude invocation. Quoted arguments with internal spaces are NOT
+	// supported; use profile.Args for that.
+	Options string
 }
 
 // CreateWorktreeOpts creates a git worktree and launches Claude Code with an
@@ -428,7 +440,7 @@ func (m *Manager) CreateWorktree(ctx context.Context, name, userPrompt, projectR
 // ResumeWorktreeOpts launches Claude Code in an existing worktree directory,
 // using the supplied profile and extra options. Unlike CreateWorktreeOpts, it
 // does not run `git worktree add`.
-func (m *Manager) ResumeWorktreeOpts(ctx context.Context, opts ResumeWorktreeOpts) (*Session, error) {
+func (m *Manager) ResumeWorktreeOpts(ctx context.Context, opts ResumeOpts) (*Session, error) {
 	return m.createWorktreeSession(ctx, worktreeOpts{
 		Name:        filepath.Base(opts.WorktreePath),
 		WtPath:      opts.WorktreePath,
@@ -446,7 +458,7 @@ func (m *Manager) ResumeWorktreeOpts(ctx context.Context, opts ResumeWorktreeOpt
 //
 // Deprecated: Use ResumeWorktreeOpts.
 func (m *Manager) ResumeWorktree(ctx context.Context, worktreePath, userPrompt, projectRoot string) (*Session, error) {
-	return m.ResumeWorktreeOpts(ctx, ResumeWorktreeOpts{
+	return m.ResumeWorktreeOpts(ctx, ResumeOpts{
 		WorktreePath: worktreePath,
 		Prompt:       userPrompt,
 		ProjectRoot:  projectRoot,
@@ -576,13 +588,11 @@ func (m *Manager) launchWorktreeSession(ctx context.Context, args launchWorktree
 		return m.launchErrorSession(ctx, sess, err)
 	}
 	launchSuccess := false
-	if cleanupFn != nil {
-		defer func() {
-			if !launchSuccess {
-				cleanupFn()
-			}
-		}()
-	}
+	defer func() {
+		if !launchSuccess {
+			cleanupFn()
+		}
+	}()
 	result, launchErr := m.launchSession(ctx, sess, claudeCmd, startDir, args.ProjectRoot, claudeEnv(id, spec))
 	if launchErr == nil {
 		launchSuccess = true
@@ -619,7 +629,7 @@ func (m *Manager) buildClaudeCommand(sess Session, spec LaunchSpec) (string, fun
 		return "", nil, fmt.Errorf("write launcher: %w", err)
 	}
 	cmd := fmt.Sprintf("exec \"$SHELL\" -lic 'exec bash %s'", shell.Quote(launcher))
-	return cmd, func() { os.Remove(launcher) }, nil
+	return cmd, func() { _ = os.Remove(launcher) }, nil
 }
 
 // buildLaunchCommand builds the tmux command for launching Claude Code in a
@@ -639,7 +649,7 @@ func (m *Manager) buildLaunchCommand(sess Session, spec LaunchSpec, systemPrompt
 		return "", "", nil, fmt.Errorf("write launcher: %w", werr)
 	}
 	claudeCmd = fmt.Sprintf("exec \"$SHELL\" -lic 'exec bash %s'", shell.Quote(launcher))
-	return claudeCmd, sess.Path, func() { os.Remove(launcher) }, nil
+	return claudeCmd, sess.Path, func() { _ = os.Remove(launcher) }, nil
 }
 
 // launcherOpts drives writeLauncher. SystemPrompt and UserPrompt are
@@ -949,13 +959,11 @@ func (m *Manager) CreatePMSessionOpts(ctx context.Context, opts PMOpts) (*Sessio
 	m.log.Info("createPMSession", "id", id[:8], "path", opts.ProjectRoot, "profile", prof.Name)
 
 	launchSuccess := false
-	if cleanupFn != nil {
-		defer func() {
-			if !launchSuccess {
-				cleanupFn()
-			}
-		}()
-	}
+	defer func() {
+		if !launchSuccess {
+			cleanupFn()
+		}
+	}()
 	result, launchErr := m.launchSession(ctx, sess, claudeCmd, startDir, opts.ProjectRoot, claudeEnv(id, spec))
 	if launchErr == nil {
 		launchSuccess = true
