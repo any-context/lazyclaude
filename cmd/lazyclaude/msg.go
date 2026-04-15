@@ -72,12 +72,12 @@ func newMsgSendCmd() *cobra.Command {
 
 func newMsgCreateCmd() *cobra.Command {
 	var (
-		name       string
-		createType string
-		prompt     string
-		from       string
-		profile    string
-		options    string
+		name        string
+		createType  string
+		prompt      string
+		from        string
+		profileName string
+		options     string
 	)
 
 	cmd := &cobra.Command{
@@ -99,7 +99,7 @@ func newMsgCreateCmd() *cobra.Command {
 
 			client := server.NewClient(disc.Port, disc.Token)
 
-			result, err := client.CreateSession(cmd.Context(), from, name, createType, prompt, profile, options)
+			result, err := client.CreateSession(cmd.Context(), from, name, createType, prompt, profileName, options)
 			if err != nil {
 				return fmt.Errorf("create session: %w", err)
 			}
@@ -119,7 +119,7 @@ func newMsgCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&createType, "type", "worker", "session type (worker, local)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "initial prompt for the session")
 	cmd.Flags().StringVar(&from, "from", "cli", "caller session ID")
-	cmd.Flags().StringVar(&profile, "profile", "", "launch profile name (empty uses effective default)")
+	cmd.Flags().StringVar(&profileName, "profile", "", "launch profile name (empty uses effective default)")
 	cmd.Flags().StringVar(&options, "options", "", "extra flags passed to the claude invocation (space-separated)")
 
 	return cmd
