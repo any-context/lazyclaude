@@ -55,8 +55,9 @@ func ValidateWorktreeName(name string) error {
 //   - control characters (0x00-0x1F, 0x7F), space (0x20)
 //   - \, ~, ^, :, ?, *, [ (git-check-ref-format rejects these)
 //   - leading "-"
-//   - trailing ".lock"
+//   - trailing ".lock", or any component ending with ".lock" (e.g. "foo.lock/bar")
 //   - trailing "."
+//   - the literal name "HEAD"
 //   - path component starting with "." (e.g. ".hidden/x" or "a/.b")
 func ValidateBranchName(name string) error {
 	if strings.TrimSpace(name) == "" {
@@ -96,10 +97,17 @@ func ValidateBranchName(name string) error {
 	if strings.HasSuffix(name, ".lock") {
 		return fmt.Errorf("branch name cannot end with '.lock'")
 	}
-	// Reject path components starting with "." (e.g. ".hidden" or "a/.config").
+	// Reject the literal name "HEAD" (reserved by git).
+	if name == "HEAD" {
+		return fmt.Errorf("branch name cannot be %q", "HEAD")
+	}
+	// Reject path components starting with "." or ending with ".lock".
 	for _, component := range strings.Split(name, "/") {
 		if strings.HasPrefix(component, ".") {
 			return fmt.Errorf("branch name component cannot start with '.'")
+		}
+		if strings.HasSuffix(component, ".lock") {
+			return fmt.Errorf("branch name component cannot end with '.lock'")
 		}
 	}
 	return nil

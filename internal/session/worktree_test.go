@@ -277,6 +277,9 @@ func TestValidateBranchName_Invalid(t *testing.T) {
 		{"control-null", "feat/\x00bad", "control"},
 		{"control-0x1f", "feat/\x1fbad", "control"},
 		{"space", "feat bar", "control characters or spaces"},
+		{"HEAD-reserved", "HEAD", "HEAD"},
+		{"component-lock", "foo.lock/bar", "component cannot end with '.lock'"},
+		{"nested-component-lock", "x/y.lock", ".lock"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.label, func(t *testing.T) {

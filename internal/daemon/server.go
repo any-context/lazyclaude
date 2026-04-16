@@ -400,10 +400,9 @@ func (s *DaemonServer) handleWorktreeCreate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	wtPath := session.WorktreePath(req.ProjectRoot, req.Name)
 	writeJSON(w, http.StatusCreated, WorktreeCreateResponse{
 		SessionID:  sess.ID,
-		Path:       wtPath,
+		Path:       sess.Path,
 		Branch:     req.Name,
 		TmuxWindow: sess.WindowName(),
 		Role:       string(sess.Role),

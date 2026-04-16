@@ -340,10 +340,11 @@ func (m *Manager) createWorktreeSession(ctx context.Context, opts worktreeOpts) 
 	// Derive directory name from branch name (e.g. "feat/x" -> "feat-x").
 	dirName := DirNameFromBranch(opts.Name)
 
-	// Collision check: verify no existing session maps to the same directory.
-	// This catches cases like "feat/x" and "feat-x" colliding.
+	// Collision check: verify no existing worktree session maps to the same
+	// directory. Only check worktree sessions (those with IsWorktreePath) to
+	// avoid false positives from PM/plain sessions.
 	for _, s := range m.store.All() {
-		if filepath.Base(s.Path) == dirName && s.Name != opts.Name {
+		if IsWorktreePath(s.Path) && filepath.Base(s.Path) == dirName && s.Name != opts.Name {
 			return nil, fmt.Errorf("directory name collision: %q and %q both map to directory %q", opts.Name, s.Name, dirName)
 		}
 	}
