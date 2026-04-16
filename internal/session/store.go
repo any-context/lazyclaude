@@ -173,6 +173,10 @@ type Store struct {
 	mu       sync.RWMutex
 	path     string
 	projects []Project
+	// deleted tracks session IDs explicitly removed by this process.
+	// mergeFromDiskLocked skips these so that GC deletes are not undone by the
+	// merge, while sessions added by other processes are still preserved.
+	deleted map[string]struct{}
 }
 
 // NewStore creates a store backed by the given file path.
@@ -225,9 +229,14 @@ func (s *Store) Load() error {
 }
 
 // Save writes projects to disk atomically (write to temp, then rename).
+// Before writing, merges any sessions present on disk but absent from memory.
+// This prevents a stale-snapshot overwrite when multiple processes share the
+// same state.json: sessions added by another process are preserved.
 func (s *Store) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.mergeFromDiskLocked()
 
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -263,6 +272,85 @@ func (s *Store) Save() error {
 		return fmt.Errorf("rename state: %w", err)
 	}
 	return nil
+}
+
+// mergeFromDiskLocked reads the on-disk state and adds any sessions that exist
+// on disk but are absent from the in-memory store. Sessions known to memory
+// (whether alive or deleted) are left unchanged. Disk-only sessions are added
+// so that concurrent processes do not overwrite each other's writes.
+//
+// Caller must hold s.mu (write lock).
+func (s *Store) mergeFromDiskLocked() {
+	data, err := os.ReadFile(s.path)
+	if err != nil {
+		return // file missing or unreadable — nothing to merge
+	}
+
+	var diskProjects []Project
+
+	var sf stateFile
+	if jsonErr := json.Unmarshal(data, &sf); jsonErr == nil && sf.Version == stateVersion {
+		diskProjects = sf.Projects
+	} else {
+		var peek struct{ Version int }
+		if jsonErr := json.Unmarshal(data, &peek); jsonErr == nil && peek.Version == 2 {
+			if projects, migErr := migrateV2ToV3(data); migErr == nil {
+				diskProjects = projects
+			}
+		}
+	}
+
+	if len(diskProjects) == 0 {
+		return
+	}
+
+	// Build set of session IDs currently in memory.
+	memIDs := make(map[string]struct{})
+	for _, p := range s.projects {
+		for _, sess := range p.Sessions {
+			memIDs[sess.ID] = struct{}{}
+		}
+	}
+
+	// Add disk-only sessions to memory, skipping sessions we explicitly deleted.
+	for _, diskProj := range diskProjects {
+		for _, diskSess := range diskProj.Sessions {
+			if _, known := memIDs[diskSess.ID]; known {
+				continue
+			}
+			if _, tombstoned := s.deleted[diskSess.ID]; tombstoned {
+				continue
+			}
+			s.addSessionLocked(diskSess, diskProj.Path)
+		}
+	}
+}
+
+// addSessionLocked inserts a session into the store without acquiring the lock.
+// Caller must hold s.mu (write lock).
+func (s *Store) addSessionLocked(sess Session, projectRoot string) {
+	projectPath := projectRoot
+	if projectPath == "" {
+		projectPath = InferProjectRoot(sess.Path)
+	}
+	idx := s.findProjectIdxLocked(projectPath, sess.Host)
+
+	if idx < 0 {
+		p := Project{
+			ID:        uuid.New().String(),
+			Name:      filepath.Base(projectPath),
+			Path:      projectPath,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			Expanded:  true,
+			Sessions:  []Session{sess},
+		}
+		s.projects = append(s.projects, p)
+		return
+	}
+
+	s.projects[idx].Sessions = append(s.projects[idx].Sessions, sess)
+	s.projects[idx].UpdatedAt = time.Now()
 }
 
 // Projects returns a deep copy of all projects.
@@ -332,6 +420,8 @@ func (s *Store) Add(sess Session, projectRoot string) {
 }
 
 // Remove deletes a session by ID. Removes the project if it becomes empty.
+// Records the ID in the deleted set so that mergeFromDiskLocked does not
+// re-add the session from disk on the next Save().
 func (s *Store) Remove(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -344,6 +434,10 @@ func (s *Store) Remove(id string) bool {
 				sessions = append(sessions, s.projects[pi].Sessions[si+1:]...)
 				s.projects[pi].Sessions = sessions
 				s.maybeRemoveProjectLocked(pi)
+				if s.deleted == nil {
+					s.deleted = make(map[string]struct{})
+				}
+				s.deleted[id] = struct{}{}
 				return true
 			}
 		}
