@@ -32,19 +32,26 @@ Evaluate each PR on the following axes:
 
 ## Plan Review (PM responsibility)
 
-When creating or updating a plan file (`docs/dev/*-plan.md`), PM MUST run `/codex:rescue` to review the plan before assigning work to a Worker. This is a PM-side design review --- verify the plan is sound before implementation begins.
+When creating or updating a plan file (`docs/dev/*-plan.md`), PM MUST spawn a `codex` profile session (no role) and request a plan review before assigning work to a Worker:
+
+```bash
+lazyclaude msg create --profile codex --type local --name codex-plan-review-<pm-session-id> --from <pm-session-id>
+lazyclaude msg send --from <pm-session-id> --type review_request <codex-session-id> "<plan content and review request>"
+```
+
+This is a PM-side design review --- verify the plan is sound before implementation begins.
 
 ## Implementation Review Boundary
 
-PM does NOT perform codex-based review on Worker implementation code. Implementation-level codex review is the Worker's responsibility. The Worker has access to the `codex` plugin (`openai-codex/codex`) and chooses the appropriate `/codex:*` command (e.g. `/codex:review`, `/codex:rescue`). PM reviews the diff, build, tests, and plan adherence only.
+PM does NOT perform codex-based review on Worker implementation code. Implementation-level codex review is the Worker's responsibility. The Worker spawns a codex session (profile=codex, type=local, no role) for implementation review. PM reviews the diff, build, tests, and plan adherence only.
 
 ## Workflow
 
-1. PM creates/updates a plan file and reviews it with `/codex:rescue`
+1. PM creates/updates a plan file and reviews it with a codex session (profile=codex, type=local, no role)
 2. PM spawns a Worker and assigns a task
 3. Worker completes the task and commits on a dedicated branch
 4. Worker runs `/go-review` and fixes all findings
-5. Worker runs their chosen codex review and fixes all findings
+5. Worker spawns a codex session (profile=codex, type=local, no role) and gets a review; fixes all findings
 6. Worker sends `review_request` to PM. The request MUST include `/go-review` results and codex review results (findings + final verdict)
 7. PM reads the diff, runs `go build`, `go vet`, and `go test -race` on the worker's worktree
 8. PM verifies the diff against the plan file --- every step implemented, no out-of-scope changes
@@ -60,7 +67,7 @@ PM does NOT perform codex-based review on Worker implementation code. Implementa
 
 ## PM review checklist (must pass every item before user verification)
 
-- [ ] Plan reviewed with `/codex:rescue` before assigning work
+- [ ] Plan reviewed with a codex session (profile=codex, type=local, no role) before assigning work
 - [ ] Diff reviewed against the plan file (`docs/dev/*-plan.md`): every Step implemented, no out-of-scope changes
 - [ ] `go build ./...` clean in the worker worktree
 - [ ] `go vet ./...` clean
@@ -81,5 +88,5 @@ Fix:
 
 Verify:
 - [ ] Run /go-review and report results
-- [ ] Run codex review (choose appropriate /codex:* command from the codex plugin) and report results
+- [ ] Run codex review (profile=codex, type=local, no role) and report results
 ```
