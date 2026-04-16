@@ -471,9 +471,6 @@ func findProjectByPathHost(mgr *session.Manager, path, host string) *session.Pro
 // projectHostOf inspects a project's sessions and returns the host they
 // carry. Mirrors session.projectHost (unexported in the session package).
 func projectHostOf(p session.Project) string {
-	if p.PM != nil && p.PM.Host != "" {
-		return p.PM.Host
-	}
 	for _, s := range p.Sessions {
 		if s.Host != "" {
 			return s.Host
@@ -506,12 +503,12 @@ func assertSingleNonPMSession(t *testing.T, mgr *session.Manager,
 	require.NotNil(t, proj, "project (%q, %q) must exist", expectProjectPath, expectHost)
 	require.Len(t, proj.Sessions, 1, "project must contain exactly one session")
 	assert.Equal(t, sess.ID, proj.Sessions[0].ID, "session must be linked to project.Sessions")
-	assert.Nil(t, proj.PM, "non-PM routing must not populate project.PM")
+	assert.Nil(t, proj.FindPM(), "non-PM routing must not create a PM session")
 }
 
 // assertSinglePMSession verifies that the store contains exactly one
 // session with Role=RolePM at the expected project, and that the PM is
-// attached as project.PM (not project.Sessions). Use this helper for P
+// present in project.Sessions with the correct role. Use this helper for P
 // cases.
 func assertSinglePMSession(t *testing.T, mgr *session.Manager,
 	expectProjectPath, expectSessionPath, expectHost string,
@@ -526,9 +523,10 @@ func assertSinglePMSession(t *testing.T, mgr *session.Manager,
 
 	proj := findProjectByPathHost(mgr, expectProjectPath, expectHost)
 	require.NotNil(t, proj, "project (%q, %q) must exist", expectProjectPath, expectHost)
-	require.NotNil(t, proj.PM, "P routing must populate project.PM")
-	assert.Equal(t, sess.ID, proj.PM.ID, "PM session must be linked to project.PM")
-	assert.Empty(t, proj.Sessions, "P routing must not populate project.Sessions")
+	pmSess := proj.FindPM()
+	require.NotNil(t, pmSess, "P routing must create a PM session in project.Sessions")
+	assert.Equal(t, sess.ID, pmSess.ID, "PM session must be findable via FindPM()")
+	require.Len(t, proj.Sessions, 1, "P routing must create exactly one session")
 }
 
 // --- n (CreateSession) ×4 ----------------------------------------------------
@@ -748,9 +746,9 @@ func TestIntegration_P_LocalCursor_StaysLocal(t *testing.T) {
 	require.NoError(t, s.adapter.CreatePMSession(s.localProj))
 
 	assert.Empty(t, s.fakeRP.pmCalls)
-	// session.Manager.CreatePMSession sets sess.Path = projectRoot, so the
-	// session path matches the project path for PM sessions.
-	assertSinglePMSession(t, s.mgr, s.localProj, s.localProj, "")
+	// Local PM sessions now use worktrees — path is the worktree directory.
+	expectedPMPath := filepath.Join(s.localProj, session.WorktreePathSegment, "pm")
+	assertSinglePMSession(t, s.mgr, s.localProj, expectedPMPath, "")
 }
 
 // 18. P, cursor on remote node → fake.pmCalls[0] == /remote/proj, mirror stored
@@ -764,7 +762,7 @@ func TestIntegration_P_RemoteCursor_RoutesToRemote(t *testing.T) {
 	// fakeSessionProvider.CreatePMSession builds a synthetic response
 	// whose Path is the projectRoot and Role is "pm"; the PostCreateHook
 	// routes it through MirrorManager.CreateMirror into the local store
-	// as project.PM.
+	// as a PM session in project.Sessions.
 	assertSinglePMSession(t, s.mgr, remoteProj, remoteProj, integrationRemoteHost)
 }
 
@@ -785,7 +783,8 @@ func TestIntegration_P_NoCursor_NoPending_StaysLocal(t *testing.T) {
 	require.NoError(t, s.adapter.CreatePMSession(s.localProj))
 
 	assert.Empty(t, s.fakeRP.pmCalls)
-	assertSinglePMSession(t, s.mgr, s.localProj, s.localProj, "")
+	expectedPMPath := filepath.Join(s.localProj, session.WorktreePathSegment, "pm")
+	assertSinglePMSession(t, s.mgr, s.localProj, expectedPMPath, "")
 }
 
 // --- worker (CreateWorkerSession) ×4 -----------------------------------------

@@ -303,8 +303,10 @@ type worktreeOpts struct {
 	WtPath      string // explicit worktree path (set for ResumeWorktree; empty = derive from projectRoot)
 	UserPrompt  string
 	ProjectRoot string
-	Role        Role // RoleNone for regular worktree, RoleWorker for worker sessions
-	SkipGitAdd  bool // true for ResumeWorktree (directory already exists)
+	Role        Role   // RoleNone for regular worktree, RoleWorker for worker sessions
+	ParentID    string // parent PM session ID (empty = root-level)
+	StartPoint  string // git start-point for worktree creation (e.g. parent's branch)
+	SkipGitAdd  bool   // true for ResumeWorktree (directory already exists)
 	Profile     string
 	ExtraFlags  []string
 }
@@ -355,7 +357,7 @@ func (m *Manager) createWorktreeSession(ctx context.Context, opts worktreeOpts) 
 	}
 
 	if !opts.SkipGitAdd {
-		if err := CreateWorktreeWithRunner(ctx, runner, opts.ProjectRoot, wtPath, opts.Name, ""); err != nil {
+		if err := CreateWorktreeWithRunner(ctx, runner, opts.ProjectRoot, wtPath, opts.Name, opts.StartPoint); err != nil {
 			return nil, fmt.Errorf("git worktree: %w", err)
 		}
 	}
@@ -366,6 +368,7 @@ func (m *Manager) createWorktreeSession(ctx context.Context, opts worktreeOpts) 
 		UserPrompt:  opts.UserPrompt,
 		ProjectRoot: opts.ProjectRoot,
 		Role:        opts.Role,
+		ParentID:    opts.ParentID,
 		Profile:     opts.Profile,
 		ExtraFlags:  opts.ExtraFlags,
 	})
@@ -383,6 +386,8 @@ type WorktreeOpts struct {
 	// claude invocation. Quoted arguments with internal spaces are NOT
 	// supported; use profile.Args for that.
 	Options string
+	// ParentID is the ID of the parent PM session. Empty means root-level.
+	ParentID string
 }
 
 // WorkerOpts holds arguments for Manager.CreateWorkerSessionOpts.
@@ -395,16 +400,23 @@ type WorkerOpts struct {
 	// claude invocation. Quoted arguments with internal spaces are NOT
 	// supported; use profile.Args for that.
 	Options string
+	// ParentID is the ID of the parent PM session. Empty means root-level.
+	ParentID string
 }
 
 // PMOpts holds arguments for Manager.CreatePMSessionOpts.
 type PMOpts struct {
+	// Name is the branch name for the PM worktree. Defaults to "pm" when
+	// empty (root PM). Sub-PMs should use a descriptive name.
+	Name        string
 	ProjectRoot string
 	Profile     string
 	// Options is a space-separated list of extra arguments appended to the
 	// claude invocation. Quoted arguments with internal spaces are NOT
 	// supported; use profile.Args for that.
 	Options string
+	// ParentID is the ID of the parent PM session. Empty means root PM.
+	ParentID string
 }
 
 // ResumeOpts holds arguments for Manager.ResumeWorktreeOpts.
@@ -417,6 +429,8 @@ type ResumeOpts struct {
 	// claude invocation. Quoted arguments with internal spaces are NOT
 	// supported; use profile.Args for that.
 	Options string
+	// ParentID is the ID of the parent PM session. Empty means root-level.
+	ParentID string
 }
 
 // CreateWorktreeOpts creates a git worktree and launches Claude Code with an
@@ -427,6 +441,7 @@ func (m *Manager) CreateWorktreeOpts(ctx context.Context, opts WorktreeOpts) (*S
 		UserPrompt:  opts.Prompt,
 		ProjectRoot: opts.ProjectRoot,
 		Role:        RoleWorker,
+		ParentID:    opts.ParentID,
 		Profile:     opts.Profile,
 		ExtraFlags:  splitOptions(opts.Options),
 	})
@@ -456,11 +471,12 @@ func (m *Manager) ResumeWorktreeOpts(ctx context.Context, opts ResumeOpts) (*Ses
 	name := branchNameFromWorktreePath(ctx, opts.ProjectRoot, opts.WorktreePath)
 
 	return m.createWorktreeSession(ctx, worktreeOpts{
-		Name:       name,
-		WtPath:     opts.WorktreePath,
-		UserPrompt: opts.Prompt,
+		Name:        name,
+		WtPath:      opts.WorktreePath,
+		UserPrompt:  opts.Prompt,
 		ProjectRoot: opts.ProjectRoot,
 		Role:        RoleWorker,
+		ParentID:    opts.ParentID,
 		SkipGitAdd:  true,
 		Profile:     opts.Profile,
 		ExtraFlags:  splitOptions(opts.Options),
@@ -551,6 +567,7 @@ type launchWorktreeArgs struct {
 	UserPrompt  string
 	ProjectRoot string
 	Role        Role
+	ParentID    string // parent PM session ID (persisted in Session.ParentID)
 	SessionID   string // reused when non-empty (resume of a GC'd session)
 	Resume      bool   // emit --resume <id> instead of --session-id <id>
 	Profile     string
@@ -600,13 +617,20 @@ func (m *Manager) launchWorktreeSession(ctx context.Context, args launchWorktree
 		}, err)
 	}
 
-	systemPrompt := BuildWorkerPrompt(ctx, args.WtPath, args.ProjectRoot, id)
+	var systemPrompt string
+	if args.Role == RolePM {
+		workerList := collectWorkerList(m.store, args.ProjectRoot)
+		systemPrompt = BuildPMPrompt(ctx, args.ProjectRoot, id, workerList)
+	} else {
+		systemPrompt = BuildWorkerPrompt(ctx, args.WtPath, args.ProjectRoot, id)
+	}
 
 	sess := Session{
 		ID:        id,
 		Name:      args.Name,
 		Path:      args.WtPath,
 		Role:      args.Role,
+		ParentID:  args.ParentID,
 		Profile:   profileNameForPersist(prof),
 		Flags:     append([]string(nil), args.ExtraFlags...),
 		CreatedAt: time.Now(),
@@ -935,70 +959,121 @@ func termSize() (int, int) {
 	return w, h
 }
 
+// findRootPM returns the root PM session for the given project path, or nil.
+func findRootPM(store *Store, projectRoot string) *Session {
+	p := store.FindProjectByPath(projectRoot)
+	if p == nil {
+		return nil
+	}
+	return p.FindPM()
+}
+
+// collectWorkerList builds a formatted string of active worker sessions
+// for inclusion in a PM prompt.
+func collectWorkerList(store *Store, projectRoot string) string {
+	p := store.FindProjectByPath(projectRoot)
+	if p == nil {
+		return ""
+	}
+	var lines []string
+	for _, s := range p.Sessions {
+		if s.Role == RoleWorker {
+			lines = append(lines, fmt.Sprintf("- %s (id=%s, path=%s)", s.Name, s.ID, s.Path))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// validateParentID checks that parentID is a valid parent PM session in the
+// given project. Returns nil if parentID is empty (root-level). Returns an
+// error if the parent does not exist, is not a PM, or belongs to a different
+// project. Uses canonical path comparison via InferProjectRoot + filepath.Clean.
+func (m *Manager) validateParentID(parentID, projectRoot string) error {
+	if parentID == "" {
+		return nil
+	}
+	parent := m.store.FindByID(parentID)
+	if parent == nil {
+		return fmt.Errorf("parent session not found: %s", parentID)
+	}
+	if parent.Role != RolePM {
+		return fmt.Errorf("parent session %s is not a PM (role=%s)", parentID, parent.Role)
+	}
+	// Verify parent belongs to the same project.
+	parentRoot := InferProjectRoot(parent.Path)
+	cleanParent := filepath.Clean(parentRoot)
+	cleanProject := filepath.Clean(projectRoot)
+	if cleanParent != cleanProject {
+		return fmt.Errorf("parent PM %s belongs to project %q, not %q", parentID, cleanParent, cleanProject)
+	}
+	return nil
+}
+
+// branchForSession returns the current git branch of a session's working
+// directory. For legacy PM sessions (Path is not a worktree path), returns
+// the HEAD of the inferred project root.
+func branchForSession(ctx context.Context, runner GitRunner, sess *Session) (string, error) {
+	dir := sess.Path
+	if !IsWorktreePath(dir) {
+		dir = InferProjectRoot(dir)
+	}
+	out, err := runner.Run(ctx, dir, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("get branch for session %s: %w", sess.ID, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // CreatePMSessionOpts creates a PM (Project Manager) session with profile
-// and extra-options support.
+// and extra-options support. PM sessions now use worktrees (same as workers).
+//
+// Root PM (ParentID==""): creates worktree from projectRoot HEAD.
+// Sub-PM (ParentID!=""): creates worktree branched from parent PM's branch.
 func (m *Manager) CreatePMSessionOpts(ctx context.Context, opts PMOpts) (*Session, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if p := m.store.FindProjectByPath(opts.ProjectRoot); p != nil && p.PM != nil {
-		return nil, fmt.Errorf("pm session already exists for %q", opts.ProjectRoot)
+	// Default branch name for root PM.
+	name := opts.Name
+	if name == "" {
+		name = "pm"
 	}
 
-	prof, err := m.ResolveProfile(opts.Profile)
-	if err != nil {
-		return nil, err
-	}
-	if err := profile.Validate(prof); err != nil {
-		return nil, fmt.Errorf("profile %q: %w", prof.Name, err)
-	}
-	spec, err := NewLaunchSpec(prof)
-	if err != nil {
-		return nil, err
+	projectRoot := opts.ProjectRoot
+
+	if opts.ParentID == "" {
+		// Root PM: check no existing root PM for this project.
+		if pm := findRootPM(m.store, projectRoot); pm != nil {
+			return nil, fmt.Errorf("pm session already exists for %q", projectRoot)
+		}
+	} else {
+		// Sub-PM: validate parent and inherit projectRoot.
+		if err := m.validateParentID(opts.ParentID, projectRoot); err != nil {
+			return nil, fmt.Errorf("validate parent: %w", err)
+		}
 	}
 
-	var workerLines []string
-	if p := m.store.FindProjectByPath(opts.ProjectRoot); p != nil {
-		for _, s := range p.Sessions {
-			if s.Role == RoleWorker {
-				workerLines = append(workerLines, fmt.Sprintf("- %s (id=%s, path=%s)", s.Name, s.ID, s.Path))
+	// Determine start point: for sub-PM, branch from parent's current branch.
+	var startPoint string
+	if opts.ParentID != "" {
+		parent := m.store.FindByID(opts.ParentID)
+		if parent != nil {
+			runner := &LocalRunner{}
+			branch, err := branchForSession(ctx, runner, parent)
+			if err == nil {
+				startPoint = branch
 			}
 		}
 	}
-	workerList := strings.Join(workerLines, "\n")
 
-	id := uuid.New().String()
-	systemPrompt := BuildPMPrompt(ctx, opts.ProjectRoot, id, workerList)
+	m.log.Info("createPMSession", "name", name, "path", projectRoot, "parentID", opts.ParentID)
 
-	sess := Session{
-		ID:        id,
-		Name:      "pm",
-		Path:      opts.ProjectRoot,
-		Role:      RolePM,
-		Profile:   profileNameForPersist(prof),
-		Flags:     splitOptions(opts.Options),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-
-	claudeCmd, startDir, cleanupFn, buildErr := m.buildLaunchCommand(sess, spec, systemPrompt, "", false)
-	if buildErr != nil {
-		return m.launchErrorSession(ctx, sess, buildErr)
-	}
-
-	m.log.Info("createPMSession", "id", id[:8], "path", opts.ProjectRoot, "profile", prof.Name)
-
-	launchSuccess := false
-	defer func() {
-		if !launchSuccess {
-			cleanupFn()
-		}
-	}()
-	result, launchErr := m.launchSession(ctx, sess, claudeCmd, startDir, opts.ProjectRoot, claudeEnv(id, spec))
-	if launchErr == nil {
-		launchSuccess = true
-	}
-	return result, launchErr
+	return m.createWorktreeSession(ctx, worktreeOpts{
+		Name:        name,
+		ProjectRoot: projectRoot,
+		Role:        RolePM,
+		ParentID:    opts.ParentID,
+		StartPoint:  startPoint,
+		Profile:     opts.Profile,
+		ExtraFlags:  splitOptions(opts.Options),
+	})
 }
 
 // CreatePMSession creates a PM (Project Manager) session for the given projectRoot.
@@ -1147,6 +1222,7 @@ func (m *Manager) CreateWorkerSessionOpts(ctx context.Context, opts WorkerOpts) 
 		UserPrompt:  opts.Prompt,
 		ProjectRoot: opts.ProjectRoot,
 		Role:        RoleWorker,
+		ParentID:    opts.ParentID,
 		Profile:     opts.Profile,
 		ExtraFlags:  splitOptions(opts.Options),
 	})

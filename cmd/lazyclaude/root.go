@@ -564,17 +564,23 @@ func pendingWindowSet(notifications []*model.ToolNotification) map[string]bool {
 }
 
 // buildProjectItems converts session.Project slice to gui.ProjectItem slice.
+// Extracts the root PM (Role==RolePM, ParentID=="") from Sessions into the
+// gui.ProjectItem.PM field so the GUI tree display remains unchanged.
 func buildProjectItems(projects []session.Project, pending map[string]bool, windowActivity map[string]gui.WindowActivityEntry) []gui.ProjectItem {
 	items := make([]gui.ProjectItem, len(projects))
 	for i, p := range projects {
 		var pm *gui.SessionItem
-		if p.PM != nil {
-			si := sessionToItem(*p.PM, pending, windowActivity)
-			pm = &si
+		var sessions []gui.SessionItem
+		for _, s := range p.Sessions {
+			if s.Role == session.RolePM && s.ParentID == "" {
+				si := sessionToItem(s, pending, windowActivity)
+				pm = &si
+				continue
+			}
+			sessions = append(sessions, sessionToItem(s, pending, windowActivity))
 		}
-		sessions := make([]gui.SessionItem, len(p.Sessions))
-		for j, s := range p.Sessions {
-			sessions[j] = sessionToItem(s, pending, windowActivity)
+		if sessions == nil {
+			sessions = []gui.SessionItem{}
 		}
 		// Derive host from any session (all sessions in a project share the same host).
 		host := ""

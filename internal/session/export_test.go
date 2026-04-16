@@ -21,3 +21,14 @@ type LauncherOpts = launcherOpts
 
 // SplitOptions exports splitOptions for testing.
 var SplitOptions = splitOptions
+
+// FindRootPM exports findRootPM for testing.
+var FindRootPM = findRootPM
+
+// BranchForSession exports branchForSession for testing.
+var BranchForSession = branchForSession
+
+// ValidateParentID exports Manager.validateParentID for testing.
+func (m *Manager) ValidateParentID(parentID, projectRoot string) error {
+	return m.validateParentID(parentID, projectRoot)
+}

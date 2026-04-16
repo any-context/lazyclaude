@@ -52,6 +52,7 @@ type Session struct {
 	Flags     []string  `json:"flags,omitempty"`
 	Role      Role      `json:"role,omitempty"`
 	Profile   string    `json:"profile,omitempty"`
+	ParentID  string    `json:"parent_id,omitempty"`
 
 	// Runtime state (not persisted)
 	TmuxWindow string `json:"-"`
@@ -109,11 +110,55 @@ func (s *Session) TmuxTarget() string {
 }
 
 // stateFile is the versioned on-disk format for state.json.
-const stateVersion = 2
+const stateVersion = 3
 
 type stateFile struct {
 	Version  int       `json:"version"`
 	Projects []Project `json:"projects"`
+}
+
+// stateFileV2 is the v2 on-disk format used before PM sessions were unified
+// into the Sessions slice. Used only for migration.
+type stateFileV2 struct {
+	Version  int         `json:"version"`
+	Projects []projectV2 `json:"projects"`
+}
+
+// projectV2 is the v2 project layout with a separate PM field.
+type projectV2 struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Path      string    `json:"path"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	PM        *Session  `json:"pm,omitempty"`
+	Sessions  []Session `json:"sessions,omitempty"`
+}
+
+// migrateV2ToV3 converts v2 projects (separate PM field) to v3 format
+// (PM merged into Sessions slice). Pure function — does not write to disk.
+func migrateV2ToV3(data []byte) ([]Project, error) {
+	var sf stateFileV2
+	if err := json.Unmarshal(data, &sf); err != nil {
+		return nil, fmt.Errorf("unmarshal v2 state: %w", err)
+	}
+	projects := make([]Project, len(sf.Projects))
+	for i, p := range sf.Projects {
+		var sessions []Session
+		if p.PM != nil {
+			sessions = append(sessions, *p.PM)
+		}
+		sessions = append(sessions, p.Sessions...)
+		projects[i] = Project{
+			ID:        p.ID,
+			Name:      p.Name,
+			Path:      p.Path,
+			CreatedAt: p.CreatedAt,
+			UpdatedAt: p.UpdatedAt,
+			Sessions:  sessions,
+		}
+	}
+	return projects, nil
 }
 
 // Store manages session persistence to a JSON file.
@@ -129,8 +174,8 @@ func NewStore(path string) *Store {
 	return &Store{path: path}
 }
 
-// Load reads projects from disk. If the file is legacy format ([]Session),
-// it resets to empty (no migration).
+// Load reads projects from disk. Migrates v2 format (separate PM field) to
+// v3 (PM in Sessions). Legacy v1 format (flat []Session) resets to empty.
 func (s *Store) Load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -144,11 +189,25 @@ func (s *Store) Load() error {
 		return fmt.Errorf("read state: %w", err)
 	}
 
-	// Try versioned format first
+	// Try current format (v3) first.
 	var sf stateFile
 	if err := json.Unmarshal(data, &sf); err == nil && sf.Version == stateVersion {
 		s.projects = sf.Projects
-		// Expanded is not persisted (json:"-"), default to expanded on load.
+		for i := range s.projects {
+			s.projects[i].Expanded = true
+		}
+		return nil
+	}
+
+	// Try v2 format (separate PM field) and migrate.
+	var peek struct{ Version int }
+	if err := json.Unmarshal(data, &peek); err == nil && peek.Version == 2 {
+		projects, migErr := migrateV2ToV3(data)
+		if migErr != nil {
+			s.projects = nil
+			return nil
+		}
+		s.projects = projects
 		for i := range s.projects {
 			s.projects[i].Expanded = true
 		}
@@ -210,10 +269,6 @@ func (s *Store) Projects() []Project {
 	result := make([]Project, len(s.projects))
 	for i, p := range s.projects {
 		result[i] = p
-		if p.PM != nil {
-			pm := *p.PM
-			result[i].PM = &pm
-		}
 		if len(p.Sessions) > 0 {
 			sessions := make([]Session, len(p.Sessions))
 			copy(sessions, p.Sessions)
@@ -224,23 +279,20 @@ func (s *Store) Projects() []Project {
 }
 
 // All returns a flat copy of all sessions across all projects.
-// PM sessions are included.
+// PM sessions are included (they live in Sessions with Role==RolePM).
 func (s *Store) All() []Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var result []Session
 	for _, p := range s.projects {
-		if p.PM != nil {
-			result = append(result, *p.PM)
-		}
 		result = append(result, p.Sessions...)
 	}
 	return result
 }
 
 // Add inserts a session, auto-creating or finding the parent project.
-// PM sessions (Role=RolePM) are stored as Project.PM.
+// All sessions (including PM) are stored in Project.Sessions.
 // When projectRoot is non-empty it is used directly instead of inferring
 // the project root from sess.Path. This avoids mismatches when the
 // worktree path (e.g. from git worktree list on a remote) differs from
@@ -264,21 +316,13 @@ func (s *Store) Add(sess Session, projectRoot string) {
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 			Expanded:  true,
-		}
-		if sess.Role == RolePM {
-			p.PM = &sess
-		} else {
-			p.Sessions = []Session{sess}
+			Sessions:  []Session{sess},
 		}
 		s.projects = append(s.projects, p)
 		return
 	}
 
-	if sess.Role == RolePM {
-		s.projects[idx].PM = &sess
-	} else {
-		s.projects[idx].Sessions = append(s.projects[idx].Sessions, sess)
-	}
+	s.projects[idx].Sessions = append(s.projects[idx].Sessions, sess)
 	s.projects[idx].UpdatedAt = time.Now()
 }
 
@@ -288,13 +332,6 @@ func (s *Store) Remove(id string) bool {
 	defer s.mu.Unlock()
 
 	for pi := range s.projects {
-		// Check PM
-		if s.projects[pi].PM != nil && s.projects[pi].PM.ID == id {
-			s.projects[pi].PM = nil
-			s.maybeRemoveProjectLocked(pi)
-			return true
-		}
-		// Check sessions
 		for si := range s.projects[pi].Sessions {
 			if s.projects[pi].Sessions[si].ID == id {
 				sessions := make([]Session, 0, len(s.projects[pi].Sessions)-1)
@@ -315,10 +352,6 @@ func (s *Store) FindByID(id string) *Session {
 	defer s.mu.RUnlock()
 
 	for pi := range s.projects {
-		if s.projects[pi].PM != nil && s.projects[pi].PM.ID == id {
-			sess := *s.projects[pi].PM
-			return &sess
-		}
 		for si := range s.projects[pi].Sessions {
 			if s.projects[pi].Sessions[si].ID == id {
 				sess := s.projects[pi].Sessions[si]
@@ -329,16 +362,29 @@ func (s *Store) FindByID(id string) *Session {
 	return nil
 }
 
+// ChildrenOf returns all sessions whose ParentID matches the given ID.
+// Returns copies; modifications do not affect the store.
+func (s *Store) ChildrenOf(parentID string) []Session {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var result []Session
+	for _, p := range s.projects {
+		for _, sess := range p.Sessions {
+			if sess.ParentID == parentID {
+				result = append(result, sess)
+			}
+		}
+	}
+	return result
+}
+
 // FindByName returns a session by name, searching all projects.
 func (s *Store) FindByName(name string) *Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	for pi := range s.projects {
-		if s.projects[pi].PM != nil && s.projects[pi].PM.Name == name {
-			sess := *s.projects[pi].PM
-			return &sess
-		}
 		for si := range s.projects[pi].Sessions {
 			if s.projects[pi].Sessions[si].Name == name {
 				sess := s.projects[pi].Sessions[si]
@@ -356,9 +402,6 @@ func (s *Store) FindProjectForSession(id string) *Project {
 	defer s.mu.RUnlock()
 
 	for i := range s.projects {
-		if s.projects[i].PM != nil && s.projects[i].PM.ID == id {
-			return s.copyProjectLocked(i)
-		}
 		for si := range s.projects[i].Sessions {
 			if s.projects[i].Sessions[si].ID == id {
 				return s.copyProjectLocked(i)
@@ -372,10 +415,6 @@ func (s *Store) FindProjectForSession(id string) *Project {
 // Caller must hold s.mu (at least RLock).
 func (s *Store) copyProjectLocked(i int) *Project {
 	p := s.projects[i]
-	if p.PM != nil {
-		pm := *p.PM
-		p.PM = &pm
-	}
 	if len(p.Sessions) > 0 {
 		sessions := make([]Session, len(p.Sessions))
 		copy(sessions, p.Sessions)
@@ -404,11 +443,6 @@ func (s *Store) Rename(id, newName string) bool {
 	defer s.mu.Unlock()
 
 	for pi := range s.projects {
-		if s.projects[pi].PM != nil && s.projects[pi].PM.ID == id {
-			s.projects[pi].PM.Name = newName
-			s.projects[pi].PM.UpdatedAt = time.Now()
-			return true
-		}
 		for si := range s.projects[pi].Sessions {
 			if s.projects[pi].Sessions[si].ID == id {
 				s.projects[pi].Sessions[si].Name = newName
@@ -425,11 +459,6 @@ func (s *Store) MarkAllStatus(status Status) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for pi := range s.projects {
-		if s.projects[pi].PM != nil {
-			s.projects[pi].PM.Status = status
-			s.projects[pi].PM.TmuxWindow = ""
-			s.projects[pi].PM.PID = 0
-		}
 		for si := range s.projects[pi].Sessions {
 			s.projects[pi].Sessions[si].Status = status
 			s.projects[pi].Sessions[si].TmuxWindow = ""
@@ -498,9 +527,6 @@ func (s *Store) ToggleProjectExpanded(projectID string) {
 
 func (s *Store) nameExistsLocked(name string) bool {
 	for _, p := range s.projects {
-		if p.PM != nil && p.PM.Name == name {
-			return true
-		}
 		for _, sess := range p.Sessions {
 			if sess.Name == name {
 				return true
@@ -530,9 +556,6 @@ func (s *Store) findProjectIdxLocked(path, host string) int {
 // Invariant: all sessions in a project share the same host. Mixed-host
 // projects are not supported.
 func projectHost(p *Project) string {
-	if p.PM != nil && p.PM.Host != "" {
-		return p.PM.Host
-	}
 	for _, s := range p.Sessions {
 		if s.Host != "" {
 			return s.Host
@@ -542,8 +565,7 @@ func projectHost(p *Project) string {
 }
 
 func (s *Store) maybeRemoveProjectLocked(idx int) {
-	p := s.projects[idx]
-	if p.PM == nil && len(p.Sessions) == 0 {
+	if len(s.projects[idx].Sessions) == 0 {
 		result := make([]Project, 0, len(s.projects)-1)
 		result = append(result, s.projects[:idx]...)
 		result = append(result, s.projects[idx+1:]...)
@@ -555,10 +577,6 @@ func (s *Store) maybeRemoveProjectLocked(idx int) {
 // Caller must hold s.mu.
 func (s *Store) mutateSessionLocked(id string, fn func(*Session)) {
 	for pi := range s.projects {
-		if s.projects[pi].PM != nil && s.projects[pi].PM.ID == id {
-			fn(s.projects[pi].PM)
-			return
-		}
 		for si := range s.projects[pi].Sessions {
 			if s.projects[pi].Sessions[si].ID == id {
 				fn(&s.projects[pi].Sessions[si])
@@ -636,9 +654,6 @@ func (s *Store) SyncWithTmux(windows []tmux.WindowInfo, panes []tmux.PaneInfo) {
 	}
 
 	for pi := range s.projects {
-		if s.projects[pi].PM != nil {
-			syncSession(s.projects[pi].PM)
-		}
 		for si := range s.projects[pi].Sessions {
 			syncSession(&s.projects[pi].Sessions[si])
 		}

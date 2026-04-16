@@ -58,7 +58,7 @@ func TestStore_AddWorktreeSessionGroupsUnderProject(t *testing.T) {
 	require.Len(t, projects[0].Sessions, 2)
 }
 
-func TestStore_AddPMSessionSetsProjectPM(t *testing.T) {
+func TestStore_AddPMSessionGoesToSessions(t *testing.T) {
 	t.Parallel()
 	s := session.NewStore("")
 
@@ -68,9 +68,12 @@ func TestStore_AddPMSessionSetsProjectPM(t *testing.T) {
 
 	projects := s.Projects()
 	require.Len(t, projects, 1)
-	require.NotNil(t, projects[0].PM)
-	assert.Equal(t, "id-pm", projects[0].PM.ID)
-	assert.Empty(t, projects[0].Sessions, "PM should not be in Sessions slice")
+	require.Len(t, projects[0].Sessions, 1, "PM should be in Sessions slice")
+	assert.Equal(t, "id-pm", projects[0].Sessions[0].ID)
+	assert.Equal(t, session.RolePM, projects[0].Sessions[0].Role)
+	pmSess := projects[0].FindPM()
+	require.NotNil(t, pmSess)
+	assert.Equal(t, "id-pm", pmSess.ID)
 }
 
 func TestStore_MultipleProjects(t *testing.T) {
@@ -123,7 +126,7 @@ func TestStore_RemovePMFromProject(t *testing.T) {
 
 	projects := s.Projects()
 	require.Len(t, projects, 1)
-	assert.Nil(t, projects[0].PM)
+	assert.Nil(t, projects[0].FindPM())
 	require.Len(t, projects[0].Sessions, 1)
 }
 
@@ -146,9 +149,11 @@ func TestStore_SaveAndLoad_ProjectFormat(t *testing.T) {
 	projects := s2.Projects()
 	require.Len(t, projects, 1)
 	assert.Equal(t, "/home/user/lazyclaude", projects[0].Path)
-	require.NotNil(t, projects[0].PM)
-	assert.Equal(t, "id-pm", projects[0].PM.ID)
-	require.Len(t, projects[0].Sessions, 2)
+	pmSess := projects[0].FindPM()
+	require.NotNil(t, pmSess)
+	assert.Equal(t, "id-pm", pmSess.ID)
+	// PM + main + feat = 3 sessions total
+	require.Len(t, projects[0].Sessions, 3)
 }
 
 func TestStore_Load_LegacyFormat_Resets(t *testing.T) {

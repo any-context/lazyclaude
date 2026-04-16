@@ -302,7 +302,7 @@ func TestStore_RoleOmittedWhenNone(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	// New format: {"version":2,"projects":[...]}
+	// Current format: {"version":3,"projects":[...]}
 	var sf map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(data, &sf))
 	var projects []map[string]json.RawMessage
@@ -340,8 +340,8 @@ func TestStore_WorkerRoleRoundTrip(t *testing.T) {
 func TestStore_Load_MissingProfileFieldDefaultsToEmpty(t *testing.T) {
 	t.Parallel()
 	// v2 state.json written before the Profile field existed must load
-	// without error, and sessions must have Profile == "" (builtin default).
-	legacy := `{
+	// via migration without error, and sessions must have Profile == "".
+	v2Data := `{
   "version": 2,
   "projects": [{
     "id": "proj-1",
@@ -360,7 +360,7 @@ func TestStore_Load_MissingProfileFieldDefaultsToEmpty(t *testing.T) {
 }`
 	dir := t.TempDir()
 	path := filepath.Join(dir, "state.json")
-	require.NoError(t, os.WriteFile(path, []byte(legacy), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte(v2Data), 0o600))
 
 	store := session.NewStore(path)
 	require.NoError(t, store.Load())
@@ -593,9 +593,11 @@ func TestStore_Add_PMHostMatchesWorkerHost(t *testing.T) {
 
 	projects := s.Projects()
 	require.Len(t, projects, 1)
-	require.NotNil(t, projects[0].PM)
-	assert.Equal(t, "pm-1", projects[0].PM.ID)
-	assert.Len(t, projects[0].Sessions, 1)
+	pmFound := projects[0].FindPM()
+	require.NotNil(t, pmFound)
+	assert.Equal(t, "pm-1", pmFound.ID)
+	// PM + worker = 2 sessions
+	assert.Len(t, projects[0].Sessions, 2)
 }
 
 func TestStore_Add_WorkerHostMatchesNewPM(t *testing.T) {
@@ -612,8 +614,10 @@ func TestStore_Add_WorkerHostMatchesNewPM(t *testing.T) {
 
 	projects := s.Projects()
 	require.Len(t, projects, 1)
-	require.NotNil(t, projects[0].PM)
-	assert.Len(t, projects[0].Sessions, 1)
+	pmFound := projects[0].FindPM()
+	require.NotNil(t, pmFound)
+	// worker + PM = 2 sessions
+	assert.Len(t, projects[0].Sessions, 2)
 }
 
 func TestStore_Add_LocalDoesNotMatchSSH(t *testing.T) {
@@ -645,6 +649,333 @@ func TestStore_Add_ExplicitProjectRoot_OverridesInference(t *testing.T) {
 	projects := s.Projects()
 	require.Len(t, projects, 1, "explicit projectRoot should match existing project")
 	assert.Len(t, projects[0].Sessions, 2)
+}
+
+// --- v2→v3 migration tests ---
+
+func TestStore_MigrateV2ToV3_PMPresent(t *testing.T) {
+	t.Parallel()
+	// v2 format: PM is a separate field on the project.
+	v2Data := `{
+  "version": 2,
+  "projects": [{
+    "id": "proj-1",
+    "name": "my-project",
+    "path": "/home/user/project",
+    "created_at": "2024-06-01T00:00:00Z",
+    "updated_at": "2024-06-01T00:00:00Z",
+    "pm": {
+      "id": "pm-id-1",
+      "name": "pm",
+      "path": "/home/user/project",
+      "role": "pm",
+      "created_at": "2024-06-01T00:00:00Z",
+      "updated_at": "2024-06-01T00:00:00Z"
+    },
+    "sessions": [{
+      "id": "w-id-1",
+      "name": "feat-x",
+      "path": "/home/user/project/.lazyclaude/worktrees/feat-x",
+      "role": "worker",
+      "created_at": "2024-06-01T00:00:00Z",
+      "updated_at": "2024-06-01T00:00:00Z"
+    }]
+  }]
+}`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	require.NoError(t, os.WriteFile(path, []byte(v2Data), 0o600))
+
+	store := session.NewStore(path)
+	require.NoError(t, store.Load())
+
+	projects := store.Projects()
+	require.Len(t, projects, 1)
+
+	// PM should be merged into Sessions (PM first, then workers).
+	require.Len(t, projects[0].Sessions, 2, "v2 PM + 1 worker = 2 sessions in v3")
+
+	// Verify PM is findable via FindPM.
+	pmSess := projects[0].FindPM()
+	require.NotNil(t, pmSess)
+	assert.Equal(t, "pm-id-1", pmSess.ID)
+	assert.Equal(t, session.RolePM, pmSess.Role)
+
+	// Verify worker is present.
+	var foundWorker bool
+	for _, s := range projects[0].Sessions {
+		if s.ID == "w-id-1" {
+			assert.Equal(t, session.RoleWorker, s.Role)
+			foundWorker = true
+		}
+	}
+	assert.True(t, foundWorker, "worker session should be in v3 Sessions")
+}
+
+func TestStore_MigrateV2ToV3_NoPM(t *testing.T) {
+	t.Parallel()
+	// v2 format with no PM field.
+	v2Data := `{
+  "version": 2,
+  "projects": [{
+    "id": "proj-1",
+    "name": "solo",
+    "path": "/home/user/solo",
+    "created_at": "2024-06-01T00:00:00Z",
+    "updated_at": "2024-06-01T00:00:00Z",
+    "sessions": [{
+      "id": "s-1",
+      "name": "main",
+      "path": "/home/user/solo",
+      "created_at": "2024-06-01T00:00:00Z",
+      "updated_at": "2024-06-01T00:00:00Z"
+    }]
+  }]
+}`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	require.NoError(t, os.WriteFile(path, []byte(v2Data), 0o600))
+
+	store := session.NewStore(path)
+	require.NoError(t, store.Load())
+
+	projects := store.Projects()
+	require.Len(t, projects, 1)
+	require.Len(t, projects[0].Sessions, 1)
+	assert.Nil(t, projects[0].FindPM())
+}
+
+func TestStore_MigrateV2ToV3_RoundTrip(t *testing.T) {
+	t.Parallel()
+	// v2 data → load (migrate) → save → reload as v3.
+	v2Data := `{
+  "version": 2,
+  "projects": [{
+    "id": "proj-rt",
+    "name": "round-trip",
+    "path": "/home/user/rt",
+    "created_at": "2024-06-01T10:00:00Z",
+    "updated_at": "2024-06-01T10:00:00Z",
+    "pm": {
+      "id": "pm-rt",
+      "name": "pm",
+      "path": "/home/user/rt",
+      "role": "pm",
+      "created_at": "2024-06-01T10:00:00Z",
+      "updated_at": "2024-06-01T10:00:00Z"
+    },
+    "sessions": [
+      {
+        "id": "w-rt-1",
+        "name": "feat-a",
+        "path": "/home/user/rt/.lazyclaude/worktrees/feat-a",
+        "role": "worker",
+        "created_at": "2024-06-01T10:00:00Z",
+        "updated_at": "2024-06-01T10:00:00Z"
+      },
+      {
+        "id": "w-rt-2",
+        "name": "feat-b",
+        "path": "/home/user/rt/.lazyclaude/worktrees/feat-b",
+        "role": "worker",
+        "created_at": "2024-06-01T10:00:00Z",
+        "updated_at": "2024-06-01T10:00:00Z"
+      }
+    ]
+  }]
+}`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	require.NoError(t, os.WriteFile(path, []byte(v2Data), 0o600))
+
+	// Load (triggers v2→v3 migration).
+	store1 := session.NewStore(path)
+	require.NoError(t, store1.Load())
+
+	// Save as v3.
+	require.NoError(t, store1.Save())
+
+	// Reload from disk — must parse as v3 (no migration needed).
+	store2 := session.NewStore(path)
+	require.NoError(t, store2.Load())
+
+	projects := store2.Projects()
+	require.Len(t, projects, 1)
+	assert.Equal(t, "round-trip", projects[0].Name)
+
+	// PM + 2 workers = 3 sessions.
+	require.Len(t, projects[0].Sessions, 3)
+
+	pmSess := projects[0].FindPM()
+	require.NotNil(t, pmSess)
+	assert.Equal(t, "pm-rt", pmSess.ID)
+
+	// Verify saved format is v3 (version field == 3, no "pm" key on project).
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &raw))
+	var version int
+	require.NoError(t, json.Unmarshal(raw["version"], &version))
+	assert.Equal(t, 3, version, "saved format should be v3")
+}
+
+func TestStore_MigrateV2ToV3_ParentIDPreserved(t *testing.T) {
+	t.Parallel()
+	// v2 format with a session that already has parent_id (hypothetical
+	// forward-compatible write). Migration should preserve it.
+	v2Data := `{
+  "version": 2,
+  "projects": [{
+    "id": "proj-pid",
+    "name": "parent-test",
+    "path": "/home/user/pt",
+    "created_at": "2024-06-01T00:00:00Z",
+    "updated_at": "2024-06-01T00:00:00Z",
+    "sessions": [{
+      "id": "s-child",
+      "name": "child",
+      "path": "/home/user/pt/.lazyclaude/worktrees/child",
+      "role": "worker",
+      "parent_id": "some-parent-id",
+      "created_at": "2024-06-01T00:00:00Z",
+      "updated_at": "2024-06-01T00:00:00Z"
+    }]
+  }]
+}`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	require.NoError(t, os.WriteFile(path, []byte(v2Data), 0o600))
+
+	store := session.NewStore(path)
+	require.NoError(t, store.Load())
+
+	all := store.All()
+	require.Len(t, all, 1)
+	assert.Equal(t, "some-parent-id", all[0].ParentID, "ParentID should survive migration")
+}
+
+// --- ChildrenOf tests ---
+
+func TestStore_ChildrenOf_ReturnsChildren(t *testing.T) {
+	t.Parallel()
+	s := session.NewStore("")
+
+	pm := newTestSession("pm-1", "pm", "/project")
+	pm.Role = session.RolePM
+	s.Add(pm, "")
+
+	child1 := newTestSession("w-1", "feat-a", "/project/.lazyclaude/worktrees/feat-a")
+	child1.Role = session.RoleWorker
+	child1.ParentID = "pm-1"
+	s.Add(child1, "")
+
+	child2 := newTestSession("w-2", "feat-b", "/project/.lazyclaude/worktrees/feat-b")
+	child2.Role = session.RoleWorker
+	child2.ParentID = "pm-1"
+	s.Add(child2, "")
+
+	// Unrelated session (no parent).
+	s.Add(newTestSession("s-3", "standalone", "/other"), "")
+
+	children := s.ChildrenOf("pm-1")
+	require.Len(t, children, 2)
+	ids := []string{children[0].ID, children[1].ID}
+	assert.Contains(t, ids, "w-1")
+	assert.Contains(t, ids, "w-2")
+}
+
+func TestStore_ChildrenOf_EmptyParent_MatchesRootSessions(t *testing.T) {
+	t.Parallel()
+	s := session.NewStore("")
+	s.Add(newTestSession("s-1", "app", "/project"), "")
+
+	// ChildrenOf("") matches sessions where ParentID=="", i.e. root-level sessions.
+	children := s.ChildrenOf("")
+	require.Len(t, children, 1)
+	assert.Equal(t, "s-1", children[0].ID)
+}
+
+func TestStore_ChildrenOf_NoMatch(t *testing.T) {
+	t.Parallel()
+	s := session.NewStore("")
+
+	child := newTestSession("w-1", "feat", "/project/.lazyclaude/worktrees/feat")
+	child.ParentID = "pm-x"
+	s.Add(child, "")
+
+	children := s.ChildrenOf("nonexistent")
+	assert.Empty(t, children)
+}
+
+func TestStore_ChildrenOf_CrossProject(t *testing.T) {
+	t.Parallel()
+	s := session.NewStore("")
+
+	// Project A
+	pmA := newTestSession("pm-a", "pm-a", "/project-a")
+	pmA.Role = session.RolePM
+	s.Add(pmA, "")
+
+	childA := newTestSession("w-a", "feat-a", "/project-a/.lazyclaude/worktrees/feat-a")
+	childA.ParentID = "pm-a"
+	s.Add(childA, "")
+
+	// Project B
+	childB := newTestSession("w-b", "feat-b", "/project-b/.lazyclaude/worktrees/feat-b")
+	childB.ParentID = "pm-b"
+	s.Add(childB, "")
+
+	childrenA := s.ChildrenOf("pm-a")
+	require.Len(t, childrenA, 1)
+	assert.Equal(t, "w-a", childrenA[0].ID)
+}
+
+// --- ParentID round-trip tests ---
+
+func TestStore_ParentID_RoundTrip(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	store1 := session.NewStore(path)
+	sess := newTestSession("child-1", "child", "/project/.lazyclaude/worktrees/child")
+	sess.ParentID = "parent-pm-id"
+	store1.Add(sess, "")
+	require.NoError(t, store1.Save())
+
+	store2 := session.NewStore(path)
+	require.NoError(t, store2.Load())
+
+	found := store2.FindByID("child-1")
+	require.NotNil(t, found)
+	assert.Equal(t, "parent-pm-id", found.ParentID)
+}
+
+func TestStore_ParentID_OmittedWhenEmpty(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	store := session.NewStore(path)
+	sess := newTestSession("no-parent", "sess", "/project")
+	// ParentID left as zero value.
+	store.Add(sess, "")
+	require.NoError(t, store.Save())
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	var sf map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &sf))
+	var projects []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(sf["projects"], &projects))
+	require.Len(t, projects, 1)
+	var sessions []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(projects[0]["sessions"], &sessions))
+	require.Len(t, sessions, 1)
+	_, hasParentID := sessions[0]["parent_id"]
+	assert.False(t, hasParentID, "parent_id key should be absent when empty (omitempty)")
 }
 
 func TestStore_Add_ExplicitProjectRoot_SymlinkMismatch(t *testing.T) {

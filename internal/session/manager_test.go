@@ -578,13 +578,15 @@ func TestManager_CreatePMSession_Basic(t *testing.T) {
 	ctx := context.Background()
 
 	projectRoot := t.TempDir()
+	initGitRepo(t, projectRoot)
 	sess, err := mgr.CreatePMSession(ctx, projectRoot)
 	require.NoError(t, err)
 	require.NotNil(t, sess)
 
 	assert.Equal(t, "pm", sess.Name)
 	assert.Equal(t, session.RolePM, sess.Role)
-	assert.Equal(t, projectRoot, sess.Path)
+	// PM sessions now use worktrees — path is the worktree directory.
+	assert.True(t, session.IsWorktreePath(sess.Path), "PM session should have worktree path")
 	assert.Equal(t, session.StatusRunning, sess.Status)
 	assert.NotEmpty(t, sess.ID)
 
@@ -609,6 +611,7 @@ func TestManager_CreatePMSession_DuplicateError(t *testing.T) {
 	ctx := context.Background()
 
 	projectRoot := t.TempDir()
+	initGitRepo(t, projectRoot)
 	_, err := mgr.CreatePMSession(ctx, projectRoot)
 	require.NoError(t, err)
 
@@ -879,4 +882,310 @@ func TestClaudeEnv_AlwaysHasAutoConnectIDE(t *testing.T) {
 	t.Parallel()
 	env := session.ClaudeEnv("", session.LaunchSpec{})
 	assert.Equal(t, "true", env["CLAUDE_CODE_AUTO_CONNECT_IDE"])
+}
+
+// --- findRootPM tests ---
+
+func TestFindRootPM_Found(t *testing.T) {
+	t.Parallel()
+	s := session.NewStore("")
+
+	pm := newTestSession("pm-1", "pm", "/project")
+	pm.Role = session.RolePM
+	s.Add(pm, "")
+	s.Add(newTestSession("w-1", "worker", "/project/.lazyclaude/worktrees/w1"), "")
+
+	found := session.FindRootPM(s, "/project")
+	require.NotNil(t, found)
+	assert.Equal(t, "pm-1", found.ID)
+}
+
+func TestFindRootPM_NotFound_NoProject(t *testing.T) {
+	t.Parallel()
+	s := session.NewStore("")
+	found := session.FindRootPM(s, "/nonexistent")
+	assert.Nil(t, found)
+}
+
+func TestFindRootPM_NotFound_NoPM(t *testing.T) {
+	t.Parallel()
+	s := session.NewStore("")
+	s.Add(newTestSession("w-1", "worker", "/project"), "")
+
+	found := session.FindRootPM(s, "/project")
+	assert.Nil(t, found, "project with no PM should return nil")
+}
+
+func TestFindRootPM_IgnoresSubPM(t *testing.T) {
+	t.Parallel()
+	s := session.NewStore("")
+
+	subPM := newTestSession("sub-pm-1", "sub-pm", "/project/.lazyclaude/worktrees/sub-pm")
+	subPM.Role = session.RolePM
+	subPM.ParentID = "some-parent"
+	s.Add(subPM, "")
+
+	found := session.FindRootPM(s, "/project")
+	assert.Nil(t, found, "sub-PM (ParentID!='') should not be returned as root PM")
+}
+
+// --- validateParentID tests ---
+
+func TestValidateParentID_EmptyIsValid(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+	err := mgr.ValidateParentID("", "/project")
+	assert.NoError(t, err, "empty parentID means root-level, should be valid")
+}
+
+func TestValidateParentID_ValidParent(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+
+	pm := newTestSession("pm-1", "pm", "/project/.lazyclaude/worktrees/pm")
+	pm.Role = session.RolePM
+	mgr.Store().Add(pm, "")
+
+	err := mgr.ValidateParentID("pm-1", "/project")
+	assert.NoError(t, err)
+}
+
+func TestValidateParentID_ParentNotFound(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+
+	err := mgr.ValidateParentID("nonexistent-id", "/project")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parent session not found")
+}
+
+func TestValidateParentID_ParentNotPM(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+
+	worker := newTestSession("w-1", "worker", "/project/.lazyclaude/worktrees/w1")
+	worker.Role = session.RoleWorker
+	mgr.Store().Add(worker, "")
+
+	err := mgr.ValidateParentID("w-1", "/project")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a PM")
+}
+
+func TestValidateParentID_CrossProject(t *testing.T) {
+	t.Parallel()
+	mgr, _ := newTestManager(t)
+
+	// PM in project-a.
+	pm := newTestSession("pm-a", "pm-a", "/project-a/.lazyclaude/worktrees/pm")
+	pm.Role = session.RolePM
+	mgr.Store().Add(pm, "")
+
+	// Validate against project-b.
+	err := mgr.ValidateParentID("pm-a", "/project-b")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "belongs to project")
+}
+
+// --- Depth-3 chain creation test (root PM → sub-PM → worker) ---
+
+func TestManager_Depth3Chain_RootPM_SubPM_Worker(t *testing.T) {
+	t.Parallel()
+	mgr, _, _ := newTestManagerWithMCP(t)
+	ctx := context.Background()
+
+	projectRoot := t.TempDir()
+	initGitRepo(t, projectRoot)
+
+	// 1. Create root PM.
+	rootPM, err := mgr.CreatePMSessionOpts(ctx, session.PMOpts{
+		ProjectRoot: projectRoot,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, rootPM)
+	assert.Equal(t, session.RolePM, rootPM.Role)
+	assert.Equal(t, "", rootPM.ParentID, "root PM has no parent")
+
+	// 2. Create sub-PM under root PM.
+	subPM, err := mgr.CreatePMSessionOpts(ctx, session.PMOpts{
+		Name:        "sub-pm",
+		ProjectRoot: projectRoot,
+		ParentID:    rootPM.ID,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, subPM)
+	assert.Equal(t, session.RolePM, subPM.Role)
+	assert.Equal(t, rootPM.ID, subPM.ParentID)
+	assert.Equal(t, "sub-pm", subPM.Name)
+
+	// 3. Create worker under sub-PM.
+	worker, err := mgr.CreateWorkerSessionOpts(ctx, session.WorkerOpts{
+		Name:        "feat-x",
+		Prompt:      "implement feature x",
+		ProjectRoot: projectRoot,
+		ParentID:    subPM.ID,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, worker)
+	assert.Equal(t, session.RoleWorker, worker.Role)
+	assert.Equal(t, subPM.ID, worker.ParentID)
+
+	// Verify the hierarchy via ChildrenOf.
+	rootChildren := mgr.Store().ChildrenOf(rootPM.ID)
+	require.Len(t, rootChildren, 1)
+	assert.Equal(t, subPM.ID, rootChildren[0].ID)
+
+	subChildren := mgr.Store().ChildrenOf(subPM.ID)
+	require.Len(t, subChildren, 1)
+	assert.Equal(t, worker.ID, subChildren[0].ID)
+
+	// Total sessions: root PM + sub-PM + worker = 3.
+	all := mgr.Sessions()
+	assert.Len(t, all, 3)
+}
+
+// --- Root PM duplicate creation error ---
+
+func TestManager_CreatePMSession_RootDuplicateError(t *testing.T) {
+	t.Parallel()
+	mgr, _, _ := newTestManagerWithMCP(t)
+	ctx := context.Background()
+
+	projectRoot := t.TempDir()
+	initGitRepo(t, projectRoot)
+
+	// First root PM succeeds.
+	_, err := mgr.CreatePMSessionOpts(ctx, session.PMOpts{
+		ProjectRoot: projectRoot,
+	})
+	require.NoError(t, err)
+
+	// Second root PM for the same project fails.
+	_, err = mgr.CreatePMSessionOpts(ctx, session.PMOpts{
+		ProjectRoot: projectRoot,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pm session already exists")
+}
+
+// --- Sub-PM creation (multiple children of same parent) ---
+
+func TestManager_SubPM_MultipleChildrenSameParent(t *testing.T) {
+	t.Parallel()
+	mgr, _, _ := newTestManagerWithMCP(t)
+	ctx := context.Background()
+
+	projectRoot := t.TempDir()
+	initGitRepo(t, projectRoot)
+
+	// Create root PM.
+	rootPM, err := mgr.CreatePMSessionOpts(ctx, session.PMOpts{
+		ProjectRoot: projectRoot,
+	})
+	require.NoError(t, err)
+
+	// Create two sub-PMs under the same root PM.
+	subPM1, err := mgr.CreatePMSessionOpts(ctx, session.PMOpts{
+		Name:        "sub-pm-1",
+		ProjectRoot: projectRoot,
+		ParentID:    rootPM.ID,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, subPM1)
+	assert.Equal(t, rootPM.ID, subPM1.ParentID)
+
+	subPM2, err := mgr.CreatePMSessionOpts(ctx, session.PMOpts{
+		Name:        "sub-pm-2",
+		ProjectRoot: projectRoot,
+		ParentID:    rootPM.ID,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, subPM2)
+	assert.Equal(t, rootPM.ID, subPM2.ParentID)
+
+	// Both sub-PMs should appear as children of root PM.
+	children := mgr.Store().ChildrenOf(rootPM.ID)
+	require.Len(t, children, 2)
+	ids := []string{children[0].ID, children[1].ID}
+	assert.Contains(t, ids, subPM1.ID)
+	assert.Contains(t, ids, subPM2.ID)
+
+	// Total sessions: root PM + 2 sub-PMs = 3.
+	all := mgr.Sessions()
+	assert.Len(t, all, 3)
+}
+
+// --- branchForSession tests ---
+
+func TestBranchForSession_WorktreePath(t *testing.T) {
+	t.Parallel()
+	projectRoot := t.TempDir()
+	initGitRepo(t, projectRoot)
+
+	// Create a worktree with a branch.
+	wtPath := filepath.Join(projectRoot, ".lazyclaude", "worktrees", "feat-branch")
+	cmd := exec.Command("git", "worktree", "add", "-b", "feat-branch", wtPath)
+	cmd.Dir = projectRoot
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git worktree add: %s", out)
+
+	sess := &session.Session{
+		ID:   "s-1",
+		Path: wtPath,
+	}
+	runner := &session.LocalRunner{}
+	branch, err := session.BranchForSession(context.Background(), runner, sess)
+	require.NoError(t, err)
+	assert.Equal(t, "feat-branch", branch)
+}
+
+func TestBranchForSession_NonWorktreeFallback(t *testing.T) {
+	t.Parallel()
+	projectRoot := t.TempDir()
+	initGitRepo(t, projectRoot)
+
+	// Non-worktree path — falls back to project root HEAD.
+	sess := &session.Session{
+		ID:   "s-1",
+		Path: projectRoot,
+	}
+	runner := &session.LocalRunner{}
+	branch, err := session.BranchForSession(context.Background(), runner, sess)
+	require.NoError(t, err)
+	// Default branch from initGitRepo depends on git config; typically "main" or "master".
+	assert.NotEmpty(t, branch)
+}
+
+// --- Worker with ParentID ---
+
+func TestManager_CreateWorkerSession_WithParentID(t *testing.T) {
+	t.Parallel()
+	mgr, _, _ := newTestManagerWithMCP(t)
+	ctx := context.Background()
+
+	projectRoot := t.TempDir()
+	initGitRepo(t, projectRoot)
+
+	// Create PM first.
+	pm, err := mgr.CreatePMSessionOpts(ctx, session.PMOpts{
+		ProjectRoot: projectRoot,
+	})
+	require.NoError(t, err)
+
+	// Create worker with ParentID.
+	worker, err := mgr.CreateWorkerSessionOpts(ctx, session.WorkerOpts{
+		Name:        "feat-child",
+		Prompt:      "do work",
+		ProjectRoot: projectRoot,
+		ParentID:    pm.ID,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, worker)
+	assert.Equal(t, pm.ID, worker.ParentID)
+	assert.Equal(t, session.RoleWorker, worker.Role)
+
+	// Verify ChildrenOf.
+	children := mgr.Store().ChildrenOf(pm.ID)
+	require.Len(t, children, 1)
+	assert.Equal(t, worker.ID, children[0].ID)
 }
